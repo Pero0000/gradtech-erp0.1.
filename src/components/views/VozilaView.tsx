@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Truck, Plus, Pencil, Trash2, Gauge, Calendar, Users } from 'lucide-react';
 import type { Vozilo, VoziloStatus, VoziloTip } from '@/types';
+import { VoziloDokumenti } from '@/components/views/VoziloDokumenti';
 import { fetchVozila, createVozilo, updateVozilo, deleteVozilo } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
@@ -31,6 +32,7 @@ const emptyForm = {
   godina_proizvodnje: '',
   broj_mjesta: '2',
   cijena_km: '',
+  enc_broj: '',
   napomena: '',
 };
 
@@ -78,6 +80,7 @@ export function VozilaView() {
       godina_proizvodnje: v.godina_proizvodnje?.toString() ?? '',
       broj_mjesta: v.broj_mjesta?.toString() ?? '2',
       cijena_km: v.cijena_km ? v.cijena_km.toString() : '',
+      enc_broj: v.enc_broj ?? '',
       napomena: v.napomena ?? '',
     });
     setModalOpen(true);
@@ -97,14 +100,17 @@ export function VozilaView() {
         godina_proizvodnje: form.godina_proizvodnje ? parseInt(form.godina_proizvodnje) : null,
         broj_mjesta: form.broj_mjesta ? parseInt(form.broj_mjesta) : 2,
         cijena_km: form.cijena_km ? parseFloat(form.cijena_km) : 0,
+        enc_broj: form.enc_broj.trim() || null,
         napomena: form.napomena.trim() || null,
       };
       if (editing) {
         await updateVozilo(editing.id, payload);
+        setModalOpen(false);
       } else {
-        await createVozilo(payload);
+        // Nakon kreiranja ostaje otvoreno da se odmah mogu dodati dokumenti i servisi
+        const created = await createVozilo(payload);
+        setEditing(created);
       }
-      setModalOpen(false);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri spremanju');
@@ -336,6 +342,9 @@ export function VozilaView() {
               placeholder="0,40"
             />
           </Field>
+          <Field label="ENC (oznaka / broj uređaja)">
+            <TextInput value={form.enc_broj} onChange={(e) => setForm({ ...form, enc_broj: e.target.value })} placeholder="npr. broj ENC uređaja" />
+          </Field>
           <Field label="Napomena">
             <Textarea
               rows={2}
@@ -344,6 +353,11 @@ export function VozilaView() {
               placeholder="Servis, kvar, posebnosti…"
             />
           </Field>
+          {editing ? (
+            <VoziloDokumenti voziloId={editing.id} />
+          ) : (
+            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Dokumenti, servisi i rokovi mogu se dodati nakon prvog spremanja vozila.</p>
+          )}
         </div>
       </Modal>
 

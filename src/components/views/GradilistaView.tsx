@@ -1,5 +1,5 @@
 import { useState, useEffect, type DragEvent } from 'react';
-import { Building2, Plus, Pencil, Trash2, Calendar, Euro, GripVertical } from 'lucide-react';
+import { Building2, Plus, Pencil, Trash2, Calendar, Euro, GripVertical, AlertTriangle } from 'lucide-react';
 import type { Gradiliste, GradilisteRegija, GradilisteStatus, Investitor, Objekt, Rok } from '@/types';
 import {
   fetchRokovi,
@@ -18,7 +18,7 @@ import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { GradilisteDetailsPanel } from '@/components/views/GradilisteDetailsPanel';
-import { nextDeadline } from '@/lib/rokovi';
+import { nextDeadline, deadlineAlert } from '@/lib/rokovi';
 
 const statusBadge: Record<GradilisteStatus, { variant: 'green' | 'yellow' | 'red' | 'blue' | 'gray'; label: string }> = {
   ponuda: { variant: 'yellow', label: 'Ponuda' },
@@ -156,7 +156,7 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
-export function GradilistaView() {
+export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string) => void } = {}) {
   const [items, setItems] = useState<Gradiliste[]>([]);
   const [rokovi, setRokovi] = useState<Rok[]>([]);
   const [columnIds, setColumnIds] = useState<string[][]>(() => readGradilisteColumns());
@@ -646,6 +646,28 @@ export function GradilistaView() {
                     </div>
                   </div>
 
+                {(() => {
+                  const alert = deadlineAlert(g, rokovi);
+                  if (!alert) return null;
+                  const style = alert.level === 'overdue'
+                    ? 'border-red-700 bg-red-600 text-white'
+                    : alert.level === 'today'
+                      ? 'border-red-400 bg-red-200 text-red-900'
+                      : 'border-red-200 bg-red-50 text-red-700';
+                  const text = alert.level === 'overdue'
+                    ? `Van roka ${Math.abs(alert.days)} d`
+                    : alert.level === 'today'
+                      ? 'Danas'
+                      : `Za ${alert.days} ${alert.days === 1 ? 'dan' : 'dana'}`;
+                  return (
+                    <div className={`mt-2 flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-semibold ${style}`}>
+                      <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span className="flex-shrink-0">{text}</span>
+                      <span className="min-w-0 flex-1 truncate font-normal">· {alert.label}</span>
+                    </div>
+                  );
+                })()}
+
                 {(g.datum_pocetka || g.datum_zavrsetka) && (
                   <div className="mt-2 grid grid-cols-2 gap-2 border-t border-slate-100 pt-2">
                     {g.datum_pocetka && (
@@ -715,6 +737,7 @@ export function GradilistaView() {
                 ));
               }}
               onRokoviChange={() => void loadRokovi()}
+              onOpenNalog={onOpenNalog}
             />
           )}
         </div>

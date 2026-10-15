@@ -40,6 +40,7 @@ import {
   updateTrosak,
 } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
+import { GradilisteMaterijalDokumenti } from '@/components/views/GradilisteMaterijalDokumenti';
 import { Modal } from '@/components/ui/Modal';
 import { Field, Select, TextInput, Textarea } from '@/components/ui/Field';
 
@@ -49,6 +50,7 @@ interface GradilisteDetailsPanelProps {
   onEdit: () => void;
   onGradilisteUpdate: (updates: Partial<Gradiliste>) => void;
   onRokoviChange?: () => void;
+  onOpenNalog?: (nalogId: string) => void;
 }
 
 type GradilisteDetails = Awaited<ReturnType<typeof fetchFullRekapitulacija>>;
@@ -94,7 +96,7 @@ function Section({ title, icon, children, action }: { title: string; icon: React
   );
 }
 
-export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilisteUpdate, onRokoviChange }: GradilisteDetailsPanelProps) {
+export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilisteUpdate, onRokoviChange, onOpenNalog }: GradilisteDetailsPanelProps) {
   const [details, setDetails] = useState<GradilisteDetails | null>(null);
   const [openCostGroups, setOpenCostGroups] = useState<Set<string>>(new Set());
   const [satnica, setSatnicaState] = useState<number>(() => {
@@ -772,17 +774,25 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               </div>
             </Section>
 
+            <GradilisteMaterijalDokumenti gradilisteId={gradiliste.id} />
+
             <Section title={`Radni nalozi (${tasks.length})`} icon={<ClipboardList className="h-4 w-4" />}>
               {tasks.length === 0 ? <p className="text-xs text-slate-400">Nema radnih naloga.</p> : (
                 <div className="space-y-2">
                   {tasks.map((item) => (
-                    <div key={item.id} className="flex items-start justify-between gap-3 text-xs">
+                    <button
+                      type="button"
+                      key={item.id}
+                      onClick={() => onOpenNalog?.(item.id)}
+                      className="flex w-full items-start justify-between gap-3 rounded-md px-1.5 py-1 text-left text-xs hover:bg-sky-50"
+                      title="Otvori radni nalog"
+                    >
                       <div className="min-w-0">
                         <p className="font-medium text-slate-800">{item.broj} · {item.naslov}</p>
                         <p className="text-slate-500">{item.prioritet} · rok {date(item.rok)}</p>
                       </div>
                       <span className="flex-shrink-0 text-slate-500">{item.status.replace('_', ' ')}</span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}

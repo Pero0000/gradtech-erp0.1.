@@ -69,7 +69,7 @@ const addDays = (d: Date, n: number) => {
 
 const fmtDate = (s: string) => new Date(s + 'T00:00:00').toLocaleDateString('hr-HR');
 
-export function RadniNaloziView() {
+export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null } = {}) {
   const [items, setItems] = useState<RadniNalog[]>([]);
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [radnici, setRadnici] = useState<Radnik[]>([]);
@@ -80,11 +80,11 @@ export function RadniNaloziView() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [period, setPeriod] = useState<Period>('danas');
+  const [period, setPeriod] = useState<Period>(focusNalogId ? 'svi' : 'danas');
   const [customDate, setCustomDate] = useState('');
   const [statusFilter, setStatusFilter] = useState<NalogStatus | 'svi'>('svi');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(focusNalogId ?? null);
   const [rokovi, setRokovi] = useState<Rok[]>([]);
   const [rokForm, setRokForm] = useState({ naziv: '', datum: '', opis: '' });
 

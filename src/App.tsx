@@ -22,6 +22,7 @@ import {
 
 function App() {
   const [view, setView] = useState<View>('dashboard');
+  const [focusNalogId, setFocusNalogId] = useState<string | null>(null);
   const [counts, setCounts] = useState({
     gradilista: 0,
     radnici: 0,
@@ -58,11 +59,11 @@ function App() {
 
   return (
     <div className="flex h-screen bg-slate-50">
-      <Sidebar current={view} onNavigate={setView} counts={counts} />
+      <Sidebar current={view} onNavigate={(v) => { setFocusNalogId(null); setView(v); }} counts={counts} />
       <main className="flex-1 overflow-y-auto">
-        <div className={`mx-auto px-6 py-8 ${view === 'raspored' || view === 'radni_nalozi' ? 'max-w-none' : 'max-w-7xl'}`}>
+        <div className={`mx-auto px-6 py-8 ${view === 'raspored' || view === 'radni_nalozi' || view === 'gradilista' ? 'max-w-none' : 'max-w-7xl'}`}>
           {view === 'dashboard' && <Dashboard onNavigate={setView} />}
-          {view === 'gradilista' && <GradilistaView />}
+          {view === 'gradilista' && <GradilistaView onOpenNalog={(id) => { setFocusNalogId(id); setView('radni_nalozi'); }} />}
           {view === 'investitori' && <InvestitoriView />}
           {view === 'objekti' && <ObjektiView />}
           {view === 'radnici' && <RadniciView />}
@@ -71,7 +72,7 @@ function App() {
           {view === 'troskovi' && <TroskoviView />}
           {view === 'fakture' && <FaktureView />}
           {view === 'radno_vrijeme' && <RadnoVrijemeView />}
-          {view === 'radni_nalozi' && <RadniNaloziView />}
+          {view === 'radni_nalozi' && <RadniNaloziView key={focusNalogId ?? 'none'} focusNalogId={focusNalogId} />}
           {view === 'rekapitulacija' && <RekapitulacijaView />}
         </div>
       </main>

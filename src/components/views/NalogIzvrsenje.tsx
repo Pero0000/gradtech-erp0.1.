@@ -15,6 +15,9 @@ import {
   fetchNalogRadnikVrijeme,
   fetchNalogStavke,
   fetchNalogZadaci,
+  fetchGradilisteDokumenti,
+  fetchNalogGradilisteDokumentIds,
+  setNalogGradilisteDokument,
   saveNalogIzvrsenje,
   saveNalogRadnikVrijeme,
   setNalogTeren,
@@ -25,6 +28,7 @@ import {
   uploadNalogDokument,
   uploadNalogFoto,
   type NalogDokument,
+  type GradilisteDokument,
   type NalogFoto,
   type NalogRadnikVrijeme,
   type NalogStavka,
@@ -136,6 +140,8 @@ export function NalogIzvrsenje({
   const [stavke, setStavke] = useState<NalogStavka[]>([]);
   const [napomena, setNapomena] = useState('');
   const [dokumenti, setDokumenti] = useState<NalogDokument[]>([]);
+  const [gradDokumenti, setGradDokumenti] = useState<GradilisteDokument[]>([]);
+  const [gradLinked, setGradLinked] = useState<string[]>([]);
   const docRef = useRef<HTMLInputElement>(null);
   const [vremena, setVremena] = useState<NalogRadnikVrijeme[]>([]);
   const [zadaci, setZadaci] = useState<GradilisteZadatak[]>([]);
@@ -177,7 +183,21 @@ export function NalogIzvrsenje({
     else setError((e) => e ?? errText(zad.reason, 'Greška pri učitavanju zadataka.') + ' Pokreni migraciju 20261015220000_zadaci_nalog_veza.sql.');
     if (fo.status === 'fulfilled') setFoto(fo.value);
     else setError((e) => e ?? errText(fo.reason, 'Greška pri učitavanju fotografija.') + hint);
-  }, [nalog.id]);
+    if (nalog.gradiliste_id) setGradDokumenti(await fetchGradilisteDokumenti(nalog.gradiliste_id).catch(() => []));
+    setGradLinked(await fetchNalogGradilisteDokumentIds(nalog.id).catch(() => []));
+  }, [nalog.id, nalog.gradiliste_id]);
+
+  const ownPaths = new Set([...dokumenti.map((d) => d.putanja), ...foto.map((f) => f.putanja)]);
+  const pickerDocs = gradDokumenti.filter((d) => !ownPaths.has(d.putanja));
+  const toggleGradDok = async (id: string, on: boolean) => {
+    setGradLinked((prev) => (on ? [...prev, id] : prev.filter((x) => x !== id)));
+    try {
+      await setNalogGradilisteDokument(nalog.id, id, on);
+    } catch (e) {
+      setGradLinked((prev) => (on ? prev.filter((x) => x !== id) : [...prev, id]));
+      setError(errText(e, 'Greška pri spremanju odabira dokumenta.') + ' Pokreni migraciju 20261015300000_nalog_gradiliste_dokumenti.sql.');
+    }
+  };
 
   useEffect(() => {
     void load();
@@ -484,6 +504,21 @@ export function NalogIzvrsenje({
           </span>
         )}
       </div>
+
+      {pickerDocs.length > 0 && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-3">
+          <SectionTitle icon={<FileText className="h-4 w-4" />}>Dokumenti i slike gradilišta — označi one koji se prikazuju na ovom nalogu ({gradLinked.length}/{pickerDocs.length})</SectionTitle>
+          <div className="grid gap-1.5 md:grid-cols-2">
+            {pickerDocs.map((d) => (
+              <label key={d.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-sky-100 bg-white px-3 py-1.5 text-sm">
+                <input type="checkbox" checked={gradLinked.includes(d.id)} onChange={(e) => void toggleGradDok(d.id, e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-sky-600" />
+                {d.vrsta === 'slika' ? <img src={d.url} alt="" className="h-6 w-6 rounded object-cover" /> : <FileText className="h-4 w-4 flex-shrink-0 text-slate-400" />}
+                <a href={d.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-sky-700 hover:underline">{d.naziv}</a>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div>
         <SectionTitle icon={<FileText className="h-4 w-4" />}>Dokumenti ({dokumenti.length})</SectionTitle>

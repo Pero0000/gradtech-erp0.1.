@@ -1,4 +1,36 @@
-﻿export type GradilisteStatus = 'ponuda' | 'planirano' | 'aktivno' | 'pauzirano' | 'zavrseno';
+﻿export type BonusTip = 'pausalno' | 'komad' | 'dan' | 'sat';
+export interface RadnikBonus {
+  naziv: string;
+  iznos: number;
+  tip: BonusTip;
+}
+export type RadnikDokumentVrsta = 'lijecnicki' | 'atest' | 'zastita_na_radu' | 'osposobljavanje' | 'ostalo';
+export interface RadnikDokument {
+  id: string;
+  radnik_id: string;
+  vrsta: RadnikDokumentVrsta;
+  naziv: string;
+  putanja: string | null;
+  datum_od: string | null;
+  datum_do: string | null;
+  napomena: string | null;
+  url?: string | null;
+}
+export type VoziloDokumentVrsta = 'registracija' | 'tehnicki' | 'osiguranje' | 'kasko' | 'servis' | 'enc' | 'tahograf' | 'ostalo';
+export interface VoziloDokument {
+  id: string;
+  vozilo_id: string;
+  vrsta: VoziloDokumentVrsta;
+  naziv: string;
+  putanja: string | null;
+  datum_od: string | null;
+  datum_do: string | null;
+  iznos: number | null;
+  km: number | null;
+  napomena: string | null;
+  url?: string | null;
+}
+export type GradilisteStatus = 'ponuda' | 'planirano' | 'aktivno' | 'pauzirano' | 'zavrseno';
 export type GradilisteRegija = 'dalmacija' | 'istra_kvarner' | 'slavonija' | 'zagreb_i_okolica' | 'medimurje';
 export type RadnikStatus = 'aktivan' | 'neaktivan' | 'bolovanje';
 export type VoziloStatus = 'slobodno' | 'zauzeto' | 'servis';
@@ -95,6 +127,11 @@ export interface DnevniRasporedRadnik {
                                                                   cijena_sata: number;
                                                                   nocni_dodatak?: number;
                                                                   teren_dnevnica?: number;
+                                                                  cijena_praznik?: number;
+                                                                  cijena_godisnji?: number;
+                                                                  cijena_bolovanje?: number;
+                                                                  cijena_put_sat?: number;
+                                                                  bonusi?: RadnikBonus[];
                                                                     created_at: string;
                                                                       updated_at: string;
                                                                       }
@@ -110,6 +147,7 @@ export interface DnevniRasporedRadnik {
                                                                                       godina_proizvodnje: number | null;
                                                                                         broj_mjesta: number;
                                                                                         cijena_km?: number;
+                                                                                        enc_broj?: string | null;
                                                                                           napomena: string | null;
                                                                                             created_at: string;
                                                                                               updated_at: string;

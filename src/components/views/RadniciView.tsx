@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Users, Plus, Pencil, Trash2, Phone, Mail, HardHat, Euro } from 'lucide-react';
-import type { Radnik, RadnikStatus } from '@/types';
+import type { Radnik, RadnikStatus, BonusTip } from '@/types';
+import { RadnikDokumenti } from '@/components/views/RadnikDokumenti';
 import { fetchRadnici, createRadnik, updateRadnik, deleteRadnik } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
@@ -14,6 +15,17 @@ const statusBadge: Record<RadnikStatus, { variant: 'green' | 'gray' | 'orange'; 
   bolovanje: { variant: 'orange', label: 'Bolovanje' },
 };
 
+const bonusTipovi: Record<BonusTip, string> = {
+  pausalno: 'Paušalno',
+  komad: 'Po komadu',
+  dan: 'Po danu',
+  sat: 'Po satu',
+};
+
+function emptyBonus() {
+  return { naziv: '', iznos: '', tip: 'pausalno' as BonusTip };
+}
+
 const emptyForm = {
   ime: '',
   prezime: '',
@@ -24,6 +36,11 @@ const emptyForm = {
   cijena_sata: '',
   nocni_dodatak: '30',
   teren_dnevnica: '',
+  cijena_praznik: '',
+  cijena_godisnji: '',
+  cijena_bolovanje: '',
+  cijena_put_sat: '',
+  bonusi: [emptyBonus(), emptyBonus(), emptyBonus()],
 };
 
 export function RadniciView() {
@@ -70,6 +87,14 @@ export function RadniciView() {
       cijena_sata: r.cijena_sata?.toString() ?? '',
       nocni_dodatak: (r.nocni_dodatak ?? 30).toString(),
       teren_dnevnica: r.teren_dnevnica ? r.teren_dnevnica.toString() : '',
+      cijena_praznik: r.cijena_praznik ? r.cijena_praznik.toString() : '',
+      cijena_godisnji: r.cijena_godisnji ? r.cijena_godisnji.toString() : '',
+      cijena_bolovanje: r.cijena_bolovanje ? r.cijena_bolovanje.toString() : '',
+      cijena_put_sat: r.cijena_put_sat ? r.cijena_put_sat.toString() : '',
+      bonusi: [0, 1, 2].map((i) => {
+        const b = r.bonusi?.[i];
+        return b ? { naziv: b.naziv, iznos: b.iznos ? b.iznos.toString() : '', tip: b.tip } : emptyBonus();
+      }),
     });
     setModalOpen(true);
   };
@@ -88,13 +113,20 @@ export function RadniciView() {
         cijena_sata: form.cijena_sata ? parseFloat(form.cijena_sata) : 0,
         nocni_dodatak: form.nocni_dodatak ? parseFloat(form.nocni_dodatak) : 0,
         teren_dnevnica: form.teren_dnevnica ? parseFloat(form.teren_dnevnica) : 0,
+        cijena_praznik: form.cijena_praznik ? parseFloat(form.cijena_praznik) : 0,
+        cijena_godisnji: form.cijena_godisnji ? parseFloat(form.cijena_godisnji) : 0,
+        cijena_bolovanje: form.cijena_bolovanje ? parseFloat(form.cijena_bolovanje) : 0,
+        cijena_put_sat: form.cijena_put_sat ? parseFloat(form.cijena_put_sat) : 0,
+        bonusi: form.bonusi.map((b) => ({ naziv: b.naziv.trim(), iznos: b.iznos ? parseFloat(b.iznos) : 0, tip: b.tip })),
       };
       if (editing) {
         await updateRadnik(editing.id, payload);
+        setModalOpen(false);
       } else {
-        await createRadnik(payload);
+        // Nakon kreiranja ostaje otvoreno da se odmah mogu dodati dokumenti
+        const created = await createRadnik(payload);
+        setEditing(created);
       }
-      setModalOpen(false);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri spremanju');
@@ -337,6 +369,42 @@ export function RadniciView() {
               />
             </Field>
           </div>
+          <div className="rounded-lg border border-slate-200 p-3">
+            <p className="mb-2 text-sm font-medium text-slate-700">Ostale cijene</p>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Praznik (EUR/dan)">
+                <TextInput type="number" step="0.50" min="0" value={form.cijena_praznik} onChange={(e) => setForm({ ...form, cijena_praznik: e.target.value })} placeholder="0.00" />
+              </Field>
+              <Field label="Godišnji (EUR/dan)">
+                <TextInput type="number" step="0.50" min="0" value={form.cijena_godisnji} onChange={(e) => setForm({ ...form, cijena_godisnji: e.target.value })} placeholder="0.00" />
+              </Field>
+              <Field label="Bolovanje (EUR/dan)">
+                <TextInput type="number" step="0.50" min="0" value={form.cijena_bolovanje} onChange={(e) => setForm({ ...form, cijena_bolovanje: e.target.value })} placeholder="0.00" />
+              </Field>
+              <Field label="Plaćeni put (EUR/h)">
+                <TextInput type="number" step="0.50" min="0" value={form.cijena_put_sat} onChange={(e) => setForm({ ...form, cijena_put_sat: e.target.value })} placeholder="0.00" />
+              </Field>
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-200 p-3">
+            <p className="mb-2 text-sm font-medium text-slate-700">Bonusi</p>
+            <div className="space-y-2">
+              {form.bonusi.map((b, i) => (
+                <div key={i} className="grid grid-cols-[1fr_5.5rem_7rem] gap-2">
+                  <TextInput value={b.naziv} onChange={(e) => setForm({ ...form, bonusi: form.bonusi.map((x, j) => (j === i ? { ...x, naziv: e.target.value } : x)) })} placeholder={`Bonus ${i + 1}`} />
+                  <TextInput type="number" step="0.50" min="0" value={b.iznos} onChange={(e) => setForm({ ...form, bonusi: form.bonusi.map((x, j) => (j === i ? { ...x, iznos: e.target.value } : x)) })} placeholder="€" />
+                  <Select value={b.tip} onChange={(e) => setForm({ ...form, bonusi: form.bonusi.map((x, j) => (j === i ? { ...x, tip: e.target.value as BonusTip } : x)) })}>
+                    {Object.entries(bonusTipovi).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  </Select>
+                </div>
+              ))}
+            </div>
+          </div>
+          {editing ? (
+            <RadnikDokumenti radnikId={editing.id} />
+          ) : (
+            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Dokumenti i rokovi mogu se dodati nakon prvog spremanja radnika.</p>
+          )}
         </div>
       </Modal>
 

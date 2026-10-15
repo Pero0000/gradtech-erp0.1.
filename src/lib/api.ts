@@ -1,5 +1,9 @@
 ﻿import { supabase } from './supabase';
 import type {
+  VoziloDokument,
+  VoziloDokumentVrsta,
+  RadnikDokument,
+  RadnikDokumentVrsta,
   DnevniRasporedGradiliste,
   GradilisteZadatak,
   DnevniRasporedOstalo,
@@ -203,6 +207,79 @@ export async function updateRadnik(id: string, r: Partial<Radnik>) {
 export async function deleteRadnik(id: string) {
   const { error } = await supabase.from('radnici').delete().eq('id', id);
   if (error) throw error;
+}
+
+export async function fetchRadnikDokumenti(radnikId: string): Promise<RadnikDokument[]> {
+  const { data, error } = await supabase.from('radnici_dokumenti').select('*').eq('radnik_id', radnikId).order('datum_do', { ascending: true, nullsFirst: false });
+  if (error) throw error;
+  return (data ?? []).map((d: any) => ({
+    ...d,
+    url: d.putanja ? supabase.storage.from('nalozi-foto').getPublicUrl(d.putanja).data.publicUrl : null,
+  }));
+}
+
+export async function addRadnikDokument(
+  radnikId: string,
+  input: { vrsta: RadnikDokumentVrsta; naziv: string; datum_od: string | null; datum_do: string | null; napomena: string | null },
+  file: File | null,
+) {
+  let putanja: string | null = null;
+  if (file) {
+    const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
+    putanja = `radnici/${radnikId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
+    const { error: upError } = await supabase.storage.from('nalozi-foto').upload(putanja, file, { contentType: file.type || undefined });
+    if (upError) throw upError;
+  }
+  const { error } = await supabase.from('radnici_dokumenti').insert({ radnik_id: radnikId, ...input, putanja });
+  if (error) {
+    if (putanja) await supabase.storage.from('nalozi-foto').remove([putanja]);
+    throw error;
+  }
+}
+
+export async function updateRadnikDokumentRok(id: string, u: { datum_od: string | null; datum_do: string | null }) {
+  const { error } = await supabase.from('radnici_dokumenti').update(u).eq('id', id);
+  if (error) throw error;
+}
+
+export async function deleteRadnikDokument(d: RadnikDokument) {
+  const { error } = await supabase.from('radnici_dokumenti').delete().eq('id', d.id);
+  if (error) throw error;
+  if (d.putanja) await supabase.storage.from('nalozi-foto').remove([d.putanja]);
+}
+
+export async function fetchVoziloDokumenti(voziloId: string): Promise<VoziloDokument[]> {
+  const { data, error } = await supabase.from('vozila_dokumenti').select('*').eq('vozilo_id', voziloId).order('datum_do', { ascending: false, nullsFirst: false });
+  if (error) throw error;
+  return (data ?? []).map((d: any) => ({
+    ...d,
+    url: d.putanja ? supabase.storage.from('nalozi-foto').getPublicUrl(d.putanja).data.publicUrl : null,
+  }));
+}
+
+export async function addVoziloDokument(
+  voziloId: string,
+  input: { vrsta: VoziloDokumentVrsta; naziv: string; datum_od: string | null; datum_do: string | null; iznos: number | null; km: number | null; napomena: string | null },
+  file: File | null,
+) {
+  let putanja: string | null = null;
+  if (file) {
+    const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
+    putanja = `vozila/${voziloId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
+    const { error: upError } = await supabase.storage.from('nalozi-foto').upload(putanja, file, { contentType: file.type || undefined });
+    if (upError) throw upError;
+  }
+  const { error } = await supabase.from('vozila_dokumenti').insert({ vozilo_id: voziloId, ...input, putanja });
+  if (error) {
+    if (putanja) await supabase.storage.from('nalozi-foto').remove([putanja]);
+    throw error;
+  }
+}
+
+export async function deleteVoziloDokument(d: VoziloDokument) {
+  const { error } = await supabase.from('vozila_dokumenti').delete().eq('id', d.id);
+  if (error) throw error;
+  if (d.putanja) await supabase.storage.from('nalozi-foto').remove([d.putanja]);
 }
 
 export async function fetchVozila(): Promise<Vozilo[]> {
@@ -576,6 +653,14 @@ export async function createRadniNalog(input: {
     if (e2) throw e2;
   }
 
+  // Materijal i alat upisan na gradilištu ulazi u prvi idući nalog tog gradilišta.
+  if (input.gradiliste_id) {
+    await supabase
+      .from('radni_nalozi_stavke')
+      .update({ nalog_id: data.id })
+      .eq('gradiliste_id', input.gradiliste_id)
+      .is('nalog_id', null);
+  }
   await prenesiOtvoreneStavke(data.id, input.gradiliste_id);
   return data;
 }
@@ -805,14 +890,14 @@ async function syncKmGrupa(datum: string, voziloId: string | undefined, nalogId:
   }
 }
 
-// Neriješen materijal i alat sa završenih naloga istog gradilišta prenosi se na novi nalog.
+// Neriješen materijal i alat s ranijih naloga (otvorenih ili završenih) istog gradilišta prenosi se na novi nalog.
 export async function prenesiOtvoreneStavke(nalogId: string, gradilisteId: string | null) {
   if (!gradilisteId) return;
   const { data: stari } = await supabase
     .from('radni_nalozi')
     .select('id')
     .eq('gradiliste_id', gradilisteId)
-    .eq('status', 'zavrsen')
+    .neq('status', 'otkazan')
     .neq('id', nalogId);
   const ids = (stari ?? []).map((n: { id: string }) => n.id);
   if (ids.length === 0) return;
@@ -831,6 +916,14 @@ export async function prenesiOtvoreneStavke(nalogId: string, gradilisteId: strin
 }
 
 async function vratiPrenesenoStavke(nalogId: string) {
+  // Neriješene stavke koje nisu preneseno s drugog naloga vraćaju se gradilištu umjesto da se brišu s nalogom.
+  await supabase
+    .from('radni_nalozi_stavke')
+    .update({ nalog_id: null })
+    .eq('nalog_id', nalogId)
+    .eq('gotovo', false)
+    .is('izvor_id', null)
+    .not('gradiliste_id', 'is', null);
   const { data } = await supabase.from('radni_nalozi_stavke').select('izvor_id').eq('nalog_id', nalogId).not('izvor_id', 'is', null);
   const izvori = (data ?? []).map((s: { izvor_id: string }) => s.izvor_id);
   if (izvori.length > 0) await supabase.from('radni_nalozi_stavke').update({ preneseno: false }).in('id', izvori);
@@ -927,6 +1020,25 @@ export async function fetchNalogFoto(nalogId: string): Promise<NalogFoto[]> {
   }));
 }
 
+async function spremiNaGradiliste(nalogId: string, putanja: string, naziv: string, velicina: number | null, vrsta: 'dokument' | 'slika') {
+  try {
+    const { data } = await supabase.from('radni_nalozi').select('gradiliste_id').eq('id', nalogId).single();
+    if (!data?.gradiliste_id) return;
+    await supabase.from('gradiliste_dokumenti').insert({ gradiliste_id: data.gradiliste_id, vrsta, putanja, naziv, velicina });
+  } catch {
+    // kopiranje na gradilište ne smije srušiti upload na nalog
+  }
+}
+
+async function datotekaJosKoristena(putanja: string) {
+  const [g, d, f] = await Promise.all([
+    supabase.from('gradiliste_dokumenti').select('id', { count: 'exact', head: true }).eq('putanja', putanja),
+    supabase.from('radni_nalozi_dokumenti').select('id', { count: 'exact', head: true }).eq('putanja', putanja),
+    supabase.from('radni_nalozi_foto').select('id', { count: 'exact', head: true }).eq('putanja', putanja),
+  ]);
+  return (g.count ?? 0) + (d.count ?? 0) + (f.count ?? 0) > 0;
+}
+
 export async function uploadNalogFoto(nalogId: string, file: File) {
   const ext = file.name.includes('.') ? file.name.split('.').pop() : 'jpg';
   const putanja = `${nalogId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
@@ -937,12 +1049,13 @@ export async function uploadNalogFoto(nalogId: string, file: File) {
     await supabase.storage.from('nalozi-foto').remove([putanja]);
     throw error;
   }
+  await spremiNaGradiliste(nalogId, putanja, file.name, file.size, 'slika');
 }
 
 export async function deleteNalogFoto(foto: NalogFoto) {
   const { error } = await supabase.from('radni_nalozi_foto').delete().eq('id', foto.id);
   if (error) throw error;
-  await supabase.storage.from('nalozi-foto').remove([foto.putanja]);
+  if (!(await datotekaJosKoristena(foto.putanja))) await supabase.storage.from('nalozi-foto').remove([foto.putanja]);
 }
 
 export interface NalogStavka {
@@ -954,7 +1067,7 @@ export interface NalogStavka {
 }
 
 export async function fetchNalogStavke(nalogId: string): Promise<NalogStavka[]> {
-  const { data, error } = await supabase.from('radni_nalozi_stavke').select('*').eq('nalog_id', nalogId).order('created_at');
+  const { data, error } = await supabase.from('radni_nalozi_stavke').select('*').eq('nalog_id', nalogId).eq('preneseno', false).order('created_at');
   if (error) throw error;
   return (data ?? []) as NalogStavka[];
 }
@@ -1002,12 +1115,85 @@ export async function uploadNalogDokument(nalogId: string, file: File) {
     await supabase.storage.from('nalozi-foto').remove([putanja]);
     throw error;
   }
+  await spremiNaGradiliste(nalogId, putanja, file.name, file.size, 'dokument');
 }
 
 export async function deleteNalogDokument(d: NalogDokument) {
   const { error } = await supabase.from('radni_nalozi_dokumenti').delete().eq('id', d.id);
   if (error) throw error;
-  await supabase.storage.from('nalozi-foto').remove([d.putanja]);
+  if (!(await datotekaJosKoristena(d.putanja))) await supabase.storage.from('nalozi-foto').remove([d.putanja]);
+}
+
+export async function fetchNalogGradilisteDokumentIds(nalogId: string): Promise<string[]> {
+  const { data, error } = await supabase.from('nalog_gradiliste_dokumenti').select('dokument_id').eq('nalog_id', nalogId);
+  if (error) throw error;
+  return (data ?? []).map((r: { dokument_id: string }) => r.dokument_id);
+}
+
+export async function setNalogGradilisteDokument(nalogId: string, dokumentId: string, on: boolean) {
+  const { error } = on
+    ? await supabase.from('nalog_gradiliste_dokumenti').upsert({ nalog_id: nalogId, dokument_id: dokumentId })
+    : await supabase.from('nalog_gradiliste_dokumenti').delete().eq('nalog_id', nalogId).eq('dokument_id', dokumentId);
+  if (error) throw error;
+}
+
+// ===== MATERIJAL, ALAT I DOKUMENTI GRADILIŠTA =====
+
+export interface GradilisteStavka {
+  id: string;
+  nalog_id: string | null;
+  gradiliste_id: string;
+  tip: 'materijal' | 'alat';
+  naziv: string;
+  gotovo: boolean;
+}
+
+export async function fetchGradilisteStavke(gradilisteId: string): Promise<GradilisteStavka[]> {
+  const { data, error } = await supabase.from('radni_nalozi_stavke').select('*').eq('gradiliste_id', gradilisteId).eq('preneseno', false).order('created_at');
+  if (error) throw error;
+  return (data ?? []) as GradilisteStavka[];
+}
+
+export async function addGradilisteStavka(gradilisteId: string, tip: 'materijal' | 'alat', naziv: string) {
+  const { error } = await supabase.from('radni_nalozi_stavke').insert({ gradiliste_id: gradilisteId, nalog_id: null, tip, naziv });
+  if (error) throw error;
+}
+
+export interface GradilisteDokument {
+  id: string;
+  gradiliste_id: string;
+  vrsta: 'dokument' | 'slika';
+  putanja: string;
+  naziv: string;
+  velicina: number | null;
+  url: string;
+}
+
+export async function fetchGradilisteDokumenti(gradilisteId: string): Promise<GradilisteDokument[]> {
+  const { data, error } = await supabase.from('gradiliste_dokumenti').select('*').eq('gradiliste_id', gradilisteId).order('created_at');
+  if (error) throw error;
+  return (data ?? []).map((d: any) => ({
+    ...d,
+    url: supabase.storage.from('nalozi-foto').getPublicUrl(d.putanja).data.publicUrl,
+  }));
+}
+
+export async function uploadGradilisteDokument(gradilisteId: string, file: File, vrsta: 'dokument' | 'slika') {
+  const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
+  const putanja = `gradiliste/${gradilisteId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
+  const { error: upError } = await supabase.storage.from('nalozi-foto').upload(putanja, file, { contentType: file.type || undefined });
+  if (upError) throw upError;
+  const { error } = await supabase.from('gradiliste_dokumenti').insert({ gradiliste_id: gradilisteId, vrsta, putanja, naziv: file.name, velicina: file.size });
+  if (error) {
+    await supabase.storage.from('nalozi-foto').remove([putanja]);
+    throw error;
+  }
+}
+
+export async function deleteGradilisteDokument(d: GradilisteDokument) {
+  const { error } = await supabase.from('gradiliste_dokumenti').delete().eq('id', d.id);
+  if (error) throw error;
+  if (!(await datotekaJosKoristena(d.putanja))) await supabase.storage.from('nalozi-foto').remove([d.putanja]);
 }
 
 export async function fetchZakljuceniNalozi(ids: string[]): Promise<string[]> {

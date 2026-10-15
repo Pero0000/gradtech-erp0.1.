@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
 import { ClipboardList, Plus, Pencil, Trash2, Users, Calendar, AlertCircle } from 'lucide-react';
-import type { RadniNalog, Gradiliste, Radnik, NalogStatus, NalogPrioritet } from '@/types';
+import type { RadniNalog, Gradiliste, Radnik, NalogStatus, NalogPrioritet, Rok } from '@/types';
 import {
+  fetchRokoviNaloga,
+  createRok,
+  updateRok,
+  deleteRok,
   fetchRadniNalozi,
   createRadniNalog,
   updateRadniNalog,
   deleteRadniNalog,
-  generateNalogBroj,
   fetchGradilista,
   fetchRadnici,
 } from '@/lib/api';
@@ -15,6 +18,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { NalogIzvrsenje } from './NalogIzvrsenje';
 
 const statusInfo: Record<NalogStatus, { variant: 'blue' | 'yellow' | 'green' | 'red'; label: string }> = {
   otvoren: { variant: 'blue', label: 'Otvoren' },
@@ -41,6 +45,30 @@ const emptyForm = {
   radnik_ids: [] as string[],
 };
 
+type Period = 'svi' | 'danas' | 'sutra' | 'tjedan' | 'prosli' | 'kasni' | 'datum' | 'bez';
+
+const periodOptions: { key: Period; label: string }[] = [
+  { key: 'danas', label: 'Danas' },
+  { key: 'sutra', label: 'Sutra' },
+  { key: 'tjedan', label: 'Ovaj tjedan' },
+  { key: 'prosli', label: 'Prošli tjedan' },
+  { key: 'kasni', label: 'Kasni' },
+  { key: 'datum', label: 'Odaberi datum' },
+  { key: 'bez', label: 'Bez roka' },
+  { key: 'svi', label: 'Svi' },
+];
+
+const toISO = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const addDays = (d: Date, n: number) => {
+  const r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
+};
+
+const fmtDate = (s: string) => new Date(s + 'T00:00:00').toLocaleDateString('hr-HR');
+
 export function RadniNaloziView() {
   const [items, setItems] = useState<RadniNalog[]>([]);
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
@@ -52,6 +80,57 @@ export function RadniNaloziView() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [period, setPeriod] = useState<Period>('danas');
+  const [customDate, setCustomDate] = useState('');
+  const [statusFilter, setStatusFilter] = useState<NalogStatus | 'svi'>('svi');
+  const [search, setSearch] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [rokovi, setRokovi] = useState<Rok[]>([]);
+  const [rokForm, setRokForm] = useState({ naziv: '', datum: '', opis: '' });
+
+  const loadRokovi = async () => {
+    try {
+      setRokovi(await fetchRokoviNaloga());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Greška pri učitavanju rokova');
+    }
+  };
+
+  const addRok = async (n: RadniNalog) => {
+    if (!rokForm.naziv.trim() || !rokForm.datum) return;
+    try {
+      await createRok({
+        gradiliste_id: n.gradiliste_id ?? null,
+        nalog_id: n.id,
+        naziv: rokForm.naziv.trim(),
+        datum: rokForm.datum,
+        status: 'otvoren',
+        opis: rokForm.opis.trim() || null,
+      });
+      setRokForm({ naziv: '', datum: '', opis: '' });
+      await loadRokovi();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Greška pri spremanju roka');
+    }
+  };
+
+  const toggleRok = async (r: Rok) => {
+    try {
+      await updateRok(r.id, { status: r.status === 'zavrsen' ? 'otvoren' : 'zavrsen' });
+      await loadRokovi();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Greška pri spremanju roka');
+    }
+  };
+
+  const removeRok = async (id: string) => {
+    try {
+      await deleteRok(id);
+      await loadRokovi();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Greška pri brisanju roka');
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -61,6 +140,7 @@ export function RadniNaloziView() {
       setItems(n);
       setGradilista(g);
       setRadnici(r);
+      await loadRokovi();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
     } finally {
@@ -71,17 +151,6 @@ export function RadniNaloziView() {
   useEffect(() => {
     load();
   }, []);
-
-  const openCreate = async () => {
-    setEditing(null);
-    try {
-      const broj = await generateNalogBroj();
-      setForm({ ...emptyForm, broj });
-    } catch {
-      setForm({ ...emptyForm, broj: `RN-${new Date().getFullYear()}-${Date.now().toString().slice(-3)}` });
-    }
-    setModalOpen(true);
-  };
 
   const openEdit = (n: RadniNalog) => {
     setEditing(n);
@@ -144,24 +213,50 @@ export function RadniNaloziView() {
     }
   };
 
+  const filteredItems = items.filter((n) => {
+    if (statusFilter !== 'svi' && n.status !== statusFilter) return false;
+    const q = search.trim().toLowerCase();
+    if (q && !`${n.broj} ${n.naslov} ${n.gradilista?.naziv ?? ''}`.toLowerCase().includes(q)) return false;
+    if (period === 'svi') return true;
+    if (period === 'bez') return !n.rok;
+    if (!n.rok) return false;
+    const today = new Date();
+    const todayStr = toISO(today);
+    switch (period) {
+      case 'danas':
+        return n.rok === todayStr;
+      case 'sutra':
+        return n.rok === toISO(addDays(today, 1));
+      case 'tjedan': {
+        const start = addDays(today, -((today.getDay() + 6) % 7));
+        return n.rok >= toISO(start) && n.rok <= toISO(addDays(start, 6));
+      }
+      case 'prosli': {
+        const start = addDays(today, -((today.getDay() + 6) % 7) - 7);
+        return n.rok >= toISO(start) && n.rok <= toISO(addDays(start, 6));
+      }
+      case 'kasni':
+        return n.rok < todayStr && n.status !== 'zavrsen' && n.status !== 'otkazan';
+      case 'datum':
+        return !customDate || n.rok === customDate;
+      default:
+        return true;
+    }
+  });
+
   if (loading) {
     return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
   }
+
+  const selected = filteredItems.find((n) => n.id === selectedId) ?? filteredItems[0] ?? null;
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Radni nalozi</h1>
-          <p className="text-sm text-slate-500 mt-1">Kreirajte i pratile radne naloge za gradilišta</p>
+          <p className="text-sm text-slate-500 mt-1">Pregled i praćenje radnih naloga. Novi nalozi kreiraju se u Dnevnom rasporedu.</p>
         </div>
-        <button
-          onClick={openCreate}
-          className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700 transition-colors shadow-sm"
-        >
-          <Plus className="h-4 w-4" />
-          Novi nalog
-        </button>
       </div>
 
       {error && (
@@ -174,26 +269,90 @@ export function RadniNaloziView() {
         <EmptyState
           icon={<ClipboardList className="h-7 w-7" />}
           title="Nema radnih naloga"
-          description="Kreirajte prvi radni nalog da biste dodijelili zadatke radnicima."
-          action={
-            <button
-              onClick={openCreate}
-              className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700 transition-colors"
-            >
-              <Plus className="h-4 w-4" />
-              Novi nalog
-            </button>
-          }
+          description="Radni nalozi kreiraju se u Dnevnom rasporedu klikom na RN uz gradilište."
         />
       ) : (
         <div className="space-y-4">
-          {items.map((n) => {
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3">
+            {periodOptions.map((p) => (
+              <button
+                key={p.key}
+                onClick={() => setPeriod(p.key)}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  period === p.key ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+            {period === 'datum' && (
+              <input
+                type="date"
+                value={customDate}
+                onChange={(e) => setCustomDate(e.target.value)}
+                className="rounded-lg border border-slate-300 px-2 py-1 text-xs"
+              />
+            )}
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as NalogStatus | 'svi')}
+              className="ml-auto rounded-lg border border-slate-300 px-2 py-1 text-xs"
+            >
+              <option value="svi">Svi statusi</option>
+              {(Object.keys(statusInfo) as NalogStatus[]).map((s) => (
+                <option key={s} value={s}>{statusInfo[s].label}</option>
+              ))}
+            </select>
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Traži broj, naslov, gradilište…"
+              className="w-56 rounded-lg border border-slate-300 px-2 py-1 text-xs"
+            />
+            <span className="text-xs text-slate-400">{filteredItems.length} / {items.length}</span>
+          </div>
+          {filteredItems.length === 0 && (
+            <p className="py-8 text-center text-sm text-slate-400">Nema naloga za odabrani filter.</p>
+          )}
+          {filteredItems.length > 0 && (
+          <div className="grid items-start gap-4 xl:grid-cols-[minmax(380px,0.75fr)_minmax(0,1.6fr)]">
+          <div className="space-y-2">
+            {filteredItems.map((n) => {
+              const nextRok = rokovi.filter((r) => r.nalog_id === n.id && r.status === 'otvoren')[0];
+              const active = selected?.id === n.id;
+              return (
+                <button
+                  key={n.id}
+                  onClick={() => setSelectedId(n.id)}
+                  className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                    active ? 'border-sky-400 bg-sky-50' : 'border-slate-200 bg-white hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-xs text-slate-400">{n.broj}</span>
+                    <Badge variant={statusInfo[n.status].variant}>{statusInfo[n.status].label}</Badge>
+                  </div>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">{n.naslov}</p>
+                  {n.gradilista?.naziv && <p className="text-xs text-slate-500">{n.gradilista.naziv}</p>}
+                  <div className="mt-1.5 flex flex-wrap gap-3 text-[11px] text-slate-500">
+                    {n.rok && <span>Rok: {fmtDate(n.rok)}</span>}
+                    {nextRok && <span className="text-amber-700">Sljedeći: {nextRok.naziv} · {fmtDate(nextRok.datum)}</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div>
+          {selected && (() => {
+            const n = selected;
             const si = statusInfo[n.status];
             const pi = prioritetInfo[n.prioritet];
+            const nalogRokovi = rokovi.filter((r) => r.nalog_id === n.id);
             return (
               <div
                 key={n.id}
-                className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-md transition-shadow"
+                className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-start gap-3">
@@ -210,7 +369,8 @@ export function RadniNaloziView() {
                       )}
                     </div>
                   </div>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center gap-1">
+                    <div id={`rn-detail-slot-${n.id}`} className="mr-2" />
                     <button
                       onClick={() => openEdit(n)}
                       className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-600 transition-colors"
@@ -234,7 +394,7 @@ export function RadniNaloziView() {
                   {(n.radnici ?? []).length > 0 && (
                     <span className="flex items-center gap-1.5 text-xs text-slate-500">
                       <Users className="h-3.5 w-3.5" />
-                      {(n.radnici ?? []).map((r) => `${r.ime} ${r.prezime}`).join(', ')}
+                      {(n.radnici ?? []).map((r) => `${r.ime} ${r.prezime}${r.id === n.poslovodja_id ? ' (poslovođa)' : ''}`).join(', ')}
                     </span>
                   )}
                   {n.rok && (
@@ -244,9 +404,82 @@ export function RadniNaloziView() {
                     </span>
                   )}
                 </div>
+
+                <div className="mt-5 border-t border-slate-100 pt-4">
+                  <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800">
+                    <Calendar className="h-4 w-4 text-sky-600" />
+                    Rokovi i važni datumi ({nalogRokovi.length})
+                  </h4>
+                  {nalogRokovi.length === 0 && <p className="mb-3 text-xs text-slate-400">Nema dodanih rokova.</p>}
+                  <div className="mb-3 space-y-1.5">
+                    {nalogRokovi.map((r) => {
+                      const late = r.status === 'otvoren' && r.datum < toISO(new Date());
+                      return (
+                        <div key={r.id} className="flex items-center gap-3 rounded-lg border border-slate-100 px-3 py-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={r.status === 'zavrsen'}
+                            onChange={() => void toggleRok(r)}
+                            className="h-4 w-4 rounded border-slate-300"
+                            title="Označi kao završeno"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className={r.status === 'zavrsen' ? 'text-slate-400 line-through' : 'text-slate-800'}>{r.naziv}</p>
+                            {r.opis && <p className="text-xs text-slate-500">{r.opis}</p>}
+                          </div>
+                          <span className={`flex-shrink-0 text-xs font-medium ${late ? 'text-red-600' : 'text-slate-600'}`}>
+                            {fmtDate(r.datum)}{late ? ' · kasni' : ''}
+                          </span>
+                          <button
+                            onClick={() => void removeRok(r.id)}
+                            className="flex-shrink-0 text-slate-300 hover:text-red-600"
+                            aria-label="Obriši rok"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      value={rokForm.naziv}
+                      onChange={(e) => setRokForm((f) => ({ ...f, naziv: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === 'Enter') void addRok(n); }}
+                      placeholder="Naziv roka ili važnog datuma"
+                      className="min-w-[200px] flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                    />
+                    <input
+                      type="date"
+                      value={rokForm.datum}
+                      onChange={(e) => setRokForm((f) => ({ ...f, datum: e.target.value }))}
+                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                    />
+                    <input
+                      value={rokForm.opis}
+                      onChange={(e) => setRokForm((f) => ({ ...f, opis: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === 'Enter') void addRok(n); }}
+                      placeholder="Napomena (neobavezno)"
+                      className="min-w-[160px] flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                    />
+                    <button
+                      onClick={() => void addRok(n)}
+                      disabled={!rokForm.naziv.trim() || !rokForm.datum}
+                      className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Dodaj
+                    </button>
+                  </div>
+                </div>
+
+                <NalogIzvrsenje key={n.id} nalog={n} slotId={`rn-detail-slot-${n.id}`} onChange={() => void load()} />
               </div>
             );
-          })}
+          })()}
+          </div>
+          </div>
+          )}
         </div>
       )}
 
@@ -254,6 +487,8 @@ export function RadniNaloziView() {
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         title={editing ? 'Uredi radni nalog' : 'Novi radni nalog'}
+        wide
+        headerSlotId="nalog-modal-slot"
         footer={
           <>
             <button
@@ -272,6 +507,7 @@ export function RadniNaloziView() {
           </>
         }
       >
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
         <div className="space-y-4">
           {!editing && (
             <Field label="Broj naloga">
@@ -366,6 +602,18 @@ export function RadniNaloziView() {
               )}
             </div>
           </div>
+        </div>
+        {editing && (
+          <div className="md:col-span-2 xl:col-span-3">
+            <NalogIzvrsenje
+              key={editing.id}
+              nalog={editing}
+              slotId="nalog-modal-slot"
+              radnikIds={form.radnik_ids}
+              onChange={(zavrsen) => setForm((f) => ({ ...f, status: zavrsen ? 'zavrsen' : f.status === 'zavrsen' ? 'u_tijeku' : f.status }))}
+            />
+          </div>
+        )}
         </div>
       </Modal>
 

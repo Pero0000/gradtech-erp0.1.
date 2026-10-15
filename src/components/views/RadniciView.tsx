@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, Plus, Pencil, Trash2, Phone, Mail, HardHat, DollarSign } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Phone, Mail, HardHat, Euro } from 'lucide-react';
 import type { Radnik, RadnikStatus } from '@/types';
 import { fetchRadnici, createRadnik, updateRadnik, deleteRadnik } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
@@ -22,6 +22,8 @@ const emptyForm = {
   email: '',
   status: 'aktivan' as RadnikStatus,
   cijena_sata: '',
+  nocni_dodatak: '30',
+  teren_dnevnica: '',
 };
 
 export function RadniciView() {
@@ -66,6 +68,8 @@ export function RadniciView() {
       email: r.email ?? '',
       status: r.status,
       cijena_sata: r.cijena_sata?.toString() ?? '',
+      nocni_dodatak: (r.nocni_dodatak ?? 30).toString(),
+      teren_dnevnica: r.teren_dnevnica ? r.teren_dnevnica.toString() : '',
     });
     setModalOpen(true);
   };
@@ -82,6 +86,8 @@ export function RadniciView() {
         email: form.email.trim() || null,
         status: form.status,
         cijena_sata: form.cijena_sata ? parseFloat(form.cijena_sata) : 0,
+        nocni_dodatak: form.nocni_dodatak ? parseFloat(form.nocni_dodatak) : 0,
+        teren_dnevnica: form.teren_dnevnica ? parseFloat(form.teren_dnevnica) : 0,
       };
       if (editing) {
         await updateRadnik(editing.id, payload);
@@ -196,7 +202,7 @@ export function RadniciView() {
                     <td className="px-5 py-3.5 text-right">
                       {r.cijena_sata > 0 ? (
                         <span className="inline-flex items-center gap-1 text-sm font-medium text-slate-700">
-                          <DollarSign className="h-3.5 w-3.5 text-slate-400" />
+                          <Euro className="h-3.5 w-3.5 text-slate-400" />
                           {r.cijena_sata.toLocaleString('hr-HR', { minimumFractionDigits: 2 })} €/h
                         </span>
                       ) : (
@@ -310,6 +316,27 @@ export function RadniciView() {
               placeholder="0.00"
             />
           </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Noćni dodatak (%) – rad 22:00–06:00">
+              <TextInput
+                type="number"
+                step="1"
+                min="0"
+                value={form.nocni_dodatak}
+                onChange={(e) => setForm({ ...form, nocni_dodatak: e.target.value })}
+              />
+            </Field>
+            <Field label="Teren – dnevnica (EUR/dan)">
+              <TextInput
+                type="number"
+                step="0.50"
+                min="0"
+                value={form.teren_dnevnica}
+                onChange={(e) => setForm({ ...form, teren_dnevnica: e.target.value })}
+                placeholder="0.00"
+              />
+            </Field>
+          </div>
         </div>
       </Modal>
 

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   FileBarChart,
   Building2,
-  DollarSign,
+  Euro,
   Clock,
   ClipboardList,
   TrendingUp,
@@ -196,7 +196,7 @@ export function RekapitulacijaView() {
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center gap-3 mb-2">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
-                  <DollarSign className="h-5 w-5" />
+                  <Euro className="h-5 w-5" />
                 </div>
                 <span className="text-sm text-slate-500">Proračun</span>
               </div>
@@ -358,7 +358,7 @@ export function RekapitulacijaView() {
             {/* Troškovi po kategoriji */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h3 className="mb-4 font-semibold text-slate-900 flex items-center gap-2">
-                <DollarSign className="h-5 w-5 text-sky-600" />
+                <Euro className="h-5 w-5 text-sky-600" />
                 Troškovi po kategoriji
               </h3>
               {Object.keys(troskoviPoKategoriji).length === 0 ? (
@@ -543,7 +543,7 @@ export function RekapitulacijaView() {
           {troskovi.length > 0 && (
             <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h3 className="mb-4 font-semibold text-slate-900 flex items-center gap-2">
-                <DollarSign className="h-5 w-5 text-sky-600" />
+                <Euro className="h-5 w-5 text-sky-600" />
                 Svi troškovi ({troskovi.length})
               </h3>
               <div className="overflow-x-auto">

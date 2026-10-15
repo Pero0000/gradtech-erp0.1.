@@ -60,14 +60,14 @@ function App() {
     <div className="flex h-screen bg-slate-50">
       <Sidebar current={view} onNavigate={setView} counts={counts} />
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-7xl px-6 py-8">
+        <div className={`mx-auto px-6 py-8 ${view === 'raspored' || view === 'radni_nalozi' ? 'max-w-none' : 'max-w-7xl'}`}>
           {view === 'dashboard' && <Dashboard onNavigate={setView} />}
           {view === 'gradilista' && <GradilistaView />}
           {view === 'investitori' && <InvestitoriView />}
           {view === 'objekti' && <ObjektiView />}
           {view === 'radnici' && <RadniciView />}
           {view === 'vozila' && <VozilaView />}
-          {view === 'raspored' && <RasporedView onNavigate={setView} />}
+          {view === 'raspored' && <RasporedView />}
           {view === 'troskovi' && <TroskoviView />}
           {view === 'fakture' && <FaktureView />}
           {view === 'radno_vrijeme' && <RadnoVrijemeView />}

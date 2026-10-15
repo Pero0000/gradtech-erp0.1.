@@ -1,43 +1,102 @@
-import { useState, useEffect, useRef } from 'react';
+﻿import { useCallback, useEffect, useState } from 'react';
+import { CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, GripVertical, Truck, X } from 'lucide-react';
+import type { DnevniRasporedGradiliste, DnevniRasporedOstalo, DnevniRasporedRadnik, Gradiliste, GradilisteRegija, GradilisteZadatak, NalogPrioritet, NalogStatus, Radnik, Rok, Vozilo } from '@/types';
+import { nextDeadline } from '@/lib/rokovi';
+import { Modal } from '@/components/ui/Modal';
+import { NalogIzvrsenje } from './NalogIzvrsenje';
+import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import {
-  CalendarDays,
-  Plus,
-  Pencil,
-  Trash2,
-  MapPin,
-  Users,
-  Truck,
-  ChevronLeft,
-  ChevronRight,
-  StickyNote,
-  ClipboardList,
-  Building2,
-  GripVertical,
-  AlertTriangle,
-  Clock,
-  ChevronRight as ChevronRightIcon,
-} from 'lucide-react';
-import type { Raspored, Gradiliste, Radnik, Vozilo, Rok } from '@/types';
-import {
-  fetchRasporedi,
+  setNalogZadaci,
+  fetchGradilisteZadaci,
+  generateNalogBroj,
+  discardRasporedNalog,
+  fetchZakljuceniNalozi,
+  fetchRadniNalozi,
+  updateRadniNalog,
+  addRasporedOstalo,
+  createNalogFromRaspored,
+  fetchRasporedOstalo,
+  removeRasporedOstalo,
+  updateRasporedOstaloTekst,
+  assignRasporedGradiliste,
+  assignRasporedRadnik,
+  fetchDnevniRaspored,
   fetchGradilista,
+  fetchRokovi,
   fetchRadnici,
   fetchVozila,
-  fetchRokovi,
-  createRaspored,
-  updateRaspored,
-  deleteRaspored,
-  createRadniNalog,
-  generateNalogBroj,
+  moveRasporedGradiliste,
+  moveRasporedRadnik,
+  removeRasporedGradiliste,
+  removeRasporedRadnik,
+  updateRasporedVrijemeVozila,
+  addRasporedTekst,
+  updateRasporedTekst,
 } from '@/lib/api';
-import { Modal } from '@/components/ui/Modal';
-import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { Badge } from '@/components/ui/Badge';
-import type { View } from '@/components/Sidebar';
 
-interface RasporedViewProps {
-  onNavigate?: (view: View) => void;
+type DragPayload =
+  | { type: 'gradiliste'; id: string; assignmentId?: string }
+  | { type: 'radnik'; id: string; assignmentId?: string }
+  | { type: 'ostalo'; id: string };
+
+type SortMode = 'manual' | 'datum_pocetka' | 'datum_zavrsetka';
+
+interface NalogForm {
+  fresh?: boolean;
+  nalogId?: string;
+  zakljucen_at: string | null;
+  assignmentId: string;
+  broj: string;
+  gradiliste_id: string;
+  naslov: string;
+  opis: string;
+  status: NalogStatus;
+  prioritet: NalogPrioritet;
+  rok: string;
+  radnik_ids: string[];
+  radnik_options: string[];
+  zadatak_ids: string[];
+}
+type Category = 'arhiva' | 'aktivna' | 'planirana' | 'ponude';
+
+const columnLabels = ['dm gradilišta', 'dm intervencije', 'ostala gradilišta'];
+const columnsStorageKey = 'gradilista-board-columns-v1';
+const sortModesStorageKey = 'gradilista-board-sort-modes-v1';
+const categories: { key: Category; label: string; statuses: Gradiliste['status'][] }[] = [
+  { key: 'arhiva', label: 'Arhiva', statuses: ['zavrseno'] },
+  { key: 'aktivna', label: 'Aktivna', statuses: ['aktivno', 'pauzirano'] },
+  { key: 'planirana', label: 'Planirana', statuses: ['planirano'] },
+  { key: 'ponude', label: 'Ponude', statuses: ['ponuda'] },
+];
+const regionInfo: Record<GradilisteRegija, { label: string; badge: string }> = {
+  dalmacija: { label: 'Dalmacija', badge: 'border-sky-200 bg-sky-100 text-sky-800' },
+  istra_kvarner: { label: 'Istra i Kvarner', badge: 'border-emerald-200 bg-emerald-100 text-emerald-800' },
+  slavonija: { label: 'Slavonija', badge: 'border-amber-200 bg-amber-100 text-amber-900' },
+  zagreb_i_okolica: { label: 'Zagreb i okolica', badge: 'border-rose-200 bg-rose-100 text-rose-800' },
+  medimurje: { label: 'Međimurje', badge: 'border-violet-200 bg-violet-100 text-violet-800' },
+};
+const minSiteSlots = 5;
+const defaultWorkerSlots = 5;
+
+function readSortModes(): SortMode[] {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(sortModesStorageKey) ?? 'null');
+    if (Array.isArray(parsed) && parsed.length === 3) {
+      return parsed.map((mode): SortMode => mode === 'datum_pocetka' || mode === 'datum_zavrsetka' ? mode : 'manual');
+    }
+  } catch {
+    // Use the default order.
+  }
+  return ['manual', 'manual', 'manual'];
+}
+
+function formatShortDate(value: string) {
+  return new Date(value).toLocaleDateString('hr-HR');
+}
+
+function localDateString(date = new Date()) {
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().split('T')[0];
 }
 
 function formatDate(d: string) {
@@ -49,770 +108,1015 @@ function formatDate(d: string) {
   });
 }
 
-function daysUntil(d: string): number {
-  const target = new Date(d + 'T00:00:00');
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+function readColumns(items: Gradiliste[]): string[][] {
+  let saved: string[][] = [[], [], []];
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(columnsStorageKey) ?? 'null');
+    if (Array.isArray(parsed) && parsed.length === 3) {
+      saved = parsed.map((column) => Array.isArray(column) ? column.filter((id): id is string => typeof id === 'string') : []);
+    }
+  } catch {
+    // Fall back to an automatic layout.
+  }
+
+  const valid = new Set(items.map((item) => item.id));
+  const assigned = new Set<string>();
+  const columns: string[][] = [[], [], []];
+  saved.forEach((column, index) => {
+    for (const id of column) {
+      if (valid.has(id) && !assigned.has(id)) {
+        columns[index].push(id);
+        assigned.add(id);
+      }
+    }
+  });
+  for (const item of items) {
+    if (assigned.has(item.id)) continue;
+    const shortest = columns.reduce((best, column, index) => column.length < columns[best].length ? index : best, 0);
+    columns[shortest].push(item.id);
+  }
+  return columns;
 }
 
-export function RasporedView({ onNavigate }: RasporedViewProps) {
-  const [rasporedi, setRasporedi] = useState<Raspored[]>([]);
+function WorkerCount({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <span
+      title={count > 1 ? `Radnik je raspoređen na ${count} gradilišta/auta` : 'Raspoređen na 1 gradilište/auto'}
+      className={`inline-flex h-5 min-w-5 flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${count > 1 ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}
+    >
+      {count}
+    </span>
+  );
+}
+
+function errMsg(reason: unknown, fallback: string) {
+  if (reason && typeof reason === 'object' && 'message' in reason) return String((reason as { message: unknown }).message);
+  return fallback;
+}
+
+function readPayload(event: React.DragEvent): DragPayload | null {
+  try {
+    const parsed = JSON.parse(event.dataTransfer.getData('application/json')) as DragPayload;
+    return parsed?.type && parsed.id ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function startDrag(event: React.DragEvent, payload: DragPayload) {
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('application/json', JSON.stringify(payload));
+}
+
+export function RasporedView() {
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [radnici, setRadnici] = useState<Radnik[]>([]);
   const [vozila, setVozila] = useState<Vozilo[]>([]);
-  const [allRokovi, setAllRokovi] = useState<Rok[]>([]);
+  const [siteAssignments, setSiteAssignments] = useState<DnevniRasporedGradiliste[]>([]);
+  const [workerAssignments, setWorkerAssignments] = useState<DnevniRasporedRadnik[]>([]);
+  const [selectedDate, setSelectedDate] = useState(localDateString());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<Raspored | null>(null);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-
-  // Drag state
-  const draggedId = useRef<string | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-
-  const [nalogModalOpen, setNalogModalOpen] = useState(false);
-  const [nalogRaspored, setNalogRaspored] = useState<Raspored | null>(null);
-  const [nalogForm, setNalogForm] = useState({ naslov: '', opis: '', prioritet: 'srednji' as const });
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [, setColumnsVersion] = useState(0);
+  const [ostalo, setOstalo] = useState<DnevniRasporedOstalo[]>([]);
+  const [nalogForm, setNalogForm] = useState<NalogForm | null>(null);
   const [nalogSaving, setNalogSaving] = useState(false);
-
-  const [form, setForm] = useState({
-    datum: new Date().toISOString().split('T')[0],
-    gradiliste_id: '',
-    napomena: '',
-    radnik_ids: [] as string[],
-    vozilo_ids: [] as string[],
-  });
-
-  const load = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [r, g, rad, v, rok] = await Promise.all([
-        fetchRasporedi(),
-        fetchGradilista(),
-        fetchRadnici(),
-        fetchVozila(),
-        fetchRokovi(),
-      ]);
-      setRasporedi(r);
-      setGradilista(g);
-      setRadnici(rad);
-      setVozila(v);
-      setAllRokovi(rok);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [lockedNalozi, setLockedNalozi] = useState<string[]>([]);
+  const [activeCategory, setActiveCategory] = useState<Category>('aktivna');
+  const [sortModes, setSortModes] = useState<SortMode[]>(() => readSortModes());
+  const [rokovi, setRokovi] = useState<Rok[]>([]);
+  const [nalogZadaci, setNalogZadaciList] = useState<GradilisteZadatak[]>([]);
+  const formGradilisteId = nalogForm?.gradiliste_id ?? '';
+  const formNalogId = nalogForm?.nalogId;
+  const visibleZadaci = nalogZadaci.filter(
+    (z) => (!z.gotovo || z.nalog_id === formNalogId) && (!z.nalog_id || z.nalog_id === formNalogId),
+  );
 
   useEffect(() => {
-    load();
+    if (!formGradilisteId) {
+      setNalogZadaciList([]);
+      return;
+    }
+    let cancelled = false;
+    fetchGradilisteZadaci(formGradilisteId)
+      .then((list) => {
+        if (!cancelled) setNalogZadaciList(list);
+      })
+      .catch(() => {
+        if (!cancelled) setNalogZadaciList([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [formGradilisteId]);
+  const changeSortMode = (columnIndex: number, mode: SortMode) => {
+    const next = [...sortModes];
+    next[columnIndex] = mode;
+    setSortModes(next);
+    try {
+      window.localStorage.setItem(sortModesStorageKey, JSON.stringify(next));
+    } catch {
+      // Sorting still works for this session.
+    }
+  };
+
+  const loadDay = useCallback(async (date: string) => {
+    const [day, nextOstalo] = await Promise.all([fetchDnevniRaspored(date), fetchRasporedOstalo(date).catch((e: unknown) => e as Error)]);
+    setSiteAssignments(day.gradilista);
+    setWorkerAssignments(day.radnici);
+    const nalogIds = day.gradilista.map((a) => a.nalog_id).filter((id): id is string => Boolean(id));
+    setLockedNalozi(await fetchZakljuceniNalozi(nalogIds).catch(() => []));
+    if (Array.isArray(nextOstalo)) setOstalo(nextOstalo);
+    else {
+      setOstalo([]);
+      setError(nextOstalo.message);
+    }
   }, []);
 
-  const dayRasporedi = rasporedi.filter((r) => r.datum === selectedDate);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([fetchGradilista(), fetchRadnici(), fetchVozila(), fetchRokovi().catch(() => [] as Rok[])])
+      .then(([nextGradilista, nextRadnici, nextVozila, nextRokovi]) => {
+        if (cancelled) return;
+        setGradilista(nextGradilista);
+        setRadnici(nextRadnici);
+        setVozila(nextVozila);
+        setRokovi(nextRokovi);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const rokoviByGradiliste = (gid: string) => allRokovi.filter((r) => r.gradiliste_id === gid);
-  const upcomingRokovi = allRokovi
-    .filter((r) => r.status === 'otvoren')
-    .sort((a, b) => a.datum.localeCompare(b.datum));
-
-  const changeDay = (delta: number) => {
-    const d = new Date(selectedDate + 'T00:00:00');
-    d.setDate(d.getDate() + delta);
-    setSelectedDate(d.toISOString().split('T')[0]);
-  };
-
-  const openCreate = (gradilisteId?: string) => {
-    setEditing(null);
-    setForm({
-      datum: selectedDate,
-      gradiliste_id: gradilisteId ?? '',
-      napomena: '',
-      radnik_ids: [],
-      vozilo_ids: [],
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    loadDay(selectedDate).catch((e: unknown) => {
+      if (!cancelled) setError(e instanceof Error ? e.message : 'Greška pri učitavanju rasporeda');
     });
-    setModalOpen(true);
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDate, loadDay]);
 
-  const openEdit = (r: Raspored) => {
-    setEditing(r);
-    setForm({
-      datum: r.datum,
-      gradiliste_id: r.gradiliste_id ?? '',
-      napomena: r.napomena ?? '',
-      radnik_ids: (r.radnici ?? []).map((rad) => rad.id),
-      vozilo_ids: (r.vozila ?? []).map((v) => v.id),
-    });
-    setModalOpen(true);
-  };
-
-  const toggleRadnik = (id: string) => {
-    setForm((f) => ({
-      ...f,
-      radnik_ids: f.radnik_ids.includes(id)
-        ? f.radnik_ids.filter((r) => r !== id)
-        : [...f.radnik_ids, id],
-    }));
-  };
-
-  const toggleVozilo = (id: string) => {
-    setForm((f) => ({
-      ...f,
-      vozilo_ids: f.vozilo_ids.includes(id)
-        ? f.vozilo_ids.filter((v) => v !== id)
-        : [...f.vozilo_ids, id],
-    }));
-  };
-
-  const save = async () => {
-    setSaving(true);
+  const run = async (action: () => Promise<void>) => {
+    setError(null);
     try {
-      const payload = {
-        datum: form.datum,
-        gradiliste_id: form.gradiliste_id || null,
-        napomena: form.napomena.trim() || null,
-        radnik_ids: form.radnik_ids,
-        vozilo_ids: form.vozilo_ids,
-      };
-      if (editing) {
-        await updateRaspored(editing.id, payload);
-      } else {
-        await createRaspored(payload);
+      await action();
+      await loadDay(selectedDate);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Greška pri spremanju rasporeda');
+    }
+  };
+
+  const openNalog = async (assignmentId: string, g: Gradiliste, opis: string, radnikIds: string[]) => {
+    setError(null);
+    try {
+      let broj: string;
+      try {
+        broj = await generateNalogBroj();
+      } catch {
+        broj = `RN-${new Date().getFullYear()}-${Date.now().toString().slice(-3)}`;
       }
-      setModalOpen(false);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri spremanju');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!deleteId) return;
-    try {
-      await deleteRaspored(deleteId);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri brisanju');
-    }
-  };
-
-  // HTML5 drag-and-drop
-  const handleDragStart = (e: React.DragEvent, g: Gradiliste) => {
-    draggedId.current = g.id;
-    e.dataTransfer.effectAllowed = 'copy';
-    e.dataTransfer.setData('text/plain', g.id);
-  };
-
-  const handleDragEnd = () => {
-    draggedId.current = null;
-    setDragOver(false);
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
-    if (!dragOver) setDragOver(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    if (e.currentTarget === e.target) {
-      setDragOver(false);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const gid = e.dataTransfer.getData('text/plain') || draggedId.current;
-    if (gid) {
-      openCreate(gid);
-    }
-    draggedId.current = null;
-  };
-
-  // Radni nalog creation
-  const openNalogModal = (r: Raspored) => {
-    setNalogRaspored(r);
-    setNalogForm({ naslov: '', opis: '', prioritet: 'srednji' as const });
-    setNalogModalOpen(true);
-  };
-
-  const saveNalog = async () => {
-    if (!nalogRaspored || !nalogForm.naslov.trim()) return;
-    setNalogSaving(true);
-    try {
-      const broj = await generateNalogBroj();
-      const radnikIds = (nalogRaspored.radnici ?? []).map((r) => r.id);
-      await createRadniNalog({
+      const created = await createNalogFromRaspored(assignmentId, {
         broj,
-        gradiliste_id: nalogRaspored.gradiliste_id,
-        naslov: nalogForm.naslov.trim(),
-        opis: nalogForm.opis.trim() || null,
+        gradiliste_id: g.id,
+        naslov: `${g.naziv} – ${new Date(selectedDate + 'T00:00:00').toLocaleDateString('hr-HR')}`,
+        opis: opis || null,
         status: 'otvoren',
-        prioritet: nalogForm.prioritet,
-        rok: null,
+        prioritet: 'srednji',
+        rok: selectedDate,
         radnik_ids: radnikIds,
       });
-      setNalogModalOpen(false);
-      if (onNavigate) onNavigate('radni_nalozi');
+      await loadDay(selectedDate);
+      await openExistingNalog(assignmentId, created.id);
+      setNalogForm((form) => (form ? { ...form, fresh: true } : form));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri kreiranju naloga');
+      setError(errMsg(e, 'Greška pri kreiranju naloga'));
+    }
+  };
+
+  const openExistingNalog = async (assignmentId: string, nalogId: string) => {
+    setError(null);
+    try {
+      const nalog = (await fetchRadniNalozi()).find((n) => n.id === nalogId);
+      if (!nalog) {
+        setError('Radni nalog više ne postoji.');
+        return;
+      }
+      const savedIds = (nalog.radnici ?? []).map((r) => r.id);
+      const carIds = workerAssignments
+        .filter((w) => w.vozilo_id === siteAssignments.find((s) => s.id === assignmentId)?.vozilo_id)
+        .map((w) => w.radnik_id);
+      const isDraft = !nalog.zakljucen_at;
+      const linkedZadaci = nalog.gradiliste_id
+        ? (await fetchGradilisteZadaci(nalog.gradiliste_id).catch(() => [] as GradilisteZadatak[])).filter((z) => z.nalog_id === nalogId)
+        : [];
+      setNalogForm({
+        nalogId,
+        zakljucen_at: nalog.zakljucen_at ?? null,
+        assignmentId,
+        broj: nalog.broj,
+        gradiliste_id: nalog.gradiliste_id ?? '',
+        naslov: nalog.naslov,
+        opis: nalog.opis ?? '',
+        status: nalog.status,
+        prioritet: nalog.prioritet,
+        rok: nalog.rok ?? '',
+        radnik_ids: isDraft ? [...new Set([...savedIds, ...carIds])] : savedIds,
+        radnik_options: [...new Set([...savedIds, ...carIds])],
+        zadatak_ids: linkedZadaci.map((z) => z.id),
+      });
+    } catch (e) {
+      setError(errMsg(e, 'Greška pri učitavanju naloga'));
+    }
+  };
+
+  const closeNalog = () => {
+    setNalogForm(null);
+    setConfirmDiscard(false);
+  };
+
+  const discardNalog = async () => {
+    if (!nalogForm?.nalogId) return;
+    setNalogSaving(true);
+    setError(null);
+    try {
+      await discardRasporedNalog(nalogForm.nalogId);
+      closeNalog();
+      await loadDay(selectedDate);
+    } catch (e) {
+      setError(errMsg(e, 'Greška pri brisanju naloga'));
+      closeNalog();
     } finally {
       setNalogSaving(false);
     }
   };
 
-  // Capacity validation
-  const totalVehicleCapacity = form.vozilo_ids.reduce((sum, vid) => {
-    const v = vozila.find((v) => v.id === vid);
-    return sum + (v?.broj_mjesta ?? 0);
-  }, 0);
-  const selectedWorkerCount = form.radnik_ids.length;
-  const capacityExceeded = totalVehicleCapacity > 0 && selectedWorkerCount > totalVehicleCapacity;
+  const saveNalog = async (lock?: 'lock' | 'unlock') => {
+    if (!nalogForm || !nalogForm.naslov.trim() || !nalogForm.nalogId) return;
+    setNalogSaving(true);
+    setError(null);
+    try {
+      const nalogId = nalogForm.nalogId;
+      const payload = {
+        gradiliste_id: nalogForm.gradiliste_id || null,
+        naslov: nalogForm.naslov.trim(),
+        opis: nalogForm.opis.trim() || null,
+        status: nalogForm.status,
+        prioritet: nalogForm.prioritet,
+        rok: nalogForm.rok || null,
+        radnik_ids: nalogForm.radnik_ids,
+        zakljucen: lock === 'lock' ? true : lock === 'unlock' ? false : undefined,
+      };
+      if (nalogForm.nalogId) await updateRadniNalog(nalogForm.nalogId, payload);
+      const validIds = nalogZadaci.filter((z) => nalogForm.zadatak_ids.includes(z.id)).map((z) => z.id);
+      await setNalogZadaci(nalogId, nalogForm.gradiliste_id || null, validIds).catch(() => {
+        setError('Zadaci nisu spremljeni. Pokreni migraciju 20261015220000_zadaci_nalog_veza.sql.');
+      });
+      closeNalog();
+      await loadDay(selectedDate);
+    } catch (e) {
+      setError(errMsg(e, 'Greška pri spremanju naloga'));
+      closeNalog();
+    } finally {
+      setNalogSaving(false);
+    }
+  };
+
+  const dismissNalog = async () => {
+    const fresh = nalogForm?.fresh ? nalogForm.nalogId : undefined;
+    closeNalog();
+    if (!fresh) return;
+    try {
+      await discardRasporedNalog(fresh);
+    } catch (e) {
+      setError(errMsg(e, 'Greška pri brisanju nacrta'));
+    }
+    await loadDay(selectedDate);
+  };
+
+  const changeDay = (delta: number) => {
+    const d = new Date(selectedDate + 'T00:00:00');
+    d.setDate(d.getDate() + delta);
+    setSelectedDate(localDateString(d));
+  };
+
+  const dropOnVehicle = (event: React.DragEvent, voziloId: string) => {
+    event.preventDefault();
+    setDropTarget(null);
+    const payload = readPayload(event);
+    if (!payload) return;
+    void run(async () => {
+      if (payload.type === 'ostalo') {
+        const entry = ostalo.find((o) => o.id === payload.id);
+        if (!entry) return;
+        if (entry.radnik_id) await assignRasporedRadnik(selectedDate, voziloId, entry.radnik_id);
+        else if (entry.tekst) await addRasporedTekst(selectedDate, voziloId, entry.tekst);
+        await removeRasporedOstalo(entry.id);
+      } else if (payload.type === 'gradiliste') {
+        if (payload.assignmentId) await moveRasporedGradiliste(payload.assignmentId, voziloId);
+        else await assignRasporedGradiliste(selectedDate, voziloId, payload.id);
+      } else if (payload.assignmentId) {
+        await moveRasporedRadnik(payload.assignmentId, voziloId);
+      } else {
+        await assignRasporedRadnik(selectedDate, voziloId, payload.id);
+      }
+    });
+  };
+
+  const placeSite = (gradilisteId: string, columnIndex: number, beforeId?: string) => {
+    if (gradilisteId === beforeId) return;
+    const next = readColumns(gradilista).map((column) => column.filter((id) => id !== gradilisteId));
+    const at = beforeId ? next[columnIndex].indexOf(beforeId) : -1;
+    next[columnIndex].splice(at < 0 ? next[columnIndex].length : at, 0, gradilisteId);
+    try {
+      window.localStorage.setItem(columnsStorageKey, JSON.stringify(next));
+    } catch {
+      // Redoslijed vrijedi samo do osvježavanja stranice.
+    }
+    if (beforeId && sortModes[columnIndex] !== 'manual') changeSortMode(columnIndex, 'manual');
+    setColumnsVersion((v) => v + 1);
+  };
+
+  const dropOnColumn = (event: React.DragEvent, columnIndex: number, beforeId?: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDropTarget(null);
+    const payload = readPayload(event);
+    if (!payload || payload.type !== 'gradiliste') return;
+    if (payload.assignmentId) {
+      const assignment = siteAssignments.find((a) => a.id === payload.assignmentId);
+      if (assignment?.gradiliste_id) placeSite(assignment.gradiliste_id, columnIndex, beforeId);
+      const assignmentId = payload.assignmentId;
+      void run(() => removeRasporedGradiliste(assignmentId));
+    } else {
+      placeSite(payload.id, columnIndex, beforeId);
+    }
+  };
+
+  const dropOnOstalo = (event: React.DragEvent) => {
+    event.preventDefault();
+    setDropTarget(null);
+    const payload = readPayload(event);
+    if (!payload || payload.type === 'ostalo' || (payload.type === 'radnik' && ostalo.some((o) => o.radnik_id === payload.id))) return;
+    const assignmentId = payload.type === 'radnik' || payload.type === 'gradiliste' ? payload.assignmentId : undefined;
+    void run(async () => {
+      if (payload.type === 'radnik') {
+        await addRasporedOstalo(selectedDate, { radnikId: payload.id });
+        if (assignmentId) await removeRasporedRadnik(assignmentId);
+      } else if (assignmentId) {
+        const assignment = siteAssignments.find((a) => a.id === assignmentId);
+        if (assignment && !assignment.gradiliste_id && assignment.tekst) {
+          await addRasporedOstalo(selectedDate, { tekst: assignment.tekst });
+          await removeRasporedGradiliste(assignmentId);
+        }
+      }
+    });
+  };
+
+  const dropOnPanel = (event: React.DragEvent, type: DragPayload['type']) => {
+    event.preventDefault();
+    setDropTarget(null);
+    const payload = readPayload(event);
+    if (payload?.type === 'ostalo' && type === 'radnik') {
+      const entry = ostalo.find((o) => o.id === payload.id);
+      if (entry?.radnik_id) void run(() => removeRasporedOstalo(entry.id));
+      return;
+    }
+    if (!payload || payload.type !== type || !payload.assignmentId) return;
+    const assignmentId = payload.assignmentId;
+    void run(() => type === 'gradiliste' ? removeRasporedGradiliste(assignmentId) : removeRasporedRadnik(assignmentId));
+  };
+
+  const allowDrop = (event: React.DragEvent, target: string) => {
+    event.preventDefault();
+    if (dropTarget !== target) setDropTarget(target);
+  };
 
   if (loading) {
     return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
   }
 
+  const categoryStatuses = categories.find((c) => c.key === activeCategory)?.statuses ?? [];
+  const sites = gradilista.filter((g) => categoryStatuses.includes(g.status)
+    && !siteAssignments.some((a) => a.gradiliste_id === g.id));
+  const columns = readColumns(gradilista).map((column) =>
+    column.filter((id) => sites.some((site) => site.id === id)));
+  const workers = radnici.filter((r) => (r.status === 'aktivan' || workerAssignments.some((a) => a.radnik_id === r.id))
+    && !ostalo.some((o) => o.radnik_id === r.id));
+  const vehicleOf = (voziloId: string) => vozila.find((v) => v.id === voziloId);
+  const workerCount = (radnikId: string) => workerAssignments.filter((a) => a.radnik_id === radnikId).length;
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dnevni raspored</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Povuci gradilište u raspored ili stvori novi unos
-          </p>
+          <p className="mt-1 text-sm text-slate-500">Povuci gradilišta i radnike u vozila. Povuci natrag na popis za uklanjanje.</p>
         </div>
-        <button
-          onClick={() => openCreate()}
-          className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700 transition-colors shadow-sm"
-        >
-          <Plus className="h-4 w-4" />
-          Novi raspored
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => changeDay(-1)}
+            aria-label="Prethodni dan"
+            className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-50"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+          <div className="min-w-[250px] text-center">
+            <div className="flex items-center justify-center gap-2">
+              <CalendarDays className="h-5 w-5 text-sky-600" />
+              <span className="text-base font-semibold capitalize text-slate-900">{formatDate(selectedDate)}</span>
+            </div>
+            <button type="button" onClick={() => setSelectedDate(localDateString())} className="text-xs text-sky-600 hover:text-sky-700">
+              Danas
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => changeDay(1)}
+            aria-label="Sljedeći dan"
+            className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-50"
+          >
+            <ChevronRight className="h-5 w-5" />
+          </button>
+        </div>
       </div>
 
-      {error && (
-        <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+      {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
-      <div className="grid gap-6 lg:grid-cols-[300px_1fr]">
-        {/* Left column: gradilišta + rokovi */}
-        <div className="space-y-4 h-fit lg:sticky lg:top-0">
-          {/* Gradilišta list */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <Building2 className="h-4 w-4 text-sky-600" />
-              Gradilišta
-            </h2>
-            {gradilista.length === 0 ? (
-              <p className="text-xs text-slate-400 py-4 text-center">Nema gradilišta</p>
-            ) : (
-              <div className="space-y-2">
-                {gradilista.map((g) => {
-                  const gRokovi = rokoviByGradiliste(g.id);
-                  const nextRok = gRokovi
-                    .filter((r) => r.status === 'otvoren')
-                    .sort((a, b) => a.datum.localeCompare(b.datum))[0];
-                  return (
-                    <div
-                      key={g.id}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, g)}
-                      onDragEnd={handleDragEnd}
-                      onClick={() => openCreate(g.id)}
-                      className="group cursor-grab rounded-lg border border-slate-100 p-2.5 hover:border-sky-200 hover:bg-sky-50 transition-colors active:cursor-grabbing"
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(620px,1.35fr)_minmax(0,1.9fr)_minmax(190px,0.4fr)]">
+        {/* Gradilišta */}
+        <div>
+          <div className="mb-2 flex flex-wrap gap-1" role="tablist" aria-label="Kategorije gradilišta">
+            {categories.map((category) => {
+              const count = gradilista.filter((g) => category.statuses.includes(g.status)).length;
+              const active = activeCategory === category.key;
+              return (
+                <button
+                  key={category.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActiveCategory(category.key)}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${active ? 'bg-sky-100 text-sky-800' : 'text-slate-600 hover:bg-slate-100'}`}
+                >
+                  {category.label}
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${active ? 'bg-white/70' : 'bg-slate-100 text-slate-500'}`}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="grid grid-cols-3 items-start gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-2">
+            {columns.map((column, index) => {
+              const mode = sortModes[index] ?? 'manual';
+              const items = column
+                .map((id) => sites.find((item) => item.id === id))
+                .filter((item): item is Gradiliste => Boolean(item));
+              if (mode !== 'manual') {
+                items.sort((first, second) => {
+                  const a = mode === 'datum_pocetka' ? nextDeadline(first, rokovi)?.datum ?? first.datum_pocetka : first[mode];
+                  const b = mode === 'datum_pocetka' ? nextDeadline(second, rokovi)?.datum ?? second.datum_pocetka : second[mode];
+                  if (!a || !b) return a === b ? 0 : a ? -1 : 1;
+                  return a.localeCompare(b);
+                });
+              }
+              return (
+                <section
+                  key={columnLabels[index]}
+                  aria-label={columnLabels[index]}
+                  onDragOver={(e) => allowDrop(e, `panel-gradiliste-${index}`)}
+                  onDragLeave={() => setDropTarget(null)}
+                  onDrop={(e) => dropOnColumn(e, index)}
+                  className={`min-h-32 min-w-0 space-y-2 rounded-lg p-0.5 ${dropTarget === `panel-gradiliste-${index}` ? 'bg-sky-100/70 ring-1 ring-sky-400' : ''}`}
+                >
+                  <div className="space-y-1 px-0.5">
+                    <div className="flex items-center justify-between">
+                      <h2 className="truncate text-[10px] font-semibold uppercase text-slate-500" title={columnLabels[index]}>
+                        {columnLabels[index]}
+                      </h2>
+                      <span className="text-[10px] tabular-nums text-slate-400">{items.length}</span>
+                    </div>
+                    <select
+                      aria-label={`Sortiranje: ${columnLabels[index]}`}
+                      value={mode}
+                      onChange={(e) => changeSortMode(index, e.target.value as SortMode)}
+                      className="w-full rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[10px] text-slate-700"
                     >
-                      <div className="flex items-center gap-2">
-                        <GripVertical className="h-4 w-4 flex-shrink-0 text-slate-300 group-hover:text-sky-400" />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-slate-800">{g.naziv}</p>
-                          {g.adresa && <p className="truncate text-xs text-slate-400">{g.adresa}</p>}
+                      <option value="manual">Vlastiti redoslijed</option>
+                      <option value="datum_pocetka">Početni / idući rok</option>
+                      <option value="datum_zavrsetka">Krajnji rok</option>
+                    </select>
+                  </div>
+                  {items.map((g) => {
+                    const region = g.regija ? regionInfo[g.regija] : null;
+                    return (
+                      <div
+                        key={g.id}
+                        draggable
+                        onDragStart={(e) => startDrag(e, { type: 'gradiliste', id: g.id })}
+                        onDragOver={(e) => {
+                          e.stopPropagation();
+                          allowDrop(e, `site-${g.id}`);
+                        }}
+                        onDrop={(e) => dropOnColumn(e, index, g.id)}
+                        title={g.naziv}
+                        className={`cursor-grab rounded-lg border bg-white p-2 shadow-sm hover:border-sky-300 active:cursor-grabbing ${dropTarget === `site-${g.id}` ? 'border-sky-400 ring-2 ring-sky-400' : 'border-slate-200'}`}
+                      >
+                        <p className="break-words text-[13px] font-semibold leading-tight text-slate-900">{g.naziv}</p>
+                        {region && (
+                          <span className={`mt-1 inline-flex rounded-full border px-1.5 text-[9px] font-medium leading-3 ${region.badge}`}>
+                            {region.label}
+                          </span>
+                        )}
+                        {(g.datum_pocetka || g.datum_zavrsetka) && (
+                          <div className="mt-1.5 space-y-0.5 border-t border-slate-100 pt-1 text-[10px] leading-tight text-slate-600">
+                            {g.datum_pocetka && <p><span className="text-slate-400">Početak:</span> <span className="font-semibold text-slate-900">{formatShortDate(g.datum_pocetka)}</span></p>}
+                            {g.datum_zavrsetka && <p><span className="text-slate-400">Kraj:</span> <span className="font-semibold text-slate-900">{formatShortDate(g.datum_zavrsetka)}</span></p>}
+                          </div>
+                        )}
+                        {(() => {
+                          const next = nextDeadline(g, rokovi);
+                          return next ? (
+                            <p className="mt-1 truncate rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-900" title={next.label}>
+                              <span className="font-semibold">Idući:</span> {next.label} · {formatShortDate(next.datum)}
+                            </p>
+                          ) : null;
+                        })()}
+                        {g.opis && (
+                          <div className="mt-1.5 rounded border-l-2 border-red-500 bg-red-50 px-1.5 py-1">
+                            <p className="text-[8px] font-bold uppercase text-red-700">Napomena</p>
+                            <p className="line-clamp-3 text-[10px] leading-3 text-red-900">{g.opis}</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {items.length === 0 && <p className="py-6 text-center text-[10px] text-slate-400">Prazan stupac</p>}
+                </section>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Vozila */}
+        {vozila.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">
+            <Truck className="mx-auto mb-2 h-6 w-6 text-slate-400" />
+            Nema vozila. Dodajte vozila na tabu Vozila i ona će se pojaviti ovdje kao auti.
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 items-start gap-4">
+            {[...vozila].sort((a, b) => b.broj_mjesta - a.broj_mjesta || a.registracija.localeCompare(b.registracija)).map((vozilo) => {
+              const carSites = siteAssignments.filter((a) => a.vozilo_id === vozilo.id);
+              const carWorkers = workerAssignments.filter((a) => a.vozilo_id === vozilo.id);
+              const workerSlots = Math.max(vozilo.broj_mjesta || defaultWorkerSlots, carWorkers.length);
+              const carTime = carSites.find((a) => a.vrijeme)?.vrijeme ?? '';
+              const siteSlots = Math.max(minSiteSlots, carSites.length + 2) - 1;
+              const over = vozilo.broj_mjesta > 0 && carWorkers.length > vozilo.broj_mjesta;
+              const target = `car-${vozilo.id}`;
+              return (
+                <section
+                  key={vozilo.id}
+                  onDragOver={(e) => allowDrop(e, target)}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null);
+                  }}
+                  onDrop={(e) => dropOnVehicle(e, vozilo.id)}
+                  className={`min-w-0 rounded-lg border-2 p-3 transition-colors ${dropTarget === target ? 'border-sky-400 bg-sky-50' : 'border-slate-400 bg-slate-200'}`}
+                >
+                  <div className="mb-2 flex items-center gap-1.5">
+                    <span className="w-20 flex-shrink-0 rounded border border-slate-800 bg-white px-1.5 py-0.5 text-xs text-slate-900">AUTO:</span>
+                    <span className="min-w-0 flex-1 truncate rounded border border-slate-800 bg-amber-200 px-2 py-0.5 text-center text-sm font-bold uppercase text-slate-900" title={[vozilo.marka, vozilo.model, vozilo.registracija].filter(Boolean).join(' ')}>
+                      {[vozilo.marka, vozilo.model, vozilo.registracija].filter(Boolean).join(' ')}
+                    </span>
+                  </div>
+
+                  <div className="mb-2 flex gap-2">
+                    <span className="h-fit w-20 flex-shrink-0 rounded border border-slate-800 bg-white px-1.5 py-0.5 text-[10px] text-slate-900">GRADILIŠTE:</span>
+                    <div className="min-w-0 flex-1 bg-white px-2 py-0.5">
+                      {carSites.map((a) => {
+                        const g = a.gradiliste_id ? gradilista.find((item) => item.id === a.gradiliste_id) : undefined;
+                        const isText = !a.gradiliste_id;
+                        const hasNalog = Boolean(a.nalog_id);
+                        const nalogLocked = hasNalog && lockedNalozi.includes(a.nalog_id as string);
+                        return (
+                          <div
+                            key={a.id}
+                            draggable
+                            onDragStart={(e) => startDrag(e, { type: 'gradiliste', id: a.gradiliste_id ?? a.id, assignmentId: a.id })}
+                            className={`min-h-[2.25rem] cursor-grab border-b border-slate-100 pb-0.5 ${nalogLocked ? 'bg-emerald-100' : ''}`}
+                          >
+                            <div className="flex items-start justify-between gap-1">
+                              {isText ? (
+                                <input
+                                  key={`${a.id}-${a.tekst ?? ''}`}
+                                  defaultValue={a.tekst ?? ''}
+                                  aria-label="Ručni unos"
+                                  onBlur={(e) => {
+                                    const next = e.target.value.trim();
+                                    if (!next) void run(() => removeRasporedGradiliste(a.id));
+                                    else if (next !== a.tekst) void run(() => updateRasporedTekst(a.id, next));
+                                  }}
+                                  className="min-w-0 flex-1 bg-transparent text-[13px] font-medium text-slate-900 outline-none focus:ring-1 focus:ring-sky-500"
+                                />
+                              ) : (
+                                <span className="min-w-0 flex-1 break-words text-[13px] font-medium leading-tight text-blue-800">{g?.naziv ?? 'Nepoznato gradilište'}</span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => void run(() => removeRasporedGradiliste(a.id))}
+                                aria-label="Ukloni gradilište"
+                                className="flex-shrink-0 text-slate-300 hover:text-red-600"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                              {!isText && g && (
+                                <button
+                                  type="button"
+                                  onClick={() => void (a.nalog_id ? openExistingNalog(a.id, a.nalog_id) : openNalog(a.id, g, [vozilo.registracija, carTime].filter(Boolean).join(', '), carWorkers.map((w) => w.radnik_id)))}
+                                  title={nalogLocked ? 'Zaključen radni nalog – otvori' : hasNalog ? 'Nacrt radnog naloga – otvori' : 'Kreiraj radni nalog'}
+                                  aria-label={hasNalog ? 'Otvori radni nalog' : 'Kreiraj radni nalog'}
+                                  className={`flex flex-shrink-0 items-center gap-0.5 rounded px-1 text-[10px] font-semibold ${nalogLocked ? 'bg-emerald-500 text-white' : hasNalog ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-600 hover:bg-sky-100 hover:text-sky-800'}`}
+                                >
+                                  {nalogLocked ? <Check className="h-3 w-3" /> : <ClipboardList className="h-3 w-3" />}
+                                  RN
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {Array.from({ length: siteSlots - carSites.length }).map((_, i) => (
+                        <div key={i} className="h-[2.25rem] border-b border-slate-100">
+                          {(
+                            <input
+                             
+                              aria-label="Ručni unos"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') e.currentTarget.blur();
+                              }}
+                              onBlur={(e) => {
+                                const text = e.target.value.trim();
+                                e.target.value = '';
+                                if (text) void run(() => addRasporedTekst(selectedDate, vozilo.id, text));
+                              }}
+                              className="h-full w-full bg-transparent px-1 text-[13px] text-slate-900 outline-none placeholder:text-slate-300 focus:ring-1 focus:ring-sky-500"
+                            />
+                          )}
                         </div>
-                        <span
-                          className={`h-2 w-2 rounded-full flex-shrink-0 ${
-                            g.status === 'aktivno'
-                              ? 'bg-emerald-500'
-                              : g.status === 'planirano'
-                                ? 'bg-sky-500'
-                                : g.status === 'pauzirano'
-                                  ? 'bg-amber-500'
-                                    : g.status === 'ponuda'
-                                      ? 'bg-violet-500'
-                                  : 'bg-slate-300'
-                          }`}
+                      ))}
+                      <div className="h-[2.25rem]">
+                        <input
+                          key={`${vozilo.id}-${carTime}`}
+                          defaultValue={carTime}
+                          disabled={carSites.length === 0}
+                          aria-label="Radno vrijeme"
+                          onBlur={(e) => {
+                            const next = e.target.value.trim();
+                            if (next !== carTime) void run(() => updateRasporedVrijemeVozila(selectedDate, vozilo.id, next));
+                          }}
+                          className="h-full w-full bg-yellow-300 px-1 text-[13px] text-red-600 outline-none focus:ring-1 focus:ring-sky-500 disabled:bg-yellow-100"
                         />
                       </div>
-                      {nextRok && (
-                        <div className="mt-1.5 ml-6 flex items-center gap-1.5 text-xs">
-                          <Clock className="h-3 w-3 text-slate-400" />
-                          <span className="text-slate-500">{nextRok.naziv}:</span>
-                          <span
-                            className={
-                              daysUntil(nextRok.datum) < 0
-                                ? 'font-medium text-red-600'
-                                : daysUntil(nextRok.datum) <= 7
-                                  ? 'font-medium text-amber-600'
-                                  : 'text-slate-500'
-                            }
-                          >
-                            {daysUntil(nextRok.datum) < 0
-                              ? `prekor. ${Math.abs(daysUntil(nextRok.datum))}d`
-                              : `${daysUntil(nextRok.datum)}d`}
-                          </span>
-                        </div>
-                      )}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-            <p className="mt-3 text-xs text-slate-400">
-              Povuci na desnu stranu ili klikni za raspored
-            </p>
-          </div>
-
-          {/* Svi rokovi - nadolazeći */}
-          {upcomingRokovi.length > 0 && (
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
-                <Clock className="h-4 w-4 text-amber-500" />
-                Nadolazeći rokovi
-              </h2>
-              <div className="space-y-2">
-                {upcomingRokovi.slice(0, 8).map((r) => {
-                  const g = gradilista.find((g) => g.id === r.gradiliste_id);
-                  const d = daysUntil(r.datum);
-                  return (
-                    <div key={r.id} className="rounded-lg border border-slate-100 p-2">
-                      <div className="flex items-center justify-between">
-                        <p className="truncate text-xs font-medium text-slate-700">{r.naziv}</p>
-                        <span
-                          className={`text-xs font-semibold flex-shrink-0 ml-2 ${
-                            d < 0 ? 'text-red-600' : d <= 7 ? 'text-amber-600' : 'text-slate-500'
-                          }`}
-                        >
-                          {d < 0 ? `${Math.abs(d)}d prekor.` : `${d}d`}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        {g?.naziv ?? '—'} · {new Date(r.datum + 'T00:00:00').toLocaleDateString('hr-HR')}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Right: schedule area */}
-        <div>
-          {/* Date navigator */}
-          <div className="mb-5 flex items-center justify-center gap-4">
-            <button
-              onClick={() => changeDay(-1)}
-              className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-50 transition-colors"
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-            <div className="text-center min-w-[280px]">
-              <div className="flex items-center justify-center gap-2">
-                <CalendarDays className="h-5 w-5 text-sky-600" />
-                <span className="text-lg font-semibold text-slate-900 capitalize">
-                  {formatDate(selectedDate)}
-                </span>
-              </div>
-              <button
-                onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
-                className="mt-1 text-xs text-sky-600 hover:text-sky-700"
-              >
-                Današnji datum
-              </button>
-            </div>
-            <button
-              onClick={() => changeDay(1)}
-              className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-50 transition-colors"
-            >
-              <ChevronRight className="h-5 w-5" />
-            </button>
-          </div>
-
-          {/* Drop zone / schedule list */}
-          {dayRasporedi.length === 0 ? (
-            <div
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              className={`rounded-2xl border-2 border-dashed transition-colors ${
-                dragOver ? 'border-sky-400 bg-sky-50' : 'border-slate-200 bg-white'
-              }`}
-            >
-              <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-                <div
-                  className={`mb-4 flex h-14 w-14 items-center justify-center rounded-2xl transition-colors ${
-                    dragOver ? 'bg-sky-100 text-sky-600' : 'bg-slate-100 text-slate-400'
-                  }`}
-                >
-                  <CalendarDays className="h-7 w-7" />
-                </div>
-                <h3 className="text-base font-semibold text-slate-900">
-                  {dragOver ? 'Pusti za kreiranje rasporeda' : 'Nema rasporeda za ovaj dan'}
-                </h3>
-                <p className="mt-1.5 max-w-sm text-sm text-slate-500">
-                  Povuci gradilište s lijeve strane ovdje, ili klikni gumb za novi raspored.
-                </p>
-                <button
-                  onClick={() => openCreate()}
-                  className="mt-5 inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700 transition-colors"
-                >
-                  <Plus className="h-4 w-4" />
-                  Novi raspored
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              className={`space-y-4 rounded-xl transition-colors ${
-                dragOver ? 'ring-2 ring-sky-400 ring-inset bg-sky-50/50' : ''
-              }`}
-            >
-              {dragOver && (
-                <div className="rounded-xl border-2 border-dashed border-sky-400 bg-sky-50 py-4 text-center text-sm font-medium text-sky-600">
-                  Pusti za dodavanje rasporeda
-                </div>
-              )}
-
-              {dayRasporedi.map((r) => {
-                const raspedRadnici = r.radnici ?? [];
-                const raspedVozila = r.vozila ?? [];
-                const totalCap = raspedVozila.reduce((sum, v) => sum + (v.broj_mjesta ?? 0), 0);
-                const capExceeded = totalCap > 0 && raspedRadnici.length > totalCap;
-
-                return (
-                  <div
-                    key={r.id}
-                    className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-md transition-shadow"
-                  >
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
-                          <MapPin className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold text-slate-900">
-                            {r.gradilista?.naziv ?? 'Bez gradilišta'}
-                          </h3>
-                          {r.gradilista?.adresa && (
-                            <p className="text-sm text-slate-500">{r.gradilista.adresa}</p>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => openNalogModal(r)}
-                          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-sky-600 hover:bg-sky-50 transition-colors"
-                        >
-                          <ClipboardList className="h-4 w-4" />
-                          Nalog
-                        </button>
-                        <button
-                          onClick={() => openEdit(r)}
-                          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-600 transition-colors"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => setDeleteId(r.id)}
-                          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600 transition-colors"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div>
-                        <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          <Users className="h-3.5 w-3.5" />
-                          Radnici ({raspedRadnici.length})
-                        </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {raspedRadnici.length === 0 ? (
-                            <span className="text-sm text-slate-400">Nema dodijeljenih radnika</span>
-                          ) : (
-                            raspedRadnici.map((rad) => (
-                              <Badge key={rad.id} variant="green">
-                                {rad.ime} {rad.prezime}
-                              </Badge>
-                            ))
-                          )}
-                        </div>
-                      </div>
-
-                      <div>
-                        <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          <Truck className="h-3.5 w-3.5" />
-                          Vozila ({raspedVozila.length})
-                          {totalCap > 0 && (
-                            <span className="font-normal normal-case text-slate-400">
-                              · kapacitet: {totalCap}
-                            </span>
-                          )}
-                        </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {raspedVozila.length === 0 ? (
-                            <span className="text-sm text-slate-400">Nema dodijeljenih vozila</span>
-                          ) : (
-                            raspedVozila.map((v) => (
-                              <Badge key={v.id} variant="blue">
-                                {v.registracija} — {v.marka} ({v.broj_mjesta} mjesta)
-                              </Badge>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {capExceeded && (
-                      <div className="mt-3 flex items-center gap-2 rounded-lg bg-red-50 border border-red-100 px-3.5 py-2.5">
-                        <AlertTriangle className="h-4 w-4 text-red-600 flex-shrink-0" />
-                        <p className="text-sm text-red-700">
-                          Broj radnika ({raspedRadnici.length}) prelazi ukupni kapacitet vozila ({totalCap} mjesta)
-                        </p>
-                      </div>
-                    )}
-
-                    {r.napomena && (
-                      <div className="mt-4 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-100 px-3.5 py-2.5">
-                        <StickyNote className="h-4 w-4 mt-0.5 text-amber-600 flex-shrink-0" />
-                        <p className="text-sm text-amber-800">{r.napomena}</p>
-                      </div>
-                    )}
                   </div>
-                );
-              })}
-            </div>
-          )}
+
+                  <div className="flex gap-2">
+                    <span className="h-fit w-20 flex-shrink-0 rounded border border-slate-800 bg-white px-1.5 py-0.5 text-[10px] text-slate-900">RADNICI:</span>
+                    <div className="min-w-0 flex-1 bg-white px-2 py-0.5">
+                      {carWorkers.map((a) => {
+                        const r = radnici.find((item) => item.id === a.radnik_id);
+                        return (
+                          <div
+                            key={a.id}
+                            draggable
+                            onDragStart={(e) => startDrag(e, { type: 'radnik', id: a.radnik_id, assignmentId: a.id })}
+                            className="flex h-6 cursor-grab items-center justify-between gap-1 border-b border-slate-100"
+                          >
+                            <span className={`truncate text-[13px] font-medium ${workerCount(a.radnik_id) > 1 ? 'text-red-600' : 'text-emerald-700'}`}>{r ? `${r.prezime} ${r.ime}` : 'Nepoznat radnik'}</span>
+                            <span className="flex flex-shrink-0 items-center gap-1">
+                              <WorkerCount count={workerCount(a.radnik_id)} />
+                              <button
+                                type="button"
+                                onClick={() => void run(() => removeRasporedRadnik(a.id))}
+                                aria-label="Ukloni radnika"
+                                className="text-slate-300 hover:text-red-600"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </span>
+                          </div>
+                        );
+                      })}
+                      {Array.from({ length: workerSlots - carWorkers.length }).map((_, i) => (
+                        <div key={i} className="h-6 border-b border-slate-100" />
+                      ))}
+                    </div>
+                  </div>
+                  {vozilo.broj_mjesta > 0 && (
+                    <p className={`mt-1 text-right text-[10px] ${over ? 'font-semibold text-red-600' : 'text-slate-500'}`}>
+                      {carWorkers.length}/{vozilo.broj_mjesta} mjesta{over ? ' – premašen kapacitet' : ''}
+                    </p>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="space-y-3 xl:sticky xl:top-0">
+        {/* Radnici */}
+        <aside
+          onDragOver={(e) => allowDrop(e, 'panel-radnici')}
+          onDragLeave={() => setDropTarget(null)}
+          onDrop={(e) => dropOnPanel(e, 'radnik')}
+          className={`rounded-xl border border-dashed p-3 ${dropTarget === 'panel-radnici' ? 'border-sky-400 bg-sky-50/70' : 'border-slate-200 bg-slate-50/50'}`}
+        >
+          <h2 className="mb-2 text-xs font-semibold uppercase text-slate-500">Zaposlenici ({workers.length})</h2>
+          {workers.length === 0 && <p className="py-4 text-center text-xs text-slate-400">Nema aktivnih radnika</p>}
+          <div className="space-y-1.5">
+            {workers.map((r) => {
+              const assignments = workerAssignments.filter((a) => a.radnik_id === r.id);
+              const cars = assignments
+                .map((a) => vehicleOf(a.vozilo_id)?.registracija)
+                .filter(Boolean)
+                .join(', ');
+              return (
+                <div
+                  key={r.id}
+                  draggable
+                  onDragStart={(e) => startDrag(e, { type: 'radnik', id: r.id })}
+                  className={`flex cursor-grab items-center gap-1.5 rounded-lg border bg-white px-2 py-1.5 shadow-sm active:cursor-grabbing ${assignments.length > 1 ? 'border-red-200' : assignments.length === 1 ? 'border-emerald-200' : 'border-slate-200 hover:border-sky-300'}`}
+                >
+                  <GripVertical className="h-3.5 w-3.5 flex-shrink-0 text-slate-300" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-medium text-slate-800">{r.prezime} {r.ime}</p>
+                    {cars && <p className={`truncate text-[10px] ${assignments.length > 1 ? 'text-red-600' : 'text-emerald-700'}`}>{cars}</p>}
+                  </div>
+                  <WorkerCount count={assignments.length} />
+                </div>
+              );
+            })}
+          </div>
+        </aside>
+
+        <aside
+          onDragOver={(e) => allowDrop(e, 'panel-ostalo')}
+          onDragLeave={() => setDropTarget(null)}
+          onDrop={dropOnOstalo}
+          className={`rounded-xl border border-dashed p-3 ${dropTarget === 'panel-ostalo' ? 'border-sky-400 bg-sky-50/70' : 'border-slate-200 bg-slate-50/50'}`}
+        >
+          <h2 className="mb-2 text-xs font-semibold uppercase text-slate-500">Ostalo</h2>
+          <div className="space-y-1.5">
+            {ostalo.map((entry) => {
+              const worker = entry.radnik_id ? radnici.find((r) => r.id === entry.radnik_id) : null;
+              return (
+                <div
+                  key={entry.id}
+                  draggable
+                  onDragStart={(e) => startDrag(e, { type: 'ostalo', id: entry.id })}
+                  className="flex cursor-grab items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm active:cursor-grabbing"
+                >
+                  <GripVertical className="h-3.5 w-3.5 flex-shrink-0 text-slate-300" />
+                  {entry.radnik_id ? (
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-800">{worker ? `${worker.prezime} ${worker.ime}` : 'Nepoznat radnik'}</span>
+                  ) : (
+                    <input
+                      key={`${entry.id}-${entry.tekst ?? ''}`}
+                      defaultValue={entry.tekst ?? ''}
+                      aria-label="Ostalo"
+                      onBlur={(e) => {
+                        const next = e.target.value.trim();
+                        if (!next) void run(() => removeRasporedOstalo(entry.id));
+                        else if (next !== entry.tekst) void run(() => updateRasporedOstaloTekst(entry.id, next));
+                      }}
+                      className="min-w-0 flex-1 bg-transparent text-xs font-semibold text-pink-400 outline-none focus:ring-1 focus:ring-sky-500"
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void run(() => removeRasporedOstalo(entry.id))}
+                    aria-label="Ukloni"
+                    className="flex-shrink-0 text-slate-300 hover:text-red-600"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+            <input
+              aria-label="Novo polje u ostalo"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.currentTarget.blur();
+              }}
+              onBlur={(e) => {
+                const text = e.target.value.trim();
+                e.target.value = '';
+                if (text) void run(() => addRasporedOstalo(selectedDate, { tekst: text }));
+              }}
+              className="h-8 w-full rounded-lg border border-dashed border-slate-300 bg-white px-2 text-xs text-slate-800 outline-none focus:border-sky-400"
+            />
+          </div>
+        </aside>
         </div>
       </div>
 
-      {/* Schedule modal */}
       <Modal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title={editing ? 'Uredi raspored' : 'Novi raspored'}
+        wide
+        open={nalogForm !== null}
+        onClose={() => void dismissNalog()}
+        title={nalogForm?.nalogId ? 'Uredi radni nalog' : 'Novi radni nalog'}
         footer={
           <>
+            {nalogForm?.nalogId && (
+              <div className="mr-auto flex items-center gap-2">
+                {confirmDiscard ? (
+                  <>
+                    <span className="text-xs text-slate-600">Obrisati nalog {nalogForm.broj}?</span>
+                    <button
+                      onClick={() => void discardNalog()}
+                      disabled={nalogSaving}
+                      className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                    >
+                      Da, odustani
+                    </button>
+                    <button onClick={() => setConfirmDiscard(false)} className="rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100">
+                      Ne
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDiscard(true)}
+                    className="rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                  >
+                    Odustani od naloga
+                  </button>
+                )}
+              </div>
+            )}
             <button
-              onClick={() => setModalOpen(false)}
+              onClick={() => void dismissNalog()}
               className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
             >
               Odustani
             </button>
             <button
-              onClick={save}
-              disabled={saving || capacityExceeded}
-              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50 transition-colors"
+              onClick={() => void saveNalog()}
+              disabled={nalogSaving || !nalogForm?.naslov.trim()}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors"
             >
-              {saving ? 'Spremanje…' : 'Spremi'}
+              {nalogSaving ? 'Spremanje…' : nalogForm?.zakljucen_at ? 'Spremi izmjene' : 'Spremi nacrt'}
             </button>
+            {!nalogForm?.zakljucen_at && (
+              <button
+                onClick={() => void saveNalog('lock')}
+                disabled={nalogSaving || !nalogForm?.naslov.trim()}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+              >
+                Zaključi nalog
+              </button>
+            )}
           </>
         }
       >
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Datum">
-              <TextInput
-                type="date"
-                value={form.datum}
-                onChange={(e) => setForm({ ...form, datum: e.target.value })}
-              />
+        {nalogForm && (
+          <div className="space-y-4">
+            <div className={`flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-xs ${nalogForm.zakljucen_at ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+              <span>
+                {nalogForm.zakljucen_at
+                  ? `Zaključen ${new Date(nalogForm.zakljucen_at).toLocaleString('hr-HR')}. Izmjene i dalje možeš spremati.`
+                  : 'Nacrt – radnici još nisu obaviješteni. Nalog možeš dorađivati dok ga ne zaključiš.'}
+              </span>
+              {nalogForm.zakljucen_at && (
+                <button
+                  type="button"
+                  onClick={() => void saveNalog('unlock')}
+                  disabled={nalogSaving}
+                  className="flex-shrink-0 font-semibold underline disabled:opacity-50"
+                >
+                  Vrati u nacrt
+                </button>
+              )}
+            </div>
+            <div className="grid gap-x-6 gap-y-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="space-y-4">
+            <Field label="Broj naloga">
+              <TextInput value={nalogForm.broj} readOnly className="font-mono bg-slate-50" />
+            </Field>
+            <Field label="Naslov *">
+              <TextInput value={nalogForm.naslov} onChange={(e) => setNalogForm({ ...nalogForm, naslov: e.target.value })} />
             </Field>
             <Field label="Gradilište">
-              <Select
-                value={form.gradiliste_id}
-                onChange={(e) => setForm({ ...form, gradiliste_id: e.target.value })}
-              >
-                <option value="">— Odaberi —</option>
+              <Select value={nalogForm.gradiliste_id} onChange={(e) => setNalogForm({ ...nalogForm, gradiliste_id: e.target.value })}>
                 {gradilista.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.naziv}
-                  </option>
+                  <option key={g.id} value={g.id}>{g.naziv}</option>
                 ))}
               </Select>
             </Field>
-          </div>
-
-          <div>
-            <p className="mb-2 text-sm font-medium text-slate-700">Radnici</p>
-            <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
-              {radnici.length === 0 ? (
-                <p className="px-3 py-2 text-sm text-slate-400">Nema radnika</p>
+            <Field label="Opis">
+              <Textarea rows={3} value={nalogForm.opis} onChange={(e) => setNalogForm({ ...nalogForm, opis: e.target.value })} placeholder="Detaljan opis zadatka…" />
+            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Status">
+                <Select value={nalogForm.status} onChange={(e) => setNalogForm({ ...nalogForm, status: e.target.value as NalogStatus })}>
+                  <option value="otvoren">Otvoren</option>
+                  <option value="u_tijeku">U tijeku</option>
+                  <option value="zavrsen">Završen</option>
+                  <option value="otkazan">Otkazan</option>
+                </Select>
+              </Field>
+              <Field label="Prioritet">
+                <Select value={nalogForm.prioritet} onChange={(e) => setNalogForm({ ...nalogForm, prioritet: e.target.value as NalogPrioritet })}>
+                  <option value="niski">Niski</option>
+                  <option value="srednji">Srednji</option>
+                  <option value="visoki">Visoki</option>
+                  <option value="hitno">Hitno</option>
+                </Select>
+              </Field>
+            </div>
+            <Field label="Rok izvršenja">
+              <TextInput type="date" value={nalogForm.rok} onChange={(e) => setNalogForm({ ...nalogForm, rok: e.target.value })} />
+            </Field>
+            </div>
+            <div className="space-y-4">
+            <div>
+              <p className="mb-2 text-sm font-medium text-slate-700">Radni zadaci za ovaj nalog</p>
+              {visibleZadaci.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Nema otvorenih radnih zadataka za ovo gradilište.</p>
               ) : (
-                radnici.map((rad) => (
-                  <label
-                    key={rad.id}
-                    className="flex items-center gap-3 px-3 py-2 hover:bg-slate-50 cursor-pointer"
-                  >
+                <div className="max-h-40 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
+                  {visibleZadaci.map((z) => (
+                    <label key={z.id} className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50">
+                      <input
+                        type="checkbox"
+                        checked={nalogForm.zadatak_ids.includes(z.id)}
+                        onChange={() =>
+                          setNalogForm({
+                            ...nalogForm,
+                            zadatak_ids: nalogForm.zadatak_ids.includes(z.id)
+                              ? nalogForm.zadatak_ids.filter((id) => id !== z.id)
+                              : [...nalogForm.zadatak_ids, z.id],
+                          })
+                        }
+                        className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                      />
+                      <span className="flex-1 text-sm text-slate-700">{z.naziv}</span>
+                      {z.rok && <span className="text-xs text-slate-400">{new Date(z.rok + 'T00:00:00').toLocaleDateString('hr-HR')}</span>}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <p className="mb-2 text-sm font-medium text-slate-700">Dodijeljeni radnici</p>
+              <div className="max-h-40 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
+                {radnici.filter((r) => nalogForm.radnik_options.includes(r.id)).map((r) => (
+                  <label key={r.id} className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50">
                     <input
                       type="checkbox"
-                      checked={form.radnik_ids.includes(rad.id)}
-                      onChange={() => toggleRadnik(rad.id)}
+                      checked={nalogForm.radnik_ids.includes(r.id)}
+                      onChange={() =>
+                        setNalogForm({
+                          ...nalogForm,
+                          radnik_ids: nalogForm.radnik_ids.includes(r.id)
+                            ? nalogForm.radnik_ids.filter((id) => id !== r.id)
+                            : [...nalogForm.radnik_ids, r.id],
+                        })
+                      }
                       className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                     />
                     <span className="text-sm text-slate-700">
-                      {rad.ime} {rad.prezime} <span className="text-slate-400">— {rad.uloga}</span>
+                      {r.ime} {r.prezime} <span className="text-slate-400">— {r.uloga}</span>
                     </span>
                   </label>
-                ))
-              )}
+                ))}
+              </div>
+            </div>
+            </div>
+            {nalogForm.nalogId && (
+              <div className="md:col-span-2 xl:col-span-2">
+                <NalogIzvrsenje
+                  key={nalogForm.nalogId}
+                  nalog={{ id: nalogForm.nalogId, gradiliste_id: nalogForm.gradiliste_id || null }}
+                  radnikIds={nalogForm.radnik_ids}
+                  hideZadaci                  onChange={(zavrsen) => setNalogForm((f) => (f ? { ...f, status: zavrsen ? 'zavrsen' : f.status === 'zavrsen' ? 'u_tijeku' : f.status } : f))}                />
+              </div>
+            )}
             </div>
           </div>
-
-          <div>
-            <p className="mb-2 text-sm font-medium text-slate-700">Vozila</p>
-            <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
-              {vozila.length === 0 ? (
-                <p className="px-3 py-2 text-sm text-slate-400">Nema vozila</p>
-              ) : (
-                vozila.map((v) => (
-                  <label
-                    key={v.id}
-                    className="flex items-center gap-3 px-3 py-2 hover:bg-slate-50 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={form.vozilo_ids.includes(v.id)}
-                      onChange={() => toggleVozilo(v.id)}
-                      className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
-                    />
-                    <span className="text-sm text-slate-700">
-                      {v.registracija} <span className="text-slate-400">— {v.marka} {v.model}</span>
-                    </span>
-                    <span className="ml-auto text-xs text-slate-400">{v.broj_mjesta} mjesta</span>
-                  </label>
-                ))
-              )}
-            </div>
-          </div>
-
-          {form.vozilo_ids.length > 0 && (
-            <div
-              className={`flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-sm ${
-                capacityExceeded
-                  ? 'bg-red-50 border border-red-100 text-red-700'
-                  : 'bg-emerald-50 border border-emerald-100 text-emerald-700'
-              }`}
-            >
-              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-              {capacityExceeded ? (
-                <span>
-                  Odabrano {selectedWorkerCount} radnika, ali vozila imaju ukupno {totalVehicleCapacity} mjesta.
-                </span>
-              ) : (
-                <span>
-                  {selectedWorkerCount} radnika / {totalVehicleCapacity} mjesta — uredu.
-                </span>
-              )}
-            </div>
-          )}
-
-          <Field label="Napomena">
-            <Textarea
-              rows={2}
-              value={form.napomena}
-              onChange={(e) => setForm({ ...form, napomena: e.target.value })}
-              placeholder="Posebne upute, materijali, zadaci…"
-            />
-          </Field>
-        </div>
+        )}
       </Modal>
-
-      {/* Create nalog from schedule */}
-      <Modal
-        open={nalogModalOpen}
-        onClose={() => setNalogModalOpen(false)}
-        title="Kreiraj radni nalog iz rasporeda"
-        footer={
-          <>
-            <button
-              onClick={() => setNalogModalOpen(false)}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
-            >
-              Odustani
-            </button>
-            <button
-              onClick={saveNalog}
-              disabled={nalogSaving || !nalogForm.naslov.trim()}
-              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50 transition-colors"
-            >
-              {nalogSaving ? 'Kreiranje…' : 'Kreiraj nalog'}
-            </button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          {nalogRaspored && (
-            <div className="rounded-lg bg-sky-50 border border-sky-100 p-3">
-              <p className="text-sm font-medium text-sky-900">
-                {nalogRaspored.gradilista?.naziv ?? 'Bez gradilišta'}
-              </p>
-              <p className="text-xs text-sky-600 mt-1">
-                {(nalogRaspored.radnici ?? []).length} radnika bit će dodijeljeno nalogu
-              </p>
-            </div>
-          )}
-          <Field label="Naslov naloga *">
-            <TextInput
-              value={nalogForm.naslov}
-              onChange={(e) => setNalogForm({ ...nalogForm, naslov: e.target.value })}
-              placeholder="npr. Zidarski radovi 1. kat"
-            />
-          </Field>
-          <Field label="Opis">
-            <Textarea
-              rows={3}
-              value={nalogForm.opis}
-              onChange={(e) => setNalogForm({ ...nalogForm, opis: e.target.value })}
-              placeholder="Detaljan opis zadatka…"
-            />
-          </Field>
-          <Field label="Prioritet">
-            <Select
-              value={nalogForm.prioritet}
-              onChange={(e) =>
-                setNalogForm({ ...nalogForm, prioritet: e.target.value as typeof nalogForm.prioritet })
-              }
-            >
-              <option value="niski">Niski</option>
-              <option value="srednji">Srednji</option>
-              <option value="visoki">Visoki</option>
-              <option value="hitno">Hitno</option>
-            </Select>
-          </Field>
-        </div>
-      </Modal>
-
-      <ConfirmDialog
-        open={deleteId !== null}
-        onClose={() => setDeleteId(null)}
-        onConfirm={handleDelete}
-        title="Izbrisati raspored?"
-        message="Ova radnja je nepovratna. Raspored će biti trajno uklonjen."
-      />
     </div>
   );
 }

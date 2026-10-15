@@ -30,6 +30,7 @@ const emptyForm = {
   kilometraza: '',
   godina_proizvodnje: '',
   broj_mjesta: '2',
+  cijena_km: '',
   napomena: '',
 };
 
@@ -76,6 +77,7 @@ export function VozilaView() {
       kilometraza: v.kilometraza?.toString() ?? '',
       godina_proizvodnje: v.godina_proizvodnje?.toString() ?? '',
       broj_mjesta: v.broj_mjesta?.toString() ?? '2',
+      cijena_km: v.cijena_km ? v.cijena_km.toString() : '',
       napomena: v.napomena ?? '',
     });
     setModalOpen(true);
@@ -94,6 +96,7 @@ export function VozilaView() {
         kilometraza: form.kilometraza ? parseInt(form.kilometraza) : 0,
         godina_proizvodnje: form.godina_proizvodnje ? parseInt(form.godina_proizvodnje) : null,
         broj_mjesta: form.broj_mjesta ? parseInt(form.broj_mjesta) : 2,
+        cijena_km: form.cijena_km ? parseFloat(form.cijena_km) : 0,
         napomena: form.napomena.trim() || null,
       };
       if (editing) {
@@ -321,6 +324,16 @@ export function VozilaView() {
               value={form.broj_mjesta}
               onChange={(e) => setForm({ ...form, broj_mjesta: e.target.value })}
               placeholder="2"
+            />
+          </Field>
+          <Field label="Cijena po kilometru (EUR/km)">
+            <TextInput
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.cijena_km}
+              onChange={(e) => setForm({ ...form, cijena_km: e.target.value })}
+              placeholder="0,40"
             />
           </Field>
           <Field label="Napomena">

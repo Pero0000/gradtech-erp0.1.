@@ -4,12 +4,14 @@ import type { Faktura, Gradiliste, Investitor, Objekt, RadnoVrijeme, Trosak } fr
 import {
   createInvestitor,
   deleteInvestitor,
+  deleteObjekt,
   fetchAllObjekti,
   fetchFakture,
   fetchGradilista,
   fetchInvestitori,
   fetchRadnoVrijeme,
   fetchTroskovi,
+  saveObjekt,
   updateInvestitor,
 } from '@/lib/api';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -51,6 +53,17 @@ const emptyInvestitorForm = {
   telefon: '',
   email: '',
   web: '',
+  napomena: '',
+};
+
+const emptyObjektForm = {
+  naziv: '',
+  investitor_id: '',
+  adresa: '',
+  mjesto: '',
+  postanski_broj: '',
+  kontakt_osoba: '',
+  telefon: '',
   napomena: '',
 };
 
@@ -573,15 +586,22 @@ export function ObjektiView() {
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [investitori, setInvestitori] = useState<Investitor[]>([]);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<Objekt | null>(null);
+  const [form, setForm] = useState(emptyObjektForm);
+  const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Objekt | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchAllObjekti(), fetchGradilista(), fetchFakture()])
-      .then(([nextObjekti, nextGradilista, nextFakture]) => {
+    Promise.all([fetchAllObjekti(), fetchGradilista(), fetchFakture(), fetchInvestitori()])
+      .then(([nextObjekti, nextGradilista, nextFakture, nextInvestitori]) => {
         if (cancelled) return;
         setObjekti(nextObjekti);
         setGradilista(nextGradilista);
         setFakture(nextFakture);
+        setInvestitori(nextInvestitori);
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(errorMessage(e));
@@ -639,7 +659,7 @@ export function ObjektiView() {
 
   const filtered = objekti.filter((objekt) => {
     const siteNames = (gradilistaPoObjektu.get(objekt.id) ?? []).map((site) => site.naziv).join(' ');
-    return `${objekt.naziv} ${objekt.investitori?.naziv ?? ''} ${siteNames}`
+    return `${objekt.naziv} ${objekt.investitori?.naziv ?? ''} ${siteNames} ${[objekt.adresa, objekt.mjesto, objekt.postanski_broj, objekt.kontakt_osoba, objekt.telefon, objekt.napomena].filter(Boolean).join(' ')}`
       .toLocaleLowerCase()
       .includes(query.trim().toLocaleLowerCase());
   });
@@ -699,6 +719,106 @@ export function ObjektiView() {
     );
   };
 
+  const openCreate = () => {
+    setEditing(null);
+    setForm(emptyObjektForm);
+    setError(null);
+    setModalOpen(true);
+  };
+
+  const openEdit = (objekt: Objekt) => {
+    setEditing(objekt);
+    setForm({
+      naziv: objekt.naziv,
+      investitor_id: objekt.investitor_id ?? '',
+      adresa: objekt.adresa ?? '',
+      mjesto: objekt.mjesto ?? '',
+      postanski_broj: objekt.postanski_broj ?? '',
+      kontakt_osoba: objekt.kontakt_osoba ?? '',
+      telefon: objekt.telefon ?? '',
+      napomena: objekt.napomena ?? '',
+    });
+    setError(null);
+    setModalOpen(true);
+  };
+
+  const submitObjekt = async () => {
+    if (!form.naziv.trim() || !form.investitor_id) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = await saveObjekt(editing?.id ?? null, {
+        naziv: form.naziv.trim(),
+        investitor_id: form.investitor_id,
+        adresa: form.adresa.trim() || null,
+        mjesto: form.mjesto.trim() || null,
+        postanski_broj: form.postanski_broj.trim() || null,
+        kontakt_osoba: form.kontakt_osoba.trim() || null,
+        telefon: form.telefon.trim() || null,
+        napomena: form.napomena.trim() || null,
+      });
+      setObjekti((current) => [...current.filter((item) => item.id !== saved.id), saved]
+        .sort((first, second) => first.naziv.localeCompare(second.naziv, 'hr', { sensitivity: 'base' })));
+      setModalOpen(false);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeObjekt = async () => {
+    if (!deleteTarget) return;
+    setError(null);
+    try {
+      await deleteObjekt(deleteTarget.id);
+      setObjekti((current) => current.filter((item) => item.id !== deleteTarget.id));
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setDeleteTarget(null);
+    }
+  };
+
+  const actionButtons = (objekt: Objekt) => (
+    <div className="flex justify-end gap-1">
+      <button
+        type="button"
+        onClick={() => openEdit(objekt)}
+        aria-label={`Uredi objekt ${objekt.naziv}`}
+        title="Uredi objekt"
+        className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-sky-600"
+      >
+        <Pencil className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={() => setDeleteTarget(objekt)}
+        aria-label={`Izbriši objekt ${objekt.naziv}`}
+        title="Izbriši objekt"
+        className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-red-600"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+    </div>
+  );
+
+  const objektDetails = (objekt: Objekt) => (
+    <>
+      <div>{objekt.naziv}</div>
+      {(objekt.adresa || objekt.mjesto || objekt.postanski_broj) && (
+        <div className="mt-1 text-xs font-normal text-slate-500">
+          {[objekt.adresa, objekt.postanski_broj, objekt.mjesto].filter(Boolean).join(', ')}
+        </div>
+      )}
+      {(objekt.kontakt_osoba || objekt.telefon) && (
+        <div className="mt-1 text-xs font-normal text-slate-500">
+          {[objekt.kontakt_osoba, objekt.telefon].filter(Boolean).join(' · ')}
+        </div>
+      )}
+    </>
+  );
+
   if (loading) {
     return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
   }
@@ -710,22 +830,46 @@ export function ObjektiView() {
           <h1 className="text-2xl font-bold text-slate-900">Objekti</h1>
           <p className="mt-1 text-sm text-slate-500">Gradilišta, termini i naplaćene fakture po objektu</p>
         </div>
-        <div className="relative w-full sm:w-72">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <TextInput
-            aria-label="Pretraži objekte"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Pretraži objekte ili investitore"
-            className="pl-9"
-          />
+        <div className="flex w-full flex-wrap items-end justify-end gap-3 sm:w-auto">
+          <div className="relative w-full sm:w-72">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <TextInput
+              aria-label="Pretraži objekte"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Pretraži objekte ili investitore"
+              className="pl-9"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={openCreate}
+            className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-sky-700"
+          >
+            <Plus className="h-4 w-4" />
+            Novi objekt
+          </button>
         </div>
       </div>
 
-      {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+      {error && !modalOpen && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
       {objekti.length === 0 ? (
-        <EmptyState icon={<Building2 className="h-7 w-7" />} title="Nema objekata" description="Objekti dodani uz investitora pojavit će se ovdje." />
+        <EmptyState
+          icon={<Building2 className="h-7 w-7" />}
+          title="Nema objekata"
+          description="Dodajte objekt i povežite ga s investitorom."
+          action={
+            <button
+              type="button"
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700"
+            >
+              <Plus className="h-4 w-4" />
+              Novi objekt
+            </button>
+          }
+        />
       ) : filtered.length === 0 ? (
         <p className="py-10 text-center text-sm text-slate-500">Nema objekata za zadanu pretragu.</p>
       ) : (
@@ -751,6 +895,7 @@ export function ObjektiView() {
                 <th aria-sort={sortKey === 'naplaceno' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="px-5 py-3 text-right text-xs">
                   {sortHeader('naplaceno', 'Naplaćeno')}
                 </th>
+                <th className="px-5 py-3 text-right text-xs font-semibold uppercase text-slate-500">Akcije</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -759,9 +904,10 @@ export function ObjektiView() {
                 if (relatedGradilista.length === 0) {
                   return (
                     <tr key={objekt.id} className="hover:bg-slate-50">
-                      <td className="px-5 py-3.5 text-sm font-medium text-slate-900">{objekt.naziv}</td>
+                      <td className="px-5 py-3.5 text-sm font-medium text-slate-900">{objektDetails(objekt)}</td>
                       <td className="px-5 py-3.5 text-sm text-slate-600">{objekt.investitori?.naziv ?? 'Bez investitora'}</td>
                       <td colSpan={4} className="px-5 py-3.5 text-sm text-slate-400">Nema povezanih gradilišta</td>
+                      <td className="px-5 py-3.5">{actionButtons(objekt)}</td>
                     </tr>
                   );
                 }
@@ -771,7 +917,7 @@ export function ObjektiView() {
                     {index === 0 && (
                       <>
                         <td rowSpan={relatedGradilista.length} className="border-r border-slate-100 px-5 py-3.5 align-top text-sm font-medium text-slate-900">
-                          {objekt.naziv}
+                          {objektDetails(objekt)}
                         </td>
                         <td rowSpan={relatedGradilista.length} className="border-r border-slate-100 px-5 py-3.5 align-top text-sm text-slate-600">
                           {objekt.investitori?.naziv ?? 'Bez investitora'}
@@ -788,6 +934,11 @@ export function ObjektiView() {
                     <td className="px-5 py-3.5 text-right text-sm font-medium text-slate-900">
                       {formatCurrency(naplaceno)}
                     </td>
+                    {index === 0 && (
+                      <td rowSpan={relatedGradilista.length} className="border-l border-slate-100 px-5 py-3.5 align-top">
+                        {actionButtons(objekt)}
+                      </td>
+                    )}
                   </tr>
                 ));
               })}
@@ -795,6 +946,81 @@ export function ObjektiView() {
           </table>
         </div>
       )}
+
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={editing ? 'Uredi objekt' : 'Novi objekt'}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setModalOpen(false)}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
+            >
+              Odustani
+            </button>
+            <button
+              type="submit"
+              form="objekt-form"
+              disabled={saving || !form.naziv.trim() || !form.investitor_id}
+              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-sky-700 disabled:opacity-50"
+            >
+              {saving ? 'Spremanje…' : 'Spremi'}
+            </button>
+          </>
+        }
+      >
+        <form
+          id="objekt-form"
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submitObjekt();
+          }}
+        >
+          {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+          <Field label="Naziv objekta *">
+            <TextInput value={form.naziv} onChange={(event) => setForm({ ...form, naziv: event.target.value })} autoFocus />
+          </Field>
+          <Field label="Investitor *">
+            <Select value={form.investitor_id} onChange={(event) => setForm({ ...form, investitor_id: event.target.value })}>
+              <option value="">Odaberi investitora</option>
+              {investitori.map((item) => <option key={item.id} value={item.id}>{item.naziv}</option>)}
+            </Select>
+          </Field>
+          <Field label="Adresa">
+            <TextInput value={form.adresa} onChange={(event) => setForm({ ...form, adresa: event.target.value })} />
+          </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Poštanski broj">
+              <TextInput value={form.postanski_broj} onChange={(event) => setForm({ ...form, postanski_broj: event.target.value })} />
+            </Field>
+            <Field label="Mjesto">
+              <TextInput value={form.mjesto} onChange={(event) => setForm({ ...form, mjesto: event.target.value })} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Kontakt osoba">
+              <TextInput value={form.kontakt_osoba} onChange={(event) => setForm({ ...form, kontakt_osoba: event.target.value })} />
+            </Field>
+            <Field label="Telefon">
+              <TextInput type="tel" value={form.telefon} onChange={(event) => setForm({ ...form, telefon: event.target.value })} />
+            </Field>
+          </div>
+          <Field label="Napomena">
+            <Textarea rows={3} value={form.napomena} onChange={(event) => setForm({ ...form, napomena: event.target.value })} />
+          </Field>
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={removeObjekt}
+        title="Izbrisati objekt?"
+        message="Objekt je moguće izbrisati samo ako nema povezana gradilišta."
+      />
     </div>
   );
 }

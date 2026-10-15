@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ClipboardCheck, Plus, Pencil, Trash2, DollarSign } from 'lucide-react';
+import { ClipboardCheck, Plus, Pencil, Trash2, Euro } from 'lucide-react';
 import type { UgovoreniRad, UgovoreniRadStatus, Gradiliste } from '@/types';
 import {
   fetchUgovoreniRadovi,
@@ -158,7 +158,7 @@ export function UgovoreniRadoviView() {
           </Select>
         </div>
         <div className="flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-white">
-          <DollarSign className="h-5 w-5" />
+          <Euro className="h-5 w-5" />
           <span className="text-sm text-slate-300">Ugovoreno:</span>
           <span className="font-bold">
             {ukupnoUgovoreno.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}

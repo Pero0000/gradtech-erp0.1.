@@ -1,4 +1,4 @@
-export type GradilisteStatus = 'ponuda' | 'planirano' | 'aktivno' | 'pauzirano' | 'zavrseno';
+﻿export type GradilisteStatus = 'ponuda' | 'planirano' | 'aktivno' | 'pauzirano' | 'zavrseno';
 export type GradilisteRegija = 'dalmacija' | 'istra_kvarner' | 'slavonija' | 'zagreb_i_okolica' | 'medimurje';
 export type RadnikStatus = 'aktivan' | 'neaktivan' | 'bolovanje';
 export type VoziloStatus = 'slobodno' | 'zauzeto' | 'servis';
@@ -23,14 +23,47 @@ export interface Investitor {
 export type InvestitorInput = Pick<Investitor, 'naziv'>
   & Partial<Omit<Investitor, 'id' | 'created_at' | 'updated_at' | 'naziv'>>;
 
-        export interface Objekt {
-          id: string;
-            naziv: string;
-              investitor_id: string | null;
-                created_at: string;
-                  updated_at: string;
-                    investitori?: Pick<Investitor, 'id' | 'naziv'> | null;
-                    }
+export interface Objekt {
+  id: string;
+  naziv: string;
+  investitor_id: string | null;
+  adresa?: string | null;
+  mjesto?: string | null;
+  postanski_broj?: string | null;
+  kontakt_osoba?: string | null;
+  telefon?: string | null;
+  napomena?: string | null;
+  created_at: string;
+  updated_at: string;
+  investitori?: Pick<Investitor, 'id' | 'naziv'> | null;
+}
+
+export type ObjektInput = Pick<Objekt, 'naziv'> & Partial<Pick<Objekt,
+  'investitor_id' | 'adresa' | 'mjesto' | 'postanski_broj' | 'kontakt_osoba' | 'telefon' | 'napomena'>>;
+
+export interface DnevniRasporedGradiliste {
+  id: string;
+  datum: string;
+  vozilo_id: string;
+  gradiliste_id: string | null;
+  tekst?: string | null;
+  nalog_id?: string | null;
+  vrijeme: string;
+}
+
+export interface DnevniRasporedOstalo {
+  id: string;
+  datum: string;
+  tekst: string | null;
+  radnik_id: string | null;
+}
+
+export interface DnevniRasporedRadnik {
+  id: string;
+  datum: string;
+  vozilo_id: string;
+  radnik_id: string;
+}
 
                     export interface Gradiliste {
                       id: string;
@@ -60,6 +93,8 @@ export type InvestitorInput = Pick<Investitor, 'naziv'>
                                                               email: string | null;
                                                                 status: RadnikStatus;
                                                                   cijena_sata: number;
+                                                                  nocni_dodatak?: number;
+                                                                  teren_dnevnica?: number;
                                                                     created_at: string;
                                                                       updated_at: string;
                                                                       }
@@ -74,6 +109,7 @@ export type InvestitorInput = Pick<Investitor, 'naziv'>
                                                                                     kilometraza: number;
                                                                                       godina_proizvodnje: number | null;
                                                                                         broj_mjesta: number;
+                                                                                        cijena_km?: number;
                                                                                           napomena: string | null;
                                                                                             created_at: string;
                                                                                               updated_at: string;
@@ -135,6 +171,9 @@ export type InvestitorInput = Pick<Investitor, 'naziv'>
                                                                                                                                                                       status: NalogStatus;
                                                                                                                                                                         prioritet: NalogPrioritet;
                                                                                                                                                                           datum_kreiranja: string;
+  zakljucen_at?: string | null;
+  teren?: boolean;
+  poslovodja_id?: string | null;
                                                                                                                                                                             rok: string | null;
                                                                                                                                                                               created_at: string;
                                                                                                                                                                                 gradilista?: Pick<Gradiliste, 'id' | 'naziv'> | null;
@@ -149,11 +188,24 @@ export type InvestitorInput = Pick<Investitor, 'naziv'>
                                                                                                                                                                                         naziv: string;
                                                                                                                                                                                           datum: string;
                                                                                                                                                                                             status: RokStatus;
+nalog_id?: string | null;
+zadatak_id?: string | null;
                                                                                                                                                                                               opis: string | null;
                                                                                                                                                                                                 created_at: string;
                                                                                                                                                                                                 }
 
-                                                                                                                                                                                                export type FakturaStatus = 'izdana' | 'placena' | 'nep placena';
+                                                                                                                                                                                                export interface GradilisteZadatak {
+  id: string;
+  gradiliste_id: string;
+  naziv: string;
+  gotovo: boolean;
+  gotovo_at: string | null;
+  rok?: string | null;
+  nalog_id?: string | null;
+  created_at: string;
+}
+
+export type FakturaStatus = 'izdana' | 'placena' | 'nep placena';
 
                                                                                                                                                                                                 export interface Faktura {
                                                                                                                                                                                                   id: string;

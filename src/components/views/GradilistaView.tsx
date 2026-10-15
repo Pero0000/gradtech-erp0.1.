@@ -1,7 +1,8 @@
 import { useState, useEffect, type DragEvent } from 'react';
-import { Building2, Plus, Pencil, Trash2, Calendar, DollarSign, GripVertical } from 'lucide-react';
-import type { Gradiliste, GradilisteRegija, GradilisteStatus, Investitor, Objekt } from '@/types';
+import { Building2, Plus, Pencil, Trash2, Calendar, Euro, GripVertical } from 'lucide-react';
+import type { Gradiliste, GradilisteRegija, GradilisteStatus, Investitor, Objekt, Rok } from '@/types';
 import {
+  fetchRokovi,
   fetchGradilista,
   createGradiliste,
   updateGradiliste,
@@ -10,12 +11,14 @@ import {
   createInvestitor,
   fetchObjekti,
   createObjekt,
+  createGradilisteZadatak,
 } from '@/lib/api';
 import { Modal } from '@/components/ui/Modal';
 import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { GradilisteDetailsPanel } from '@/components/views/GradilisteDetailsPanel';
+import { nextDeadline } from '@/lib/rokovi';
 
 const statusBadge: Record<GradilisteStatus, { variant: 'green' | 'yellow' | 'red' | 'blue' | 'gray'; label: string }> = {
   ponuda: { variant: 'yellow', label: 'Ponuda' },
@@ -155,6 +158,7 @@ function getErrorMessage(error: unknown, fallback: string) {
 
 export function GradilistaView() {
   const [items, setItems] = useState<Gradiliste[]>([]);
+  const [rokovi, setRokovi] = useState<Rok[]>([]);
   const [columnIds, setColumnIds] = useState<string[][]>(() => readGradilisteColumns());
   const [columnSortModes, setColumnSortModes] = useState<GradilisteSortMode[]>(() => readGradilisteSortModes());
   const [draggedId, setDraggedId] = useState<string | null>(null);
@@ -177,10 +181,22 @@ export function GradilistaView() {
   const [investorMode, setInvestorMode] = useState<'manual' | 'select'>('manual');
   const [newObjectName, setNewObjectName] = useState('');
   const [objectMode, setObjectMode] = useState<'manual' | 'select'>('manual');
+  const [newZadaci, setNewZadaci] = useState<{ naziv: string; rok: string }[]>([]);
+  const [zadatakNaziv, setZadatakNaziv] = useState('');
+  const [zadatakRok, setZadatakRok] = useState('');
+
+  const loadRokovi = async () => {
+    try {
+      setRokovi(await fetchRokovi());
+    } catch {
+      setRokovi([]);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
     setError(null);
+    void loadRokovi();
     try {
       const [nextItems, nextInvestitori] = await Promise.all([fetchGradilista(), fetchInvestitori()]);
       setItems(nextItems);
@@ -273,7 +289,18 @@ export function GradilistaView() {
     setInvestorMode('manual');
     setNewObjectName('');
     setObjectMode('manual');
+    setNewZadaci([]);
+    setZadatakNaziv('');
+    setZadatakRok('');
     setModalOpen(true);
+  };
+
+  const addNewZadatak = () => {
+    const naziv = zadatakNaziv.trim();
+    if (!naziv) return;
+    setNewZadaci((prev) => [...prev, { naziv, rok: zadatakRok }]);
+    setZadatakNaziv('');
+    setZadatakRok('');
   };
 
   const openEdit = (g: Gradiliste) => {
@@ -351,6 +378,10 @@ export function GradilistaView() {
       const savedGradiliste = editing
         ? await updateGradiliste(editing.id, payload)
         : await createGradiliste(payload);
+      if (!editing) {
+        const pending = zadatakNaziv.trim() ? [...newZadaci, { naziv: zadatakNaziv.trim(), rok: zadatakRok }] : newZadaci;
+        for (const z of pending) await createGradilisteZadatak(savedGradiliste.id, z.naziv, z.rok || null);
+      }
       const nextColumns = columnIds.map((column) => column.filter((id) => id !== savedGradiliste.id));
       nextColumns[Number(targetColumn)].push(savedGradiliste.id);
       setColumnIds(nextColumns);
@@ -503,10 +534,13 @@ export function GradilistaView() {
               .filter((item): item is Gradiliste => Boolean(item));
             const sortMode = columnSortModes[columnIndex] ?? 'manual';
             if (sortMode !== 'manual') {
-              const dateField = sortMode === 'datum_pocetka' ? 'datum_pocetka' : 'datum_zavrsetka';
+              const dateOf = (item: Gradiliste) =>
+                sortMode === 'datum_pocetka'
+                  ? nextDeadline(item, rokovi)?.datum ?? item.datum_pocetka
+                  : item.datum_zavrsetka;
               columnItems.sort((first, second) => {
-                const firstDate = first[dateField];
-                const secondDate = second[dateField];
+                const firstDate = dateOf(first);
+                const secondDate = dateOf(second);
                 if (!firstDate || !secondDate) {
                   if (firstDate === secondDate) return 0;
                   return firstDate ? -1 : 1;
@@ -546,7 +580,7 @@ export function GradilistaView() {
                     className="px-2.5 py-2 text-xs"
                   >
                     <option value="manual">Vlastiti redoslijed</option>
-                    <option value="datum_pocetka">Početni rok</option>
+                    <option value="datum_pocetka">Početni / idući rok</option>
                     <option value="datum_zavrsetka">Krajnji rok</option>
                   </Select>
                 </div>
@@ -635,10 +669,22 @@ export function GradilistaView() {
                   </div>
                 )}
 
+                {(() => {
+                  const next = nextDeadline(g, rokovi);
+                  return next ? (
+                    <div className="mt-2 flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-900">
+                      <Calendar className="h-3.5 w-3.5 flex-shrink-0 text-amber-600" />
+                      <span className="font-semibold uppercase text-[9px]">Idući rok</span>
+                      <span className="min-w-0 flex-1 truncate">{next.label}</span>
+                      <span className="flex-shrink-0 font-semibold">{new Date(`${next.datum}T00:00:00`).toLocaleDateString('hr-HR')}</span>
+                    </div>
+                  ) : null;
+                })()}
+
                 {g.proracun > 0 && (
                   <div className="mt-2 flex flex-wrap gap-4 text-xs text-slate-500">
                     <span className="flex items-center gap-1.5">
-                      <DollarSign className="h-3.5 w-3.5" />
+                      <Euro className="h-3.5 w-3.5" />
                       {g.proracun.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
                     </span>
                   </div>
@@ -668,6 +714,7 @@ export function GradilistaView() {
                   item.id === selectedGradiliste.id ? { ...item, ...updates } : item,
                 ));
               }}
+              onRokoviChange={() => void loadRokovi()}
             />
           )}
         </div>
@@ -677,6 +724,7 @@ export function GradilistaView() {
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         title={editing ? 'Uredi gradilište' : 'Novo gradilište'}
+        wide="md"
         footer={
           <>
             <button
@@ -700,7 +748,7 @@ export function GradilistaView() {
             {error}
           </div>
         )}
-        <div className="space-y-4">
+        <div className="grid gap-x-6 gap-y-4 md:grid-cols-2">
           <Field label="Vrsta gradilišta *">
             <Select value={targetColumn} onChange={(event) => setTargetColumn(event.target.value)}>
               <option value="">Odaberi vrstu gradilišta</option>
@@ -920,6 +968,51 @@ export function GradilistaView() {
               placeholder="Napomena uz gradilište…"
             />
           </Field>
+          {!editing && (
+            <div className="md:col-span-2">
+              <p className="mb-1 text-sm font-medium text-slate-700">Radni zadaci</p>
+              {newZadaci.length > 0 && (
+                <div className="mb-2 grid gap-1.5 md:grid-cols-2">
+                  {newZadaci.map((z, index) => (
+                    <div key={`${z.naziv}-${index}`} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
+                      <span className="min-w-0 flex-1 truncate">{z.naziv}</span>
+                      {z.rok && <span className="text-xs text-slate-500">{new Date(`${z.rok}T00:00:00`).toLocaleDateString('hr-HR')}</span>}
+                      <button
+                        type="button"
+                        onClick={() => setNewZadaci((prev) => prev.filter((_, i) => i !== index))}
+                        className="text-slate-300 hover:text-red-600"
+                        aria-label="Ukloni zadatak"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="min-w-[12rem] flex-1">
+                  <TextInput
+                    value={zadatakNaziv}
+                    onChange={(e) => setZadatakNaziv(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addNewZadatak(); } }}
+                    placeholder="Novi radni zadatak…"
+                  />
+                </div>
+                <div className="w-40">
+                  <TextInput type="date" value={zadatakRok} onChange={(e) => setZadatakRok(e.target.value)} title="Rok (neobavezno)" />
+                </div>
+                <button
+                  type="button"
+                  onClick={addNewZadatak}
+                  disabled={!zadatakNaziv.trim()}
+                  className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Dodaj
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </Modal>
 

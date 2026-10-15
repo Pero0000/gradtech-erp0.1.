@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, FileText, Plus, Pencil, Trash2, DollarSign } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, FileText, Plus, Pencil, Trash2, Euro } from 'lucide-react';
 import type { Faktura, FakturaStatus, Gradiliste } from '@/types';
 import {
   fetchFakture,
@@ -235,7 +235,7 @@ export function FaktureView() {
           </Select>
         </div>
         <div className="flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-white">
-          <DollarSign className="h-5 w-5" />
+          <Euro className="h-5 w-5" />
           <span className="text-sm text-slate-300">Ukupno:</span>
           <span className="font-bold">
             {ukupno.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}

@@ -7,17 +7,20 @@ interface ModalProps {
   title: string;
   children: ReactNode;
   footer?: ReactNode;
+  wide?: boolean | 'md';
+  headerSlotId?: string;
 }
 
-export function Modal({ open, onClose, title, children, footer }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, wide, headerSlotId }: ModalProps) {
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white shadow-2xl">
+      <div className={`relative z-10 w-full ${wide === 'md' ? 'max-w-4xl' : wide ? 'max-w-7xl' : 'max-w-lg'} max-h-[92vh] overflow-y-auto rounded-2xl bg-white shadow-2xl`}>
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+          {headerSlotId && <div id={headerSlotId} className="ml-auto mr-3" />}
           <button
             onClick={onClose}
             className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"

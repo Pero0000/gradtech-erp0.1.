@@ -3,6 +3,7 @@ import { Sidebar, type View } from '@/components/Sidebar';
 import { Dashboard } from '@/components/views/Dashboard';
 import { GradilistaView } from '@/components/views/GradilistaView';
 import { InvestitoriView, ObjektiView } from '@/components/views/RegistryViews';
+import { KooperantiView } from '@/components/views/KooperantiView';
 import { RadniciView } from '@/components/views/RadniciView';
 import { VozilaView } from '@/components/views/VozilaView';
 import { RasporedView } from '@/components/views/RasporedView';
@@ -11,6 +12,10 @@ import { FaktureView } from '@/components/views/FaktureView';
 import { RadnoVrijemeView } from '@/components/views/RadnoVrijemeView';
 import { RadniNaloziView } from '@/components/views/RadniNaloziView';
 import { RekapitulacijaView } from '@/components/views/RekapitulacijaView';
+import { ObavijestiView } from '@/components/views/ObavijestiView';
+import { PostavkeView } from '@/components/views/PostavkeView';
+import { loadObavijesti, sendPushNotifications } from '@/lib/obavijesti';
+import { loadPostavke } from '@/lib/postavke';
 import {
   fetchGradilista,
   fetchRadnici,
@@ -30,7 +35,24 @@ function App() {
     raspored: 0,
     troskovi: 0,
     radni_nalozi: 0,
+    obavijesti: 0,
   });
+
+  useEffect(() => {
+    const refresh = async () => {
+      try {
+        const postavke = loadPostavke();
+        const list = await loadObavijesti(postavke);
+        setCounts((previous) => ({ ...previous, obavijesti: list.filter((o) => o.level !== 'upcoming').length }));
+        if (postavke.push) sendPushNotifications(list);
+      } catch {
+        // obavijesti view shows its own errors
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 30 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [view]);
 
   useEffect(() => {
     (async () => {
@@ -43,14 +65,15 @@ function App() {
           fetchTroskovi(),
           fetchRadniNalozi(),
         ]);
-        setCounts({
+        setCounts((previous) => ({
+          ...previous,
           gradilista: g.length,
           radnici: r.length,
           vozila: v.length,
           raspored: rasp.length,
           troskovi: t.length,
           radni_nalozi: n.length,
-        });
+        }));
       } catch {
         // counts will remain 0 — individual views show their own errors
       }
@@ -66,6 +89,7 @@ function App() {
           {view === 'gradilista' && <GradilistaView onOpenNalog={(id) => { setFocusNalogId(id); setView('radni_nalozi'); }} />}
           {view === 'investitori' && <InvestitoriView />}
           {view === 'objekti' && <ObjektiView />}
+          {view === 'kooperanti' && <KooperantiView />}
           {view === 'radnici' && <RadniciView />}
           {view === 'vozila' && <VozilaView />}
           {view === 'raspored' && <RasporedView />}
@@ -74,6 +98,8 @@ function App() {
           {view === 'radno_vrijeme' && <RadnoVrijemeView />}
           {view === 'radni_nalozi' && <RadniNaloziView key={focusNalogId ?? 'none'} focusNalogId={focusNalogId} />}
           {view === 'rekapitulacija' && <RekapitulacijaView />}
+          {view === 'obavijesti' && <ObavijestiView onNavigate={setView} />}
+          {view === 'postavke' && <PostavkeView />}
         </div>
       </main>
     </div>

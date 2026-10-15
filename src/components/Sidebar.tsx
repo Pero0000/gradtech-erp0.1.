@@ -9,6 +9,9 @@ import {
   ClipboardList,
   FileBarChart,
   FileText,
+  Handshake,
+  Bell,
+  Settings,
 } from 'lucide-react';
 
 export type View =
@@ -16,6 +19,7 @@ export type View =
   | 'gradilista'
   | 'investitori'
   | 'objekti'
+  | 'kooperanti'
   | 'radnici'
   | 'vozila'
   | 'raspored'
@@ -23,7 +27,9 @@ export type View =
   | 'radno_vrijeme'
   | 'fakture'
   | 'radni_nalozi'
-  | 'rekapitulacija';
+  | 'rekapitulacija'
+  | 'obavijesti'
+  | 'postavke';
 
 interface SidebarProps {
   current: View;
@@ -35,6 +41,7 @@ interface SidebarProps {
     raspored: number;
     troskovi: number;
     radni_nalozi: number;
+    obavijesti?: number;
   };
 }
 
@@ -44,7 +51,7 @@ const navSections: {
 }[] = [
   {
     title: 'Pregled',
-    items: [{ view: 'dashboard', label: 'Nadzorna ploča', icon: LayoutDashboard }],
+    items: [{ view: 'dashboard', label: 'Nadzorna ploča', icon: LayoutDashboard }, { view: 'obavijesti', label: 'Obavijesti', icon: Bell }],
   },
   {
     title: 'Resursi',
@@ -59,6 +66,7 @@ const navSections: {
     items: [
       { view: 'investitori', label: 'Investitori', icon: Users },
       { view: 'objekti', label: 'Objekti', icon: Building2 },
+      { view: 'kooperanti', label: 'Kooperanti', icon: Handshake },
     ],
   },
   {
@@ -77,6 +85,10 @@ const navSections: {
       { view: 'rekapitulacija', label: 'Rekapitulacija', icon: FileBarChart },
     ],
   },
+  {
+    title: 'Sustav',
+    items: [{ view: 'postavke', label: 'Postavke', icon: Settings }],
+  },
 ];
 
 const countMap: Partial<Record<View, keyof SidebarProps['counts']>> = {
@@ -86,6 +98,7 @@ const countMap: Partial<Record<View, keyof SidebarProps['counts']>> = {
   raspored: 'raspored',
   troskovi: 'troskovi',
   radni_nalozi: 'radni_nalozi',
+  obavijesti: 'obavijesti',
 };
 
 export function Sidebar({ current, onNavigate, counts }: SidebarProps) {
@@ -129,7 +142,7 @@ export function Sidebar({ current, onNavigate, counts }: SidebarProps) {
                     {count !== undefined && count > 0 && (
                       <span
                         className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                          active ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-500'
+                          active ? 'bg-sky-100 text-sky-700' : item.view === 'obavijesti' ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-500'
                         }`}
                       >
                         {count}

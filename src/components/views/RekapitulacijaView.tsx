@@ -26,6 +26,7 @@ const kategorijaLabel: Record<TrosakKategorija, string> = {
   kooperanti: 'Kooperanti',
   place: 'Plaće',
   oprema: 'Oprema',
+  direktni: 'Direktni trošak',
   ostalo: 'Ostalo',
 };
 

@@ -1,4 +1,5 @@
 ﻿import { supabase } from './supabase';
+import { nocniInterval } from './postavke';
 import type {
   VoziloDokument,
   VoziloDokumentVrsta,
@@ -11,6 +12,8 @@ import type {
   Gradiliste,
   Investitor,
   InvestitorInput,
+  Kooperant,
+  KooperantInput,
   Objekt,
   ObjektInput,
   Radnik,
@@ -255,6 +258,24 @@ export async function fetchVoziloDokumenti(voziloId: string): Promise<VoziloDoku
     ...d,
     url: d.putanja ? supabase.storage.from('nalozi-foto').getPublicUrl(d.putanja).data.publicUrl : null,
   }));
+}
+
+export async function fetchSviRadnikDokumenti(): Promise<RadnikDokument[]> {
+  const { data, error } = await supabase.from('radnici_dokumenti').select('*');
+  if (error) throw error;
+  return (data ?? []) as RadnikDokument[];
+}
+
+export async function fetchSviVoziloDokumenti(): Promise<VoziloDokument[]> {
+  const { data, error } = await supabase.from('vozila_dokumenti').select('*');
+  if (error) throw error;
+  return (data ?? []) as VoziloDokument[];
+}
+
+export async function fetchSviServisi(): Promise<VoziloDokument[]> {
+  const { data, error } = await supabase.from('vozila_dokumenti').select('*').eq('vrsta', 'servis');
+  if (error) throw error;
+  return (data ?? []) as VoziloDokument[];
 }
 
 export async function addVoziloDokument(
@@ -509,10 +530,38 @@ export async function removeRasporedRadnik(id: string) {
 
 // ===== TROŠKOVI =====
 
+export async function fetchKooperanti(): Promise<Kooperant[]> {
+  const { data, error } = await supabase.from('kooperanti').select('*').order('naziv', { ascending: true });
+  if (error) throwActionableDbError(error, 'kooperanti');
+  return (data ?? []) as Kooperant[];
+}
+
+export async function createKooperant(k: KooperantInput) {
+  const { data, error } = await supabase.from('kooperanti').insert(k).select().single();
+  if (error) throwActionableDbError(error, 'kooperanti');
+  return data as Kooperant;
+}
+
+export async function updateKooperant(id: string, k: Partial<KooperantInput>) {
+  const { data, error } = await supabase
+    .from('kooperanti')
+    .update({ ...k, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throwActionableDbError(error, 'kooperanti');
+  return data as Kooperant;
+}
+
+export async function deleteKooperant(id: string) {
+  const { error } = await supabase.from('kooperanti').delete().eq('id', id);
+  if (error) throwActionableDbError(error, 'kooperanti');
+}
+
 export async function fetchTroskovi(): Promise<Trosak[]> {
   const { data, error } = await supabase
     .from('troskovi')
-    .select('*, gradilista:gradiliste_id ( id, naziv )')
+    .select('*, gradilista:gradiliste_id ( id, naziv ), kooperanti:kooperant_id ( id, naziv )')
     .order('datum', { ascending: false });
   if (error) throw error;
   return (data ?? []) as Trosak[];
@@ -521,6 +570,7 @@ export async function fetchTroskovi(): Promise<Trosak[]> {
 export async function createTrosak(t: {
   gradiliste_id: string | null;
   kategorija: TrosakKategorija;
+  kooperant_id?: string | null;
   opis: string;
   iznos: number;
   datum: string;
@@ -784,9 +834,11 @@ export async function syncNalogTroskovi(nalogId: string) {
     if (od !== null && doo !== null) {
       const diff = doo >= od ? doo - od : doo + 1440 - od;
       let nocne = 0;
+      const { nocOd, danOd } = nocniInterval();
       for (let m = od; m < od + diff; m++) {
         const t = m % 1440;
-        if (t >= 1320 || t < 360) nocne++;
+        const night = nocOd > danOd ? t >= nocOd || t < danOd : t >= nocOd && t < danOd;
+        if (night) nocne++;
       }
       if (diff > 0) {
         sati.push({

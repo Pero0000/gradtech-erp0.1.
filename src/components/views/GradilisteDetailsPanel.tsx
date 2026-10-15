@@ -16,6 +16,7 @@ import type {
   FakturaStatus,
   Gradiliste,
   GradilisteZadatak,
+  Kooperant,
   RadniNalog,
   RadnoVrijeme,
   Rok,
@@ -33,6 +34,8 @@ import {
   deleteRok,
   updateRok,
   createTrosak,
+  createKooperant,
+  fetchKooperanti,
   deleteTrosak,
   fetchFullRekapitulacija,
   updateFaktura,
@@ -63,6 +66,7 @@ const expenseLabels: Record<TrosakKategorija, string> = {
   kooperanti: 'Kooperanti',
   place: 'Plaće',
   oprema: 'Oprema',
+  direktni: 'Direktni trošak',
   ostalo: 'Ostalo',
 };
 
@@ -144,10 +148,17 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const [savingCost, setSavingCost] = useState(false);
   const [costForm, setCostForm] = useState({
     kategorija: 'materijal' as TrosakKategorija,
+    kooperant_id: '',
+    novi_kooperant: '',
     opis: '',
     iznos: '',
     datum: new Date().toISOString().slice(0, 10),
   });
+  const [kooperanti, setKooperanti] = useState<Kooperant[]>([]);
+
+  useEffect(() => {
+    fetchKooperanti().then(setKooperanti).catch(() => setKooperanti([]));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -389,7 +400,8 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     setEditingCost(cost ?? null);
     setCostForm({
       kategorija: cost?.kategorija ?? 'materijal',
-      opis: cost?.opis ?? '',
+      kooperant_id: cost?.kooperant_id ?? '',
+      novi_kooperant: '',
       iznos: cost ? String(cost.iznos) : '',
       datum: cost?.datum ?? new Date().toISOString().slice(0, 10),
     });
@@ -404,11 +416,20 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     const payload = {
       gradiliste_id: gradiliste.id,
       kategorija: costForm.kategorija,
+      kooperant_id: null as string | null,
       opis: costForm.opis.trim(),
       iznos: Number(costForm.iznos),
       datum: costForm.datum,
     };
     try {
+      if (costForm.kategorija === 'kooperanti') {
+        if (costForm.kooperant_id) payload.kooperant_id = costForm.kooperant_id;
+        else if (costForm.novi_kooperant.trim()) {
+          const created = await createKooperant({ naziv: costForm.novi_kooperant.trim() });
+          payload.kooperant_id = created.id;
+          setKooperanti((previous) => [...previous, created].sort((a, b) => a.naziv.localeCompare(b.naziv)));
+        }
+      }
       if (editingCost) await updateTrosak(editingCost.id, payload);
       else await createTrosak(payload);
       await reloadDetails();
@@ -461,7 +482,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     totals[key].cost += item.sati * rate;
     return totals;
   }, {});
-  const costRow = (t: Trosak) => ({ id: t.id, title: t.opis, sub: `${expenseLabels[t.kategorija]} · ${date(t.datum)}`, amount: t.iznos, trosak: t });
+  const costRow = (t: Trosak) => ({ id: t.id, title: t.opis, sub: `${t.kooperanti?.naziv ? `${t.kooperanti.naziv} · ` : kooperanti.find((k) => k.id === t.kooperant_id)?.naziv ? `${kooperanti.find((k) => k.id === t.kooperant_id)?.naziv} · ` : ''}${expenseLabels[t.kategorija]} · ${date(t.datum)}`, amount: t.iznos, trosak: t });
   const isTeren = (t: Trosak) => t.kategorija === 'place' && t.opis.startsWith('Teren');
   const isNight = (t: Trosak) => t.kategorija === 'place' && t.opis.startsWith('Noćni rad');
   const sumOf = (list: Trosak[]) => list.reduce((s, t) => s + t.iznos, 0);
@@ -469,7 +490,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const terenList = costs.filter(isTeren);
   const nightList = costs.filter(isNight);
   const kmList = byKat('put');
-  const otherList = costs.filter((t) => !isTeren(t) && !isNight(t) && !['materijal', 'smjestaj', 'kooperanti', 'put'].includes(t.kategorija));
+  const otherList = costs.filter((t) => !isTeren(t) && !isNight(t) && !['materijal', 'smjestaj', 'kooperanti', 'direktni', 'put'].includes(t.kategorija));
   const costGroups: { key: string; label: string; hint?: string; total: number; hidden?: boolean; toggle?: 'teren' | 'nocna'; rows: { id: string; title: string; sub?: string; amount: number; trosak?: Trosak }[] }[] = [
     {
       key: 'sati',
@@ -483,6 +504,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     { key: 'materijal', label: 'Materijal', total: sumOf(byKat('materijal')), rows: byKat('materijal').map(costRow) },
     { key: 'smjestaj', label: 'Smještaj', total: sumOf(byKat('smjestaj')), rows: byKat('smjestaj').map(costRow) },
     { key: 'kooperanti', label: 'Kooperanti', total: sumOf(byKat('kooperanti')), rows: byKat('kooperanti').map(costRow) },
+    { key: 'direktni', label: 'Direktni troškovi', total: sumOf(byKat('direktni')), rows: byKat('direktni').map(costRow) },
     { key: 'km', label: 'Kilometri vozila', total: sumOf(kmList), rows: kmList.map(costRow) },
     ...(otherList.length > 0 ? [{ key: 'ostalo', label: 'Ostalo', total: sumOf(otherList), rows: otherList.map(costRow) }] : []),
   ];
@@ -1007,9 +1029,23 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               <option value="kooperanti">Kooperanti</option>
               <option value="place">Plaće</option>
               <option value="oprema">Oprema</option>
+              <option value="direktni">Direktni trošak</option>
               <option value="ostalo">Ostalo</option>
             </Select>
           </Field>
+          {costForm.kategorija === 'kooperanti' && (
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Kooperant">
+                <Select value={costForm.kooperant_id} onChange={(event) => setCostForm((previous) => ({ ...previous, kooperant_id: event.target.value }))}>
+                  <option value="">— Odaberi —</option>
+                  {kooperanti.map((k) => <option key={k.id} value={k.id}>{k.naziv}</option>)}
+                </Select>
+              </Field>
+              <Field label="ili novi kooperant">
+                <TextInput value={costForm.novi_kooperant} disabled={!!costForm.kooperant_id} onChange={(event) => setCostForm((previous) => ({ ...previous, novi_kooperant: event.target.value }))} placeholder="Naziv" />
+              </Field>
+            </div>
+          )}
           <Field label="Opis troška *">
             <TextInput value={costForm.opis} onChange={(event) => setCostForm((previous) => ({ ...previous, opis: event.target.value }))} placeholder="Opis stavke" />
           </Field>

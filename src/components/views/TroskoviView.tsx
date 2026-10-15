@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Receipt, Plus, Pencil, Trash2, Euro } from 'lucide-react';
-import type { Trosak, TrosakKategorija, Gradiliste } from '@/types';
+import type { Trosak, TrosakKategorija, Gradiliste, Kooperant } from '@/types';
 import {
   fetchTroskovi,
+  fetchKooperanti,
   createTrosak,
   updateTrosak,
   deleteTrosak,
@@ -22,12 +23,14 @@ const kategorijaInfo: Record<TrosakKategorija, { variant: 'blue' | 'orange' | 'g
   kooperanti: { variant: 'red', label: 'Kooperanti' },
   place: { variant: 'green', label: 'Plaće' },
   oprema: { variant: 'gray', label: 'Oprema' },
+  direktni: { variant: 'orange', label: 'Direktni trošak' },
   ostalo: { variant: 'red', label: 'Ostalo' },
 };
 
 const emptyForm = {
   gradiliste_id: '',
   kategorija: 'materijal' as TrosakKategorija,
+  kooperant_id: '',
   opis: '',
   iznos: '',
   datum: new Date().toISOString().split('T')[0],
@@ -36,6 +39,7 @@ const emptyForm = {
 export function TroskoviView() {
   const [items, setItems] = useState<Trosak[]>([]);
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
+  const [kooperanti, setKooperanti] = useState<Kooperant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -49,9 +53,10 @@ export function TroskoviView() {
     setLoading(true);
     setError(null);
     try {
-      const [t, g] = await Promise.all([fetchTroskovi(), fetchGradilista()]);
+      const [t, g, k] = await Promise.all([fetchTroskovi(), fetchGradilista(), fetchKooperanti().catch(() => [])]);
       setItems(t);
       setGradilista(g);
+      setKooperanti(k);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
     } finally {
@@ -74,6 +79,7 @@ export function TroskoviView() {
     setForm({
       gradiliste_id: t.gradiliste_id ?? '',
       kategorija: t.kategorija,
+      kooperant_id: t.kooperant_id ?? '',
       opis: t.opis,
       iznos: t.iznos.toString(),
       datum: t.datum,
@@ -88,6 +94,7 @@ export function TroskoviView() {
       const payload = {
         gradiliste_id: form.gradiliste_id || null,
         kategorija: form.kategorija,
+        kooperant_id: form.kategorija === 'kooperanti' && form.kooperant_id ? form.kooperant_id : null,
         opis: form.opis.trim(),
         iznos: parseFloat(form.iznos),
         datum: form.datum,
@@ -211,7 +218,7 @@ export function TroskoviView() {
                     <td className="px-5 py-3.5">
                       <Badge variant={ki.variant}>{ki.label}</Badge>
                     </td>
-                    <td className="px-5 py-3.5 text-sm text-slate-700">{t.opis}</td>
+                    <td className="px-5 py-3.5 text-sm text-slate-700">{t.kooperanti?.naziv ? <strong className="mr-1">{t.kooperanti.naziv}:</strong> : null}{t.opis}</td>
                     <td className="px-5 py-3.5 text-right text-sm font-semibold text-slate-900">
                       {t.iznos.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
                     </td>
@@ -287,9 +294,18 @@ export function TroskoviView() {
               <option value="kooperanti">Kooperanti</option>
               <option value="place">Plaće</option>
               <option value="oprema">Oprema</option>
+              <option value="direktni">Direktni trošak</option>
               <option value="ostalo">Ostalo</option>
             </Select>
           </Field>
+          {form.kategorija === 'kooperanti' && (
+            <Field label="Kooperant">
+              <Select value={form.kooperant_id} onChange={(e) => setForm({ ...form, kooperant_id: e.target.value })}>
+                <option value="">— Odaberi —</option>
+                {kooperanti.map((k) => <option key={k.id} value={k.id}>{k.naziv}</option>)}
+              </Select>
+            </Field>
+          )}
           <Field label="Opis *">
             <TextInput
               value={form.opis}

@@ -148,6 +148,10 @@ export interface DnevniRasporedRadnik {
                                                                                         broj_mjesta: number;
                                                                                         cijena_km?: number;
                                                                                         enc_broj?: string | null;
+                                                                                        servis_interval_km?: number | null;
+                                                                                        servis_interval_mjeseci?: number | null;
+                                                                                        servis_upozorenje_km?: number;
+                                                                                        servis_upozorenje_dana?: number;
                                                                                           napomena: string | null;
                                                                                             created_at: string;
                                                                                               updated_at: string;
@@ -172,13 +176,35 @@ export interface DnevniRasporedRadnik {
                                                                                                                         vozilo_ids: string[];
                                                                                                                         }
 
-                                                                                                                        export type TrosakKategorija = 'materijal' | 'gorivo' | 'put' | 'smjestaj' | 'kooperanti' | 'place' | 'oprema' | 'ostalo';
+                                                                                                                        export type TrosakKategorija = 'materijal' | 'gorivo' | 'put' | 'smjestaj' | 'kooperanti' | 'place' | 'oprema' | 'direktni' | 'ostalo';
+
+                                                                                                                        export interface Kooperant {
+                                                                                                                          id: string;
+                                                                                                                          naziv: string;
+                                                                                                                          djelatnost: string | null;
+                                                                                                                          oib: string | null;
+                                                                                                                          iban: string | null;
+                                                                                                                          adresa: string | null;
+                                                                                                                          mjesto: string | null;
+                                                                                                                          postanski_broj: string | null;
+                                                                                                                          kontakt_osoba: string | null;
+                                                                                                                          telefon: string | null;
+                                                                                                                          email: string | null;
+                                                                                                                          web: string | null;
+                                                                                                                          napomena: string | null;
+                                                                                                                          created_at: string;
+                                                                                                                          updated_at: string;
+                                                                                                                        }
+
+                                                                                                                        export type KooperantInput = Pick<Kooperant, 'naziv'>
+                                                                                                                          & Partial<Omit<Kooperant, 'id' | 'created_at' | 'updated_at' | 'naziv'>>;
 
                                                                                                                         export interface Trosak {
                                                                                                                           id: string;
                                                                                                                             gradiliste_id: string | null;
                                                                                                                               kategorija: TrosakKategorija;
-                                                                                                                                opis: string;
+                                                                                                                                kooperant_id?: string | null;
+                                                                                                                                kooperanti?: Pick<Kooperant, 'id' | 'naziv'> | null;
                                                                                                                                   iznos: number;
                                                                                                                                     datum: string;
                                                                                                                                       created_at: string;

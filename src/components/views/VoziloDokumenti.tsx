@@ -27,7 +27,7 @@ function status(d: VoziloDokument) {
   return { label: 'Vrijedi', cls: 'bg-emerald-50 text-emerald-700' };
 }
 
-export function VoziloDokumenti({ voziloId }: { voziloId: string }) {
+export function VoziloDokumenti({ voziloId, onChange }: { voziloId: string; onChange?: () => void }) {
   const [items, setItems] = useState<VoziloDokument[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -70,6 +70,7 @@ export function VoziloDokumenti({ voziloId }: { voziloId: string }) {
       setFile(null);
       if (fileRef.current) fileRef.current.value = '';
       await load();
+      onChange?.();
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -82,6 +83,7 @@ export function VoziloDokumenti({ voziloId }: { voziloId: string }) {
     try {
       await deleteVoziloDokument(d);
       await load();
+      onChange?.();
     } catch (e) {
       setError(errText(e));
     }

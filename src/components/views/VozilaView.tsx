@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Truck, Plus, Pencil, Trash2, Gauge, Calendar, Users } from 'lucide-react';
-import type { Vozilo, VoziloStatus, VoziloTip } from '@/types';
+import type { Vozilo, VoziloStatus, VoziloTip, VoziloDokument } from '@/types';
+import { servisAlert } from '@/lib/servis';
+import { AlertTriangle } from 'lucide-react';
 import { VoziloDokumenti } from '@/components/views/VoziloDokumenti';
-import { fetchVozila, createVozilo, updateVozilo, deleteVozilo } from '@/lib/api';
+import { fetchVozila, createVozilo, updateVozilo, deleteVozilo, fetchSviServisi } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
@@ -33,6 +35,10 @@ const emptyForm = {
   broj_mjesta: '2',
   cijena_km: '',
   enc_broj: '',
+  servis_interval_km: '',
+  servis_interval_mjeseci: '',
+  servis_upozorenje_km: '1000',
+  servis_upozorenje_dana: '30',
   napomena: '',
 };
 
@@ -46,11 +52,15 @@ export function VozilaView() {
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
+  const [servisi, setServisi] = useState<VoziloDokument[]>([]);
+  const loadServisi = () => fetchSviServisi().then(setServisi).catch(() => setServisi([]));
+
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
       setItems(await fetchVozila());
+      await loadServisi();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
     } finally {
@@ -81,6 +91,10 @@ export function VozilaView() {
       broj_mjesta: v.broj_mjesta?.toString() ?? '2',
       cijena_km: v.cijena_km ? v.cijena_km.toString() : '',
       enc_broj: v.enc_broj ?? '',
+      servis_interval_km: v.servis_interval_km ? v.servis_interval_km.toString() : '',
+      servis_interval_mjeseci: v.servis_interval_mjeseci ? v.servis_interval_mjeseci.toString() : '',
+      servis_upozorenje_km: (v.servis_upozorenje_km ?? 1000).toString(),
+      servis_upozorenje_dana: (v.servis_upozorenje_dana ?? 30).toString(),
       napomena: v.napomena ?? '',
     });
     setModalOpen(true);
@@ -101,6 +115,10 @@ export function VozilaView() {
         broj_mjesta: form.broj_mjesta ? parseInt(form.broj_mjesta) : 2,
         cijena_km: form.cijena_km ? parseFloat(form.cijena_km) : 0,
         enc_broj: form.enc_broj.trim() || null,
+        servis_interval_km: form.servis_interval_km ? parseInt(form.servis_interval_km) : null,
+        servis_interval_mjeseci: form.servis_interval_mjeseci ? parseInt(form.servis_interval_mjeseci) : null,
+        servis_upozorenje_km: form.servis_upozorenje_km ? parseInt(form.servis_upozorenje_km) : 1000,
+        servis_upozorenje_dana: form.servis_upozorenje_dana ? parseInt(form.servis_upozorenje_dana) : 30,
         napomena: form.napomena.trim() || null,
       };
       if (editing) {
@@ -229,6 +247,22 @@ export function VozilaView() {
                   </span>
                 </div>
 
+                {(() => {
+                  const alert = servisAlert(v, servisi);
+                  if (!alert) return null;
+                  const cls = alert.level === 'overdue'
+                    ? 'border-red-700 bg-red-600 text-white'
+                    : alert.level === 'soon'
+                      ? 'border-red-300 bg-red-100 text-red-800'
+                      : 'border-slate-200 bg-slate-50 text-slate-600';
+                  return (
+                    <div className={`mt-3 flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-semibold ${cls}`}>
+                      <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span>{alert.text.charAt(0).toUpperCase() + alert.text.slice(1)}</span>
+                    </div>
+                  );
+                })()}
+
                 {v.napomena && <p className="mt-3 text-sm text-slate-600 line-clamp-2">{v.napomena}</p>}
               </div>
             );
@@ -353,8 +387,26 @@ export function VozilaView() {
               placeholder="Servis, kvar, posebnosti…"
             />
           </Field>
+          <div className="rounded-lg border border-slate-200 p-3">
+            <p className="mb-2 text-sm font-medium text-slate-700">Upozorenje za servis</p>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Servis svakih (km)">
+                <TextInput type="number" min="0" value={form.servis_interval_km} onChange={(e) => setForm({ ...form, servis_interval_km: e.target.value })} placeholder="npr. 15000" />
+              </Field>
+              <Field label="Servis svakih (mjeseci)">
+                <TextInput type="number" min="0" value={form.servis_interval_mjeseci} onChange={(e) => setForm({ ...form, servis_interval_mjeseci: e.target.value })} placeholder="npr. 12" />
+              </Field>
+              <Field label="Upozori X km prije">
+                <TextInput type="number" min="0" value={form.servis_upozorenje_km} onChange={(e) => setForm({ ...form, servis_upozorenje_km: e.target.value })} />
+              </Field>
+              <Field label="Upozori X dana prije">
+                <TextInput type="number" min="0" value={form.servis_upozorenje_dana} onChange={(e) => setForm({ ...form, servis_upozorenje_dana: e.target.value })} />
+              </Field>
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400">Računa se od zadnjeg upisanog servisa i trenutne kilometraže vozila. Ostavi prazno za isključeno.</p>
+          </div>
           {editing ? (
-            <VoziloDokumenti voziloId={editing.id} />
+            <VoziloDokumenti voziloId={editing.id} onChange={() => void loadServisi()} />
           ) : (
             <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Dokumenti, servisi i rokovi mogu se dodati nakon prvog spremanja vozila.</p>
           )}

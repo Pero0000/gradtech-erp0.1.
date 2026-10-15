@@ -1,23 +1,18 @@
 import { useEffect, useState } from 'react';
+import { AlertTriangle, Bell, Building2, CalendarDays, ClipboardList, Receipt, Truck, Wallet } from 'lucide-react';
+import type { Faktura, Gradiliste, Radnik, RadniNalog, Trosak, Vozilo } from '@/types';
 import {
-  Building2,
-  Users,
-  Truck,
-  CalendarDays,
-  TrendingUp,
-  Activity,
-  Receipt,
-  ClipboardList,
-} from 'lucide-react';
-import type { Gradiliste, Radnik, Vozilo, Raspored, Trosak, RadniNalog } from '@/types';
-import {
+  fetchDnevniRaspored,
+  fetchFakture,
   fetchGradilista,
   fetchRadnici,
-  fetchVozila,
-  fetchRasporedi,
-  fetchTroskovi,
   fetchRadniNalozi,
+  fetchTroskovi,
+  fetchVozila,
 } from '@/lib/api';
+import { loadObavijesti, relativeLabel, type Obavijest, type ObavijestLevel } from '@/lib/obavijesti';
+import { loadPostavke } from '@/lib/postavke';
+import { todayISO } from '@/lib/rokovi';
 import { Badge } from '@/components/ui/Badge';
 import type { View } from '@/components/Sidebar';
 
@@ -25,359 +20,221 @@ interface DashboardProps {
   onNavigate: (view: View) => void;
 }
 
+type Raspored = Awaited<ReturnType<typeof fetchDnevniRaspored>>;
+
+const eur = (value: number) => value.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' });
+const dm = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('hr-HR', { day: '2-digit', month: '2-digit' });
+
+const levelBadge: Record<ObavijestLevel, string> = {
+  overdue: 'bg-red-600 text-white',
+  today: 'bg-red-200 text-red-900',
+  soon: 'bg-red-50 text-red-700',
+  upcoming: 'bg-slate-100 text-slate-600',
+};
+
+function Card({ title, icon, action, onAction, children }: { title: string; icon: React.ReactNode; action?: string; onAction?: () => void; children: React.ReactNode }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">{icon}{title}</h2>
+        {action && <button type="button" onClick={onAction} className="text-xs font-medium text-sky-700 hover:underline">{action}</button>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+const Empty = ({ text }: { text: string }) => <p className="py-4 text-center text-xs text-slate-400">{text}</p>;
+
+function ObavijestRow({ o, onClick }: { o: Obavijest; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50">
+      <span className={`w-20 shrink-0 rounded-full px-2 py-0.5 text-center text-[11px] font-semibold ${levelBadge[o.level]}`}>
+        {o.days === null ? 'Pozor' : relativeLabel(o.days)}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-slate-800">{o.title}</span>
+        <span className="block truncate text-xs text-slate-500">{o.detail}</span>
+      </span>
+      {o.datum && <span className="text-xs text-slate-400">{dm(o.datum)}</span>}
+    </button>
+  );
+}
+
 export function Dashboard({ onNavigate }: DashboardProps) {
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [radnici, setRadnici] = useState<Radnik[]>([]);
   const [vozila, setVozila] = useState<Vozilo[]>([]);
-  const [rasporedi, setRasporedi] = useState<Raspored[]>([]);
   const [troskovi, setTroskovi] = useState<Trosak[]>([]);
   const [nalozi, setNalozi] = useState<RadniNalog[]>([]);
+  const [fakture, setFakture] = useState<Faktura[]>([]);
+  const [obavijesti, setObavijesti] = useState<Obavijest[]>([]);
+  const [raspored, setRaspored] = useState<Raspored>({ gradilista: [], radnici: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const danas = todayISO();
 
   useEffect(() => {
     (async () => {
       try {
-        const [g, r, v, rasp, t, n] = await Promise.all([
+        const [g, r, v, t, n, f, o, rasp] = await Promise.all([
           fetchGradilista(),
           fetchRadnici(),
           fetchVozila(),
-          fetchRasporedi(),
           fetchTroskovi(),
           fetchRadniNalozi(),
+          fetchFakture(),
+          loadObavijesti(loadPostavke()).catch(() => [] as Obavijest[]),
+          fetchDnevniRaspored(danas).catch(() => ({ gradilista: [], radnici: [] }) as Raspored),
         ]);
         setGradilista(g);
         setRadnici(r);
         setVozila(v);
-        setRasporedi(rasp);
         setTroskovi(t);
         setNalozi(n);
+        setFakture(f);
+        setObavijesti(o);
+        setRaspored(rasp);
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [danas]);
 
-  if (loading) {
-    return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
-  }
+  if (loading) return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
+  if (error) return <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>;
 
-  if (error) {
-    return (
-      <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-        {error}
-      </div>
-    );
-  }
+  const gradById = new Map(gradilista.map((g) => [g.id, g]));
+  const radnikById = new Map(radnici.map((r) => [r.id, r]));
+  const aktivna = gradilista.filter((g) => g.status === 'aktivno').length;
+  const otvoreni = nalozi.filter((n) => n.status === 'otvoren' || n.status === 'u_tijeku');
+  const otvoreniSorted = [...otvoreni].sort((a, b) => Number(b.datum_kreiranja === danas) - Number(a.datum_kreiranja === danas) || b.datum_kreiranja.localeCompare(a.datum_kreiranja));
+  const hitno = obavijesti.filter((o) => o.level === 'overdue' || o.level === 'today');
 
-  const aktivnaGradilista = gradilista.filter((g) => g.status === 'aktivno' || g.status === 'pauzirano').length;
-  const aktivniRadnici = radnici.filter((r) => r.status === 'aktivan').length;
-  const slobodnaVozila = vozila.filter((v) => v.status === 'slobodno').length;
-  const danas = new Date().toISOString().split('T')[0];
-  const danasnjiRasporedi = rasporedi.filter((r) => r.datum === danas);
-  const otvoreniNalozi = nalozi.filter((n) => n.status === 'otvoren' || n.status === 'u_tijeku');
+  const mjesec = danas.slice(0, 7);
+  const troskoviMjesec = troskovi.filter((t) => t.datum.startsWith(mjesec)).reduce((s, t) => s + t.iznos, 0);
+  const noviTroskovi = [...troskovi].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')).slice(0, 6);
 
-  const ukupniProracun = gradilista.reduce((sum, g) => sum + (g.proracun ?? 0), 0);
-  const ukupniTroskovi = troskovi.reduce((sum, t) => sum + t.iznos, 0);
+  const neplacene = fakture.filter((f) => f.status !== 'placena');
+  const dospjele = neplacene.filter((f) => f.datum_dospjecja && f.datum_dospjecja < danas);
+  const dospjeloIznos = dospjele.reduce((s, f) => s + f.iznos, 0);
+  const neplacenoIznos = neplacene.reduce((s, f) => s + f.iznos, 0);
 
-  const stats = [
-    {
-      label: 'Gradilišta',
-      value: gradilista.length,
-      sub: `${aktivnaGradilista} aktivnih`,
-      icon: Building2,
-      color: 'sky',
-      onClick: () => onNavigate('gradilista'),
-    },
-    {
-      label: 'Radnici',
-      value: radnici.length,
-      sub: `${aktivniRadnici} aktivnih`,
-      icon: Users,
-      color: 'emerald',
-      onClick: () => onNavigate('radnici'),
-    },
-    {
-      label: 'Vozila',
-      value: vozila.length,
-      sub: `${slobodnaVozila} slobodnih`,
-      icon: Truck,
-      color: 'amber',
-      onClick: () => onNavigate('vozila'),
-    },
-    {
-      label: 'Današnji raspored',
-      value: danasnjiRasporedi.length,
-      sub: 'rasporeda danas',
-      icon: CalendarDays,
-      color: 'violet',
-      onClick: () => onNavigate('raspored'),
-    },
-    {
-      label: 'Troškovi',
-      value: troskovi.length,
-      sub: ukupniTroskovi.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' }),
-      icon: Receipt,
-      color: 'rose',
-      onClick: () => onNavigate('troskovi'),
-    },
-    {
-      label: 'Radni nalozi',
-      value: nalozi.length,
-      sub: `${otvoreniNalozi.length} otvorenih`,
-      icon: ClipboardList,
-      color: 'indigo',
-      onClick: () => onNavigate('radni_nalozi'),
-    },
+  const rokGradilista = obavijesti.filter((o) => o.tip === 'projekt_rok').slice(0, 7);
+  const ostaliRokovi = obavijesti.filter((o) => o.tip !== 'projekt_rok' && o.tip !== 'faktura_naplata').slice(0, 7);
+
+  const rasporedPoVozilu = vozila
+    .filter((v) => v.u_rasporedu !== false)
+    .map((v) => ({
+      vozilo: v,
+      stavke: raspored.gradilista.filter((s) => s.vozilo_id === v.id),
+      ljudi: raspored.radnici.filter((s) => s.vozilo_id === v.id),
+    }))
+    .filter((x) => x.stavke.length > 0 || x.ljudi.length > 0);
+
+  const kpis = [
+    { label: 'Aktivna gradilišta', value: aktivna, sub: `${gradilista.length} ukupno`, icon: Building2, tone: 'text-sky-600 bg-sky-50', view: 'gradilista' as View },
+    { label: 'Otvoreni nalozi', value: otvoreni.length, sub: `${otvoreni.filter((n) => n.datum_kreiranja === danas).length} kreirano danas`, icon: ClipboardList, tone: 'text-emerald-600 bg-emerald-50', view: 'radni_nalozi' as View },
+    { label: 'Hitne obavijesti', value: hitno.length, sub: 'kasne ili ističu danas', icon: AlertTriangle, tone: hitno.length ? 'text-red-600 bg-red-50' : 'text-slate-500 bg-slate-100', view: 'obavijesti' as View },
+    { label: 'Troškovi ovaj mjesec', value: eur(troskoviMjesec), sub: `${troskovi.filter((t) => t.datum.startsWith(mjesec)).length} stavki`, icon: Receipt, tone: 'text-rose-600 bg-rose-50', view: 'troskovi' as View },
+    { label: 'Neplaćene fakture', value: eur(neplacenoIznos), sub: dospjele.length ? `${dospjele.length} dospjelih · ${eur(dospjeloIznos)}` : 'nema dospjelih', icon: Wallet, tone: dospjele.length ? 'text-amber-600 bg-amber-50' : 'text-slate-500 bg-slate-100', view: 'fakture' as View },
   ];
-
-  const colorMap: Record<string, { bg: string; text: string }> = {
-    sky: { bg: 'bg-sky-50', text: 'text-sky-600' },
-    emerald: { bg: 'bg-emerald-50', text: 'text-emerald-600' },
-    amber: { bg: 'bg-amber-50', text: 'text-amber-600' },
-    violet: { bg: 'bg-violet-50', text: 'text-violet-600' },
-    rose: { bg: 'bg-rose-50', text: 'text-rose-600' },
-    indigo: { bg: 'bg-indigo-50', text: 'text-indigo-600' },
-  };
-
-  const statusBadge: Record<string, { variant: 'green' | 'yellow' | 'red' | 'blue' | 'gray'; label: string }> = {
-    ponuda: { variant: 'yellow', label: 'Ponuda' },
-    planirano: { variant: 'blue', label: 'Planirano' },
-    aktivno: { variant: 'green', label: 'Aktivno' },
-    pauzirano: { variant: 'yellow', label: 'Pauzirano' },
-    zavrseno: { variant: 'gray', label: 'Završeno' },
-  };
 
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Nadzorna ploča</h1>
-        <p className="text-sm text-slate-500 mt-1">Pregled svih ključnih informacija firme</p>
+        <p className="mt-1 text-sm text-slate-500">
+          {new Date().toLocaleDateString('hr-HR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+        </p>
       </div>
 
-      {/* Stat cards */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 mb-8">
-        {stats.map((s) => {
-          const Icon = s.icon;
-          const c = colorMap[s.color];
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
+        {kpis.map((k) => {
+          const Icon = k.icon;
           return (
-            <button
-              key={s.label}
-              onClick={s.onClick}
-              className="group rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm hover:shadow-md transition-all"
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${c.bg} ${c.text}`}>
-                  <Icon className="h-5 w-5" />
-                </div>
-                <span className="text-3xl font-bold text-slate-900">{s.value}</span>
-              </div>
-              <p className="text-sm font-medium text-slate-700">{s.label}</p>
-              <p className="text-xs text-slate-400 mt-0.5">{s.sub}</p>
+            <button key={k.label} type="button" onClick={() => onNavigate(k.view)} className="rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-sky-300">
+              <span className={`mb-2 inline-flex h-9 w-9 items-center justify-center rounded-lg ${k.tone}`}><Icon className="h-5 w-5" /></span>
+              <p className="text-xl font-bold text-slate-900">{k.value}</p>
+              <p className="text-xs font-medium text-slate-600">{k.label}</p>
+              <p className="truncate text-[11px] text-slate-400">{k.sub}</p>
             </button>
           );
         })}
       </div>
 
-      {/* Financijski banner */}
-      {(ukupniProracun > 0 || ukupniTroskovi > 0) && (
-        <div className="mb-8 grid gap-4 sm:grid-cols-3">
-          <div className="flex items-center gap-4 rounded-2xl bg-gradient-to-r from-slate-800 to-slate-900 p-6 text-white">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/10">
-              <TrendingUp className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-sm text-slate-300">Proračun projekata</p>
-              <p className="text-xl font-bold">
-                {ukupniProracun.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-4 rounded-2xl bg-gradient-to-r from-rose-600 to-rose-700 p-6 text-white">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/10">
-              <Receipt className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-sm text-rose-200">Ostvareni troškovi</p>
-              <p className="text-xl font-bold">
-                {ukupniTroskovi.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
-              </p>
-            </div>
-          </div>
-          <div
-            className={`flex items-center gap-4 rounded-2xl p-6 text-white ${
-              ukupniProracun - ukupniTroskovi >= 0
-                ? 'bg-gradient-to-r from-emerald-600 to-emerald-700'
-                : 'bg-gradient-to-r from-red-600 to-red-700'
-            }`}
-          >
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/10">
-              <TrendingUp className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-sm text-white/80">Preostali proračun</p>
-              <p className="text-xl font-bold">
-                {(ukupniProracun - ukupniTroskovi).toLocaleString('hr-HR', {
-                  style: 'currency',
-                  currency: 'EUR',
-                })}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card title="Rokovi gradilišta" icon={<Building2 className="h-4 w-4 text-sky-600" />} action="Sve obavijesti" onAction={() => onNavigate('obavijesti')}>
+          {rokGradilista.length === 0 ? <Empty text="Nema nadolazećih rokova ✅" /> : rokGradilista.map((o) => <ObavijestRow key={o.id} o={o} onClick={() => onNavigate('gradilista')} />)}
+        </Card>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Današnji raspored */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-slate-900 flex items-center gap-2">
-              <CalendarDays className="h-5 w-5 text-sky-600" />
-              Današnji raspored
-            </h2>
-            <button
-              onClick={() => onNavigate('raspored')}
-              className="text-xs text-sky-600 hover:text-sky-700 font-medium"
-            >
-              Vidi sve →
-            </button>
-          </div>
+        <Card title="Ostali rokovi" icon={<Bell className="h-4 w-4 text-amber-600" />} action="Sve obavijesti" onAction={() => onNavigate('obavijesti')}>
+          {ostaliRokovi.length === 0 ? <Empty text="Nema rokova za radnike i vozila ✅" /> : ostaliRokovi.map((o) => <ObavijestRow key={o.id} o={o} onClick={() => onNavigate(o.view)} />)}
+        </Card>
 
-          {danasnjiRasporedi.length === 0 ? (
-            <p className="text-sm text-slate-400 py-6 text-center">Nema rasporeda za danas</p>
-          ) : (
-            <div className="space-y-3">
-              {danasnjiRasporedi.map((r) => (
-                <div key={r.id} className="flex items-start gap-3 rounded-lg border border-slate-100 p-3">
-                  <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-sky-50 text-sky-600">
-                    <Activity className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-900">
-                      {r.gradilista?.naziv ?? 'Bez gradilišta'}
-                    </p>
-                    <span className="text-xs text-slate-500">
-                      {(r.radnici ?? []).length} radnika · {(r.vozila ?? []).length} vozila
-                    </span>
-                  </div>
+        <Card title="Današnji raspored" icon={<CalendarDays className="h-4 w-4 text-violet-600" />} action="Otvori" onAction={() => onNavigate('raspored')}>
+          {rasporedPoVozilu.length === 0 ? <Empty text="Danas nema rasporeda" /> : (
+            <div className="space-y-2">
+              {rasporedPoVozilu.map(({ vozilo, stavke, ljudi }) => (
+                <div key={vozilo.id} className="rounded-lg bg-slate-50 p-2">
+                  <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-800"><Truck className="h-3.5 w-3.5 text-slate-400" />{[vozilo.marka, vozilo.model].filter(Boolean).join(' ')}</p>
+                  <p className="mt-0.5 text-xs text-slate-600">🏗️ {stavke.map((s) => (s.gradiliste_id ? gradById.get(s.gradiliste_id)?.naziv : s.tekst) ?? '—').join(', ') || '—'}</p>
+                  <p className="text-xs text-slate-500">👷 {ljudi.map((l) => { const r = radnikById.get(l.radnik_id); return r ? `${r.ime} ${r.prezime[0]}.` : '?'; }).join(', ') || 'bez radnika'}</p>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </Card>
 
-        {/* Otvoreni nalozi */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-slate-900 flex items-center gap-2">
-              <ClipboardList className="h-5 w-5 text-sky-600" />
-              Otvoreni nalozi
-            </h2>
-            <button
-              onClick={() => onNavigate('radni_nalozi')}
-              className="text-xs text-sky-600 hover:text-sky-700 font-medium"
-            >
-              Vidi sve →
-            </button>
-          </div>
-
-          {otvoreniNalozi.length === 0 ? (
-            <p className="text-sm text-slate-400 py-6 text-center">Nema otvorenih naloga</p>
-          ) : (
-            <div className="space-y-3">
-              {otvoreniNalozi.slice(0, 5).map((n) => (
-                <div key={n.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 p-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-900 truncate">
-                      <span className="font-mono text-xs text-slate-400 mr-1.5">{n.broj}</span>
-                      {n.naslov}
-                    </p>
-                    {n.gradilista?.naziv && (
-                      <p className="text-xs text-slate-400 truncate">{n.gradilista.naziv}</p>
-                    )}
-                  </div>
-                  <Badge variant={n.status === 'u_tijeku' ? 'yellow' : 'blue'}>
-                    {n.status === 'u_tijeku' ? 'U tijeku' : 'Otvoren'}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Aktivna gradilišta */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-slate-900 flex items-center gap-2">
-              <Building2 className="h-5 w-5 text-sky-600" />
-              Gradilišta
-            </h2>
-            <button
-              onClick={() => onNavigate('gradilista')}
-              className="text-xs text-sky-600 hover:text-sky-700 font-medium"
-            >
-              Vidi sve →
-            </button>
-          </div>
-
-          {gradilista.length === 0 ? (
-            <p className="text-sm text-slate-400 py-6 text-center">Nema gradilišta</p>
-          ) : (
-            <div className="space-y-3">
-              {gradilista.slice(0, 5).map((g) => {
-                const sb = statusBadge[g.status] ?? statusBadge.zavrseno;
-                return (
-                  <div key={g.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 p-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-900 truncate">{g.naziv}</p>
-                      {g.adresa && <p className="text-xs text-slate-400 truncate">{g.adresa}</p>}
-                    </div>
-                    <Badge variant={sb.variant}>{sb.label}</Badge>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Najnoviji troškovi */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-slate-900 flex items-center gap-2">
-              <Receipt className="h-5 w-5 text-sky-600" />
-              Najnoviji troškovi
-            </h2>
-            <button
-              onClick={() => onNavigate('troskovi')}
-              className="text-xs text-sky-600 hover:text-sky-700 font-medium"
-            >
-              Vidi sve →
-            </button>
-          </div>
-
-          {troskovi.length === 0 ? (
-            <p className="text-sm text-slate-400 py-6 text-center">Nema troškova</p>
-          ) : (
-            <div className="space-y-3">
-              {troskovi.slice(0, 5).map((t) => (
-                <div key={t.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 p-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-900 truncate">{t.opis}</p>
-                    <span className="text-xs text-slate-400">
-                      {t.gradilista?.naziv ?? 'Bez gradilišta'} ·{' '}
-                      {new Date(t.datum + 'T00:00:00').toLocaleDateString('hr-HR')}
-                    </span>
-                  </div>
-                  <span className="text-sm font-semibold text-slate-900 whitespace-nowrap">
-                    {t.iznos.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
+        <Card title="Otvoreni radni nalozi" icon={<ClipboardList className="h-4 w-4 text-emerald-600" />} action="Svi nalozi" onAction={() => onNavigate('radni_nalozi')}>
+          {otvoreniSorted.length === 0 ? <Empty text="Nema otvorenih naloga ✅" /> : (
+            <ul className="space-y-1">
+              {otvoreniSorted.slice(0, 7).map((n) => (
+                <li key={n.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium text-slate-800">{n.broj} · {n.gradilista?.naziv ?? n.naslov}</span>
+                    <span className="block text-xs text-slate-500">{n.datum_kreiranja === danas ? 'danas' : dm(n.datum_kreiranja)}{n.rok ? ` · rok ${dm(n.rok)}` : ''}</span>
                   </span>
-                </div>
+                  <Badge variant={n.status === 'u_tijeku' ? 'blue' : 'gray'}>{n.status === 'u_tijeku' ? 'U tijeku' : 'Otvoren'}</Badge>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
-        </div>
+        </Card>
+
+        <Card title="Novi troškovi" icon={<Receipt className="h-4 w-4 text-rose-600" />} action="Svi troškovi" onAction={() => onNavigate('troskovi')}>
+          {noviTroskovi.length === 0 ? <Empty text="Još nema troškova" /> : (
+            <ul className="space-y-1">
+              {noviTroskovi.map((t) => (
+                <li key={t.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-slate-800">{t.opis}</span>
+                    <span className="block truncate text-xs text-slate-500">{t.gradilista?.naziv ?? '—'} · {dm(t.datum)}</span>
+                  </span>
+                  <span className="text-sm font-semibold text-slate-900">{eur(t.iznos)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card title="Dospjele fakture" icon={<Wallet className="h-4 w-4 text-amber-600" />} action="Fakture" onAction={() => onNavigate('fakture')}>
+          {dospjele.length === 0 ? <Empty text="Nema dospjelih neplaćenih faktura ✅" /> : (
+            <ul className="space-y-1">
+              {dospjele.sort((a, b) => (a.datum_dospjecja ?? '').localeCompare(b.datum_dospjecja ?? '')).slice(0, 6).map((f) => (
+                <li key={f.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-slate-800">{f.broj} · {f.kupac ?? f.gradilista?.naziv ?? '—'}</span>
+                    <span className="block text-xs text-red-600">dospjelo {f.datum_dospjecja ? dm(f.datum_dospjecja) : ''}</span>
+                  </span>
+                  <span className="text-sm font-semibold text-slate-900">{eur(f.iznos)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
       </div>
     </div>
   );

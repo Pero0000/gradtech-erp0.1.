@@ -12,6 +12,17 @@ function addMonths(iso: string, months: number) {
 const days = (from: string, to: string) =>
   Math.round((new Date(`${to}T00:00:00`).getTime() - new Date(`${from}T00:00:00`).getTime()) / 86400000);
 
+// Idući servis: km (zadnji servis + interval) i/ili datum
+export function nextServis(v: Vozilo, dokumenti: VoziloDokument[]): { km: number | null; datum: string | null } {
+  const last = dokumenti
+    .filter((d) => d.vozilo_id === v.id && d.vrsta === 'servis')
+    .sort((a, b) => (b.datum_od ?? '').localeCompare(a.datum_od ?? ''))[0];
+  if (!last) return { km: null, datum: null };
+  const km = v.servis_interval_km && last.km != null ? last.km + v.servis_interval_km : null;
+  const datum = last.datum_do ?? (last.datum_od && v.servis_interval_mjeseci ? addMonths(last.datum_od, v.servis_interval_mjeseci) : null);
+  return { km, datum };
+}
+
 // Upozorenje po kilometrima i/ili vremenu od zadnjeg servisa (prema postavkama vozila)
 export function servisAlert(v: Vozilo, dokumenti: VoziloDokument[]): ServisAlert | null {
   const intKm = v.servis_interval_km ?? null;

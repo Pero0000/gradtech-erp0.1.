@@ -6,6 +6,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Field, Textarea, TextInput } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
+import { ExportMenu } from '@/components/ui/ExportMenu';
 
 const emptyForm = {
   naziv: '',
@@ -136,9 +137,30 @@ export function KooperantiView() {
           <h1 className="text-2xl font-bold text-slate-900">Kooperanti</h1>
           <p className="mt-1 text-sm text-slate-500">Baza kooperanata i njihovi troškovi po gradilištima · ukupno {eur(grandTotal)}</p>
         </div>
-        <button type="button" onClick={() => openForm()} className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-sky-700">
-          <Plus className="h-4 w-4" /> Novi kooperant
-        </button>
+        <div className="flex items-center gap-2">
+          <ExportMenu
+            disabled={filtered.length === 0}
+            build={() => ({
+              file: 'Kooperanti',
+              title: 'Kooperanti',
+              rows: filtered,
+              columns: [
+                { header: 'Naziv', get: (k: Kooperant) => k.naziv },
+                { header: 'Djelatnost', get: (k: Kooperant) => k.djelatnost ?? '' },
+                { header: 'OIB', get: (k: Kooperant) => k.oib ?? '' },
+                { header: 'IBAN', get: (k: Kooperant) => k.iban ?? '' },
+                { header: 'Adresa', get: (k: Kooperant) => [k.adresa, k.postanski_broj, k.mjesto].filter(Boolean).join(', ') },
+                { header: 'Kontakt', get: (k: Kooperant) => k.kontakt_osoba ?? '' },
+                { header: 'Telefon', get: (k: Kooperant) => k.telefon ?? '' },
+                { header: 'Email', get: (k: Kooperant) => k.email ?? '' },
+                { header: 'Troškovi', kind: 'eur', get: (k: Kooperant) => (byKooperant.get(k.id) ?? []).reduce((s, t) => s + t.iznos, 0) },
+              ],
+            })}
+          />
+          <button type="button" onClick={() => openForm()} className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-sky-700">
+            <Plus className="h-4 w-4" /> Novi kooperant
+          </button>
+        </div>
       </div>
 
       {error && <p className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}

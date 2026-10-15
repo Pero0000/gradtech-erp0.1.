@@ -18,6 +18,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Field, Select, Textarea, TextInput } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
+import { ExportMenu } from '@/components/ui/ExportMenu';
 
 const months = [
   'Siječanj',
@@ -328,6 +329,26 @@ export function InvestitoriView() {
               className="pl-9"
             />
           </div>
+          <ExportMenu
+            disabled={sortedInvestitori.length === 0}
+            build={() => ({
+              file: 'Investitori',
+              title: 'Investitori',
+              rows: sortedInvestitori,
+              columns: [
+                { header: 'Naziv', get: (i: Investitor) => i.naziv },
+                { header: 'OIB', get: (i: Investitor) => i.oib ?? '' },
+                { header: 'Adresa', get: (i: Investitor) => [i.adresa, i.postanski_broj, i.mjesto].filter(Boolean).join(', ') },
+                { header: 'Kontakt', get: (i: Investitor) => i.kontakt_osoba ?? '' },
+                { header: 'Telefon', get: (i: Investitor) => i.telefon ?? '' },
+                { header: 'Email', get: (i: Investitor) => i.email ?? '' },
+                { header: 'Objekata', kind: 'num', get: (i: Investitor) => objekti.filter((o) => o.investitor_id === i.id).length },
+                { header: 'Troškovi', kind: 'eur', get: (i: Investitor) => financesByInvestor.get(i.id)?.totalCosts ?? 0 },
+                { header: 'Fakturirano', kind: 'eur', get: (i: Investitor) => financesByInvestor.get(i.id)?.invoiced ?? 0 },
+                { header: 'Razlika', kind: 'eur', get: (i: Investitor) => financesByInvestor.get(i.id)?.difference ?? 0 },
+              ],
+            })}
+          />
           <button
             type="button"
             onClick={openCreate}
@@ -841,6 +862,23 @@ export function ObjektiView() {
               className="pl-9"
             />
           </div>
+          <ExportMenu
+            disabled={sortedObjekti.length === 0}
+            build={() => ({
+              file: 'Objekti',
+              title: 'Objekti',
+              rows: sortedObjekti,
+              columns: [
+                { header: 'Objekt', get: (o: Objekt) => o.naziv },
+                { header: 'Investitor', get: (o: Objekt) => o.investitori?.naziv ?? '' },
+                { header: 'Adresa', get: (o: Objekt) => [o.adresa, o.postanski_broj, o.mjesto].filter(Boolean).join(', ') },
+                { header: 'Kontakt', get: (o: Objekt) => o.kontakt_osoba ?? '' },
+                { header: 'Telefon', get: (o: Objekt) => o.telefon ?? '' },
+                { header: 'Gradilišta', get: (o: Objekt) => (gradilistaPoObjektu.get(o.id) ?? []).map((g) => g.naziv).join('; ') },
+                { header: 'Naplaćeno', kind: 'eur', get: (o: Objekt) => (redoviPoObjektu.get(o.id) ?? []).reduce((s, r) => s + r.naplaceno, 0) },
+              ],
+            })}
+          />
           <button
             type="button"
             onClick={openCreate}

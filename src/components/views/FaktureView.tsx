@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, FileText, Plus, Pencil, Trash2, Euro } from 'lucide-react';
-import type { Faktura, FakturaStatus, Gradiliste } from '@/types';
+import type { Faktura, FakturaStatus, Gradiliste, Investitor } from '@/types';
 import {
+  fetchInvestitori,
+  createInvestitor,
   fetchFakture,
   createFaktura,
   updateFaktura,
@@ -13,6 +15,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ExportMenu } from '@/components/ui/ExportMenu';
 
 const statusInfo: Record<FakturaStatus, { variant: 'blue' | 'green' | 'red'; label: string }> = {
   izdana: { variant: 'blue', label: 'Izdana' },
@@ -57,6 +60,8 @@ function getErrorMessage(error: unknown, fallback: string) {
 export function FaktureView() {
   const [items, setItems] = useState<Faktura[]>([]);
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
+  const [investitori, setInvestitori] = useState<Investitor[]>([]);
+  const [newInv, setNewInv] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -72,9 +77,10 @@ export function FaktureView() {
     setLoading(true);
     setError(null);
     try {
-      const [f, g] = await Promise.all([fetchFakture(), fetchGradilista()]);
+      const [f, g, inv] = await Promise.all([fetchFakture(), fetchGradilista(), fetchInvestitori().catch(() => [])]);
       setItems(f);
       setGradilista(g);
+      setInvestitori(inv);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
     } finally {
@@ -87,12 +93,14 @@ export function FaktureView() {
   }, []);
 
   const openCreate = () => {
+    setNewInv(null);
     setEditing(null);
     setForm({ ...emptyForm, gradiliste_id: filterGradiliste });
     setModalOpen(true);
   };
 
   const openEdit = (f: Faktura) => {
+    setNewInv(null);
     setEditing(f);
     setForm({
       gradiliste_id: f.gradiliste_id ?? '',
@@ -105,6 +113,19 @@ export function FaktureView() {
       opis: f.opis ?? '',
     });
     setModalOpen(true);
+  };
+
+  const addInvestitor = async () => {
+    const naziv = (newInv ?? '').trim();
+    if (!naziv) return;
+    try {
+      const created = await createInvestitor({ naziv });
+      setInvestitori((prev) => [...prev, created].sort((a, b) => a.naziv.localeCompare(b.naziv, 'hr')));
+      setForm((prev) => ({ ...prev, kupac: created.naziv }));
+      setNewInv(null);
+    } catch (e) {
+      setError(getErrorMessage(e, 'Greška pri dodavanju investitora'));
+    }
   };
 
   const handleGradilisteChange = (gradilisteId: string) => {
@@ -208,13 +229,33 @@ export function FaktureView() {
           <h1 className="text-2xl font-bold text-slate-900">Fakture</h1>
           <p className="text-sm text-slate-500 mt-1">Izdane fakture po gradilištima</p>
         </div>
-        <button
-          onClick={openCreate}
-          className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700 transition-colors shadow-sm"
-        >
-          <Plus className="h-4 w-4" />
-          Nova faktura
-        </button>
+        <div className="flex items-center gap-2">
+          <ExportMenu
+            disabled={sortedItems.length === 0}
+            build={() => ({
+              file: 'Fakture',
+              title: 'Fakture',
+              rows: sortedItems,
+              columns: [
+                { header: 'Broj', get: (f: Faktura) => f.broj },
+                { header: 'Gradilište', get: (f: Faktura) => f.gradilista?.naziv ?? '' },
+                { header: 'Kupac', get: (f: Faktura) => f.kupac ?? '' },
+                { header: 'Izdana', kind: 'date', get: (f: Faktura) => f.datum_izdavanja },
+                { header: 'Dospijeće', kind: 'date', get: (f: Faktura) => f.datum_dospjecja },
+                { header: 'Status', get: (f: Faktura) => statusInfo[f.status].label },
+                { header: 'Iznos', kind: 'eur', get: (f: Faktura) => f.iznos },
+              ],
+              totals: { Iznos: ukupno },
+            })}
+          />
+          <button
+            onClick={openCreate}
+            className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700 transition-colors shadow-sm"
+          >
+            <Plus className="h-4 w-4" />
+            Nova faktura
+          </button>
+        </div>
       </div>
 
       {error && !modalOpen && (
@@ -387,12 +428,51 @@ export function FaktureView() {
               </Select>
             </Field>
           </div>
-          <Field label="Kupac">
-            <TextInput
-              value={form.kupac}
-              onChange={(e) => setForm({ ...form, kupac: e.target.value })}
-              placeholder="npr. Investitor d.o.o."
-            />
+          <Field label="Kupac (investitor)">
+            {newInv === null ? (
+              <div className="flex gap-2">
+                <Select value={form.kupac} onChange={(e) => setForm({ ...form, kupac: e.target.value })}>
+                  <option value="">— Odaberi investitora —</option>
+                  {form.kupac && !investitori.some((i) => i.naziv === form.kupac) && (
+                    <option value={form.kupac}>{form.kupac}</option>
+                  )}
+                  {investitori.map((i) => (
+                    <option key={i.id} value={i.naziv}>{i.naziv}</option>
+                  ))}
+                </Select>
+                <button
+                  type="button"
+                  onClick={() => setNewInv('')}
+                  className="shrink-0 rounded-lg border border-slate-200 px-3 text-sm font-medium text-sky-700 hover:bg-sky-50"
+                >
+                  + Novi
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <TextInput
+                  autoFocus
+                  value={newInv}
+                  onChange={(e) => setNewInv(e.target.value)}
+                  placeholder="Naziv novog investitora"
+                />
+                <button
+                  type="button"
+                  onClick={addInvestitor}
+                  disabled={!newInv.trim()}
+                  className="shrink-0 rounded-lg bg-sky-600 px-3 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+                >
+                  Dodaj
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewInv(null)}
+                  className="shrink-0 rounded-lg px-3 text-sm text-slate-600 hover:bg-slate-100"
+                >
+                  Odustani
+                </button>
+              </div>
+            )}
           </Field>
           <Field label="Iznos (EUR) *">
             <TextInput

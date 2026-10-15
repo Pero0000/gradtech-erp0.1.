@@ -14,6 +14,7 @@ import {
   createGradilisteZadatak,
 } from '@/lib/api';
 import { Modal } from '@/components/ui/Modal';
+import { ExportMenu } from '@/components/ui/ExportMenu';
 import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -450,13 +451,35 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
           <h1 className="text-2xl font-bold text-slate-900">Gradilišta</h1>
           <p className="text-sm text-slate-500 mt-1">Upravljajte svim gradilištima firme</p>
         </div>
-        <button
-          onClick={() => openCreate()}
-          className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700 transition-colors shadow-sm"
-        >
-          <Plus className="h-4 w-4" />
-          Novo gradilište
-        </button>
+        <div className="flex items-center gap-2">
+          <ExportMenu
+            disabled={items.length === 0}
+            build={() => ({
+              file: 'Gradilista',
+              title: 'Gradilišta',
+              rows: items,
+              columns: [
+                { header: 'Naziv', get: (g: Gradiliste) => g.naziv },
+                { header: 'Status', get: (g: Gradiliste) => statusBadge[g.status].label },
+                { header: 'Regija', get: (g: Gradiliste) => (g.regija ? regionInfo[g.regija].label : '') },
+                { header: 'Adresa', get: (g: Gradiliste) => g.adresa ?? '' },
+                { header: 'Voditelj', get: (g: Gradiliste) => g.voditelj_gradilista ?? '' },
+                { header: 'Početak', kind: 'date', get: (g: Gradiliste) => g.datum_pocetka },
+                { header: 'Završetak', kind: 'date', get: (g: Gradiliste) => g.datum_zavrsetka },
+                { header: 'Proračun', kind: 'eur', get: (g: Gradiliste) => g.proracun },
+                { header: 'Ugovoreno', kind: 'eur', get: (g: Gradiliste) => g.ugovorena_vrijednost ?? 0 },
+              ],
+              totals: { Proračun: items.reduce((s, g) => s + g.proracun, 0) },
+            })}
+          />
+          <button
+            onClick={() => openCreate()}
+            className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700 transition-colors shadow-sm"
+          >
+            <Plus className="h-4 w-4" />
+            Novo gradilište
+          </button>
+        </div>
       </div>
 
       <div className="mb-5 flex flex-wrap gap-2 border-b border-slate-200 pb-3" role="tablist" aria-label="Kategorije gradilišta">

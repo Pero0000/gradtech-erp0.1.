@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ClipboardList, Plus, Pencil, Trash2, Users, Calendar, AlertCircle } from 'lucide-react';
+import { ClipboardList, Plus, Pencil, Trash2, Users, Calendar, AlertCircle, Printer } from 'lucide-react';
 import type { RadniNalog, Gradiliste, Radnik, NalogStatus, NalogPrioritet, Rok } from '@/types';
 import {
   fetchRokoviNaloga,
@@ -19,6 +19,8 @@ import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { NalogIzvrsenje } from './NalogIzvrsenje';
+import { ExportMenu } from '@/components/ui/ExportMenu';
+import { downloadNalogPdf } from '@/lib/nalogPdf';
 
 const statusInfo: Record<NalogStatus, { variant: 'blue' | 'yellow' | 'green' | 'red'; label: string }> = {
   otvoren: { variant: 'blue', label: 'Otvoren' },
@@ -87,6 +89,18 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
   const [selectedId, setSelectedId] = useState<string | null>(focusNalogId ?? null);
   const [rokovi, setRokovi] = useState<Rok[]>([]);
   const [rokForm, setRokForm] = useState({ naziv: '', datum: '', opis: '' });
+  const [printingId, setPrintingId] = useState<string | null>(null);
+
+  const printNalog = async (n: RadniNalog) => {
+    setPrintingId(n.id);
+    try {
+      await downloadNalogPdf(n, gradilista.find((g) => g.id === n.gradiliste_id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Greška pri izradi PDF-a');
+    } finally {
+      setPrintingId(null);
+    }
+  };
 
   const loadRokovi = async () => {
     try {
@@ -257,6 +271,24 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
           <h1 className="text-2xl font-bold text-slate-900">Radni nalozi</h1>
           <p className="text-sm text-slate-500 mt-1">Pregled i praćenje radnih naloga. Novi nalozi kreiraju se u Dnevnom rasporedu.</p>
         </div>
+        <ExportMenu
+          disabled={filteredItems.length === 0}
+          build={() => ({
+            file: 'Radni_nalozi',
+            title: 'Radni nalozi',
+            rows: filteredItems,
+            columns: [
+              { header: 'Broj', get: (n: RadniNalog) => n.broj },
+              { header: 'Naslov', get: (n: RadniNalog) => n.naslov },
+              { header: 'Gradilište', get: (n: RadniNalog) => n.gradilista?.naziv ?? '' },
+              { header: 'Status', get: (n: RadniNalog) => statusInfo[n.status].label },
+              { header: 'Prioritet', get: (n: RadniNalog) => prioritetInfo[n.prioritet].label },
+              { header: 'Rok', kind: 'date', get: (n: RadniNalog) => n.rok },
+              { header: 'Radnici', get: (n: RadniNalog) => (n.radnici ?? []).map((r) => `${r.ime} ${r.prezime}`).join(', ') },
+              { header: 'Opis', get: (n: RadniNalog) => n.opis ?? '' },
+            ],
+          })}
+        />
       </div>
 
       {error && (
@@ -371,6 +403,15 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                   </div>
                   <div className="flex items-center gap-1">
                     <div id={`rn-detail-slot-${n.id}`} className="mr-2" />
+                    <button
+                      onClick={() => printNalog(n)}
+                      disabled={printingId === n.id}
+                      title="Preuzmi nalog za ispis (PDF)"
+                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-sky-600 transition-colors disabled:opacity-50"
+                    >
+                      <Printer className="h-4 w-4" />
+                      {printingId === n.id ? 'Priprema…' : 'PDF za ispis'}
+                    </button>
                     <button
                       onClick={() => openEdit(n)}
                       className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-600 transition-colors"

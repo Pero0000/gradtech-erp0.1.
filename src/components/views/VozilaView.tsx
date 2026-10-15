@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Truck, Plus, Pencil, Trash2, Gauge, Calendar, Users } from 'lucide-react';
+import { Truck, Plus, Pencil, Trash2, Gauge, Calendar, Users, Weight, LayoutGrid, Table2 } from 'lucide-react';
 import type { Vozilo, VoziloStatus, VoziloTip, VoziloDokument } from '@/types';
-import { servisAlert } from '@/lib/servis';
+import { servisAlert, nextServis } from '@/lib/servis';
 import { AlertTriangle } from 'lucide-react';
 import { VoziloDokumenti } from '@/components/views/VoziloDokumenti';
 import { fetchVozila, createVozilo, updateVozilo, deleteVozilo, fetchSviServisi } from '@/lib/api';
@@ -10,6 +10,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ExportMenu } from '@/components/ui/ExportMenu';
 
 const statusBadge: Record<VoziloStatus, { variant: 'green' | 'red' | 'yellow'; label: string }> = {
   slobodno: { variant: 'green', label: 'Slobodno' },
@@ -34,6 +35,9 @@ const emptyForm = {
   godina_proizvodnje: '',
   broj_mjesta: '2',
   cijena_km: '',
+  nosivost_kg: '',
+  masa_kg: '',
+  u_rasporedu: true,
   enc_broj: '',
   servis_interval_km: '',
   servis_interval_mjeseci: '',
@@ -51,7 +55,11 @@ export function VozilaView() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-
+  const [prikaz, setPrikaz] = useState<'kartice' | 'tablica'>(() => (localStorage.getItem('tm_vozila_prikaz') === 'tablica' ? 'tablica' : 'kartice'));
+  const setView = (p: 'kartice' | 'tablica') => {
+    setPrikaz(p);
+    localStorage.setItem('tm_vozila_prikaz', p);
+  };
   const [servisi, setServisi] = useState<VoziloDokument[]>([]);
   const loadServisi = () => fetchSviServisi().then(setServisi).catch(() => setServisi([]));
 
@@ -90,6 +98,9 @@ export function VozilaView() {
       godina_proizvodnje: v.godina_proizvodnje?.toString() ?? '',
       broj_mjesta: v.broj_mjesta?.toString() ?? '2',
       cijena_km: v.cijena_km ? v.cijena_km.toString() : '',
+      nosivost_kg: v.nosivost_kg ? v.nosivost_kg.toString() : '',
+      masa_kg: v.masa_kg ? v.masa_kg.toString() : '',
+      u_rasporedu: v.u_rasporedu !== false,
       enc_broj: v.enc_broj ?? '',
       servis_interval_km: v.servis_interval_km ? v.servis_interval_km.toString() : '',
       servis_interval_mjeseci: v.servis_interval_mjeseci ? v.servis_interval_mjeseci.toString() : '',
@@ -114,6 +125,9 @@ export function VozilaView() {
         godina_proizvodnje: form.godina_proizvodnje ? parseInt(form.godina_proizvodnje) : null,
         broj_mjesta: form.broj_mjesta ? parseInt(form.broj_mjesta) : 2,
         cijena_km: form.cijena_km ? parseFloat(form.cijena_km) : 0,
+        nosivost_kg: form.nosivost_kg ? parseFloat(form.nosivost_kg) : null,
+        masa_kg: form.masa_kg ? parseFloat(form.masa_kg) : null,
+        u_rasporedu: form.u_rasporedu,
         enc_broj: form.enc_broj.trim() || null,
         servis_interval_km: form.servis_interval_km ? parseInt(form.servis_interval_km) : null,
         servis_interval_mjeseci: form.servis_interval_mjeseci ? parseInt(form.servis_interval_mjeseci) : null,
@@ -158,6 +172,31 @@ export function VozilaView() {
           <h1 className="text-2xl font-bold text-slate-900">Vozila</h1>
           <p className="text-sm text-slate-500 mt-1">Upravljajte vozilnim parkom firme</p>
         </div>
+        <div className="flex items-center gap-2">
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+            <button type="button" onClick={() => setView('kartice')} className={`rounded-md p-2 ${prikaz === 'kartice' ? 'bg-sky-100 text-sky-700' : 'text-slate-500 hover:bg-slate-50'}`} title="Kartice"><LayoutGrid className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setView('tablica')} className={`rounded-md p-2 ${prikaz === 'tablica' ? 'bg-sky-100 text-sky-700' : 'text-slate-500 hover:bg-slate-50'}`} title="Tablica"><Table2 className="h-4 w-4" /></button>
+          </div>
+          <ExportMenu
+            disabled={items.length === 0}
+            build={() => ({
+              file: 'Vozila',
+              title: 'Vozila',
+              rows: items,
+              columns: [
+                { header: 'Registracija', get: (v: Vozilo) => v.registracija },
+                { header: 'Marka', get: (v: Vozilo) => v.marka },
+                { header: 'Model', get: (v: Vozilo) => v.model ?? '' },
+                { header: 'Tip', get: (v: Vozilo) => tipLabel[v.tip] },
+                { header: 'Status', get: (v: Vozilo) => statusBadge[v.status].label },
+                { header: 'Kilometraža', kind: 'num', get: (v: Vozilo) => v.kilometraza },
+                { header: 'Godina', get: (v: Vozilo) => v.godina_proizvodnje?.toString() ?? '' },
+                { header: 'Mjesta', kind: 'num', get: (v: Vozilo) => v.broj_mjesta },
+                { header: 'Cijena/km', kind: 'eur', get: (v: Vozilo) => v.cijena_km ?? 0 },
+                { header: 'Napomena', get: (v: Vozilo) => v.napomena ?? '' },
+              ],
+            })}
+          />
         <button
           onClick={openCreate}
           className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700 transition-colors shadow-sm"
@@ -165,6 +204,7 @@ export function VozilaView() {
           <Plus className="h-4 w-4" />
           Novo vozilo
         </button>
+        </div>
       </div>
 
       {error && (
@@ -188,6 +228,62 @@ export function VozilaView() {
             </button>
           }
         />
+      ) : prikaz === 'tablica' ? (
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-4 py-3 text-left">Vozilo</th>
+                <th className="px-4 py-3 text-left">Registracija</th>
+                <th className="px-4 py-3 text-left">Tip</th>
+                <th className="px-4 py-3 text-left">Status</th>
+                <th className="px-4 py-3 text-right">Km</th>
+                <th className="px-4 py-3 text-right">Mjesta</th>
+                <th className="px-4 py-3 text-right">Nosivost</th>
+                <th className="px-4 py-3 text-right">Masa</th>
+                <th className="px-4 py-3 text-left">ENC</th>
+                <th className="px-4 py-3 text-left">Idući servis</th>
+                <th className="px-4 py-3 text-right">Akcije</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {items.map((v) => {
+                const sb = statusBadge[v.status];
+                const ns = nextServis(v, servisi);
+                const alert = servisAlert(v, servisi);
+                const alertCls = alert?.level === 'overdue' ? 'text-red-600 font-semibold' : alert?.level === 'soon' ? 'text-red-500 font-medium' : 'text-slate-700';
+                return (
+                  <tr key={v.id} className="group hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-slate-900">{v.marka} {v.model}</td>
+                    <td className="px-4 py-3 text-slate-600">{v.registracija}</td>
+                    <td className="px-4 py-3"><Badge variant="blue">{tipLabel[v.tip]}</Badge></td>
+                    <td className="px-4 py-3"><Badge variant={sb.variant}>{sb.label}</Badge></td>
+                    <td className="px-4 py-3 text-right text-slate-600">{v.kilometraza ? v.kilometraza.toLocaleString('hr-HR') : '—'}</td>
+                    <td className="px-4 py-3 text-right text-slate-600">{v.broj_mjesta}</td>
+                    <td className="px-4 py-3 text-right text-slate-600">{v.nosivost_kg ? `${v.nosivost_kg.toLocaleString('hr-HR')} kg` : '—'}</td>
+                    <td className="px-4 py-3 text-right text-slate-600">{v.masa_kg ? `${v.masa_kg.toLocaleString('hr-HR')} kg` : '—'}</td>
+                    <td className="px-4 py-3 text-slate-600">{v.enc_broj || '—'}</td>
+                    <td className={`px-4 py-3 ${alertCls}`}>
+                      {ns.km || ns.datum ? (
+                        <>
+                          {ns.km ? `${ns.km.toLocaleString('hr-HR')} km` : ''}
+                          {ns.km && ns.datum ? ' / ' : ''}
+                          {ns.datum ? new Date(`${ns.datum}T00:00:00`).toLocaleDateString('hr-HR') : ''}
+                        </>
+                      ) : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => openEdit(v)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-600"><Pencil className="h-4 w-4" /></button>
+                        <button onClick={() => setDeleteId(v.id)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {items.map((v) => {
@@ -244,6 +340,14 @@ export function VozilaView() {
                   <span className="flex items-center gap-1.5">
                     <Users className="h-3.5 w-3.5" />
                     {v.broj_mjesta} mjesta
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Weight className="h-3.5 w-3.5" />
+                    Nosivost: {v.nosivost_kg ? `${v.nosivost_kg.toLocaleString('hr-HR')} kg` : '—'}
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Weight className="h-3.5 w-3.5" />
+                    Masa: {v.masa_kg ? `${v.masa_kg.toLocaleString('hr-HR')} kg` : '—'}
                   </span>
                 </div>
 
@@ -366,6 +470,18 @@ export function VozilaView() {
               placeholder="2"
             />
           </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Nosivost (kg)">
+              <TextInput type="number" min="0" value={form.nosivost_kg} onChange={(e) => setForm({ ...form, nosivost_kg: e.target.value })} placeholder="1000" />
+            </Field>
+            <Field label="Masa vozila (kg)">
+              <TextInput type="number" min="0" value={form.masa_kg} onChange={(e) => setForm({ ...form, masa_kg: e.target.value })} placeholder="2000" />
+            </Field>
+          </div>
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+            <input type="checkbox" checked={form.u_rasporedu} onChange={(e) => setForm({ ...form, u_rasporedu: e.target.checked })} className="h-4 w-4 rounded border-slate-300" />
+            Prikaži u dnevnom rasporedu
+          </label>
           <Field label="Cijena po kilometru (EUR/km)">
             <TextInput
               type="number"

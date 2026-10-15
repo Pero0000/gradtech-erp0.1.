@@ -4,6 +4,8 @@ import { Dashboard } from '@/components/views/Dashboard';
 import { GradilistaView } from '@/components/views/GradilistaView';
 import { InvestitoriView, ObjektiView } from '@/components/views/RegistryViews';
 import { KooperantiView } from '@/components/views/KooperantiView';
+import { StavkeView } from '@/components/views/StavkeView';
+import { PonudeView } from '@/components/views/PonudeView';
 import { RadniciView } from '@/components/views/RadniciView';
 import { VozilaView } from '@/components/views/VozilaView';
 import { RasporedView } from '@/components/views/RasporedView';
@@ -14,6 +16,7 @@ import { RadniNaloziView } from '@/components/views/RadniNaloziView';
 import { RekapitulacijaView } from '@/components/views/RekapitulacijaView';
 import { ObavijestiView } from '@/components/views/ObavijestiView';
 import { PostavkeView } from '@/components/views/PostavkeView';
+import { AsistentView } from '@/components/views/AsistentView';
 import { loadObavijesti, sendPushNotifications } from '@/lib/obavijesti';
 import { loadPostavke } from '@/lib/postavke';
 import {
@@ -90,6 +93,8 @@ function App() {
           {view === 'investitori' && <InvestitoriView />}
           {view === 'objekti' && <ObjektiView />}
           {view === 'kooperanti' && <KooperantiView />}
+          {view === 'stavke' && <StavkeView />}
+          {view === 'ponude' && <PonudeView />}
           {view === 'radnici' && <RadniciView />}
           {view === 'vozila' && <VozilaView />}
           {view === 'raspored' && <RasporedView />}
@@ -100,6 +105,7 @@ function App() {
           {view === 'rekapitulacija' && <RekapitulacijaView />}
           {view === 'obavijesti' && <ObavijestiView onNavigate={setView} />}
           {view === 'postavke' && <PostavkeView />}
+          {view === 'asistent' && <AsistentView onNavigate={setView} />}
         </div>
       </main>
     </div>

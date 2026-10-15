@@ -17,6 +17,7 @@ import { fetchGradilista, fetchFullRekapitulacija } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Select } from '@/components/ui/Field';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { RekapitulacijaSva } from './RekapitulacijaSva';
 
 const kategorijaLabel: Record<TrosakKategorija, string> = {
   materijal: 'Materijal',
@@ -74,7 +75,7 @@ export function RekapitulacijaView() {
         const g = await fetchGradilista();
         setGradilista(g);
         if (g.length > 0 && !selectedId) {
-          setSelectedId(g[0].id);
+          setSelectedId('all');
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
@@ -85,7 +86,7 @@ export function RekapitulacijaView() {
   }, []);
 
   useEffect(() => {
-    if (!selectedId) return;
+    if (!selectedId || selectedId === 'all') return;
     (async () => {
       setLoading(true);
       setError(null);
@@ -165,6 +166,7 @@ export function RekapitulacijaView() {
         <>
           <div className="mb-6 w-80">
             <Select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
+              <option value="all">Sva gradilišta (pregled)</option>
               {gradilista.map((g) => (
                 <option key={g.id} value={g.id}>
                   {g.naziv}
@@ -173,7 +175,9 @@ export function RekapitulacijaView() {
             </Select>
           </div>
 
-          {selectedGradiliste && (
+          {selectedId === 'all' && <RekapitulacijaSva gradilista={gradilista} onOpen={setSelectedId} />}
+
+          {selectedId !== 'all' && selectedGradiliste && (
             <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center gap-3 mb-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
@@ -192,7 +196,26 @@ export function RekapitulacijaView() {
             </div>
           )}
 
+          {selectedId !== 'all' && (<>
           {/* Summary cards */}
+          {proracun > 0 && (
+            <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-2 flex justify-between text-sm">
+                <span className="font-semibold text-slate-900">Iskorištenost proračuna</span>
+                <span className={ukupniTroskovi > proracun ? 'font-bold text-red-600' : 'font-bold text-slate-700'}>
+                  {Math.round((ukupniTroskovi / proracun) * 100)}%
+                </span>
+              </div>
+              <div className="flex h-4 overflow-hidden rounded-full bg-slate-100">
+                <div className="bg-sky-500" style={{ width: `${Math.min(100, (direktniTroskovi / proracun) * 100)}%` }} title="Direktni troškovi" />
+                <div className={ukupniTroskovi > proracun ? 'bg-red-500' : 'bg-amber-400'} style={{ width: `${Math.max(0, Math.min(100 - (direktniTroskovi / proracun) * 100, (trosakRada / proracun) * 100))}%` }} title="Trošak rada" />
+              </div>
+              <p className="mt-1 flex gap-4 text-xs text-slate-500">
+                <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-sky-500" />Direktni</span>
+                <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-amber-400" />Rad</span>
+              </p>
+            </div>
+          )}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 mb-8">
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center gap-3 mb-2">
@@ -577,6 +600,7 @@ export function RekapitulacijaView() {
               </div>
             </div>
           )}
+          </>)}
         </>
       )}
     </div>

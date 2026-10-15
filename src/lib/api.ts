@@ -2,6 +2,9 @@
 import { nocniInterval } from './postavke';
 import type {
   VoziloDokument,
+  OdsustvoVrsta,
+  RadnikOdsustvo,
+  RadnikPovijest,
   VoziloDokumentVrsta,
   RadnikDokument,
   RadnikDokumentVrsta,
@@ -258,6 +261,40 @@ export async function fetchVoziloDokumenti(voziloId: string): Promise<VoziloDoku
     ...d,
     url: d.putanja ? supabase.storage.from('nalozi-foto').getPublicUrl(d.putanja).data.publicUrl : null,
   }));
+}
+
+export async function fetchRadnikPovijest(radnikId: string): Promise<RadnikPovijest[]> {
+  const { data, error } = await supabase
+    .from('radnici_povijest')
+    .select('*')
+    .eq('radnik_id', radnikId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as RadnikPovijest[];
+}
+
+export async function addRadnikPovijest(rows: { radnik_id: string; polje: string; stara_vrijednost: string | null; nova_vrijednost: string | null }[]) {
+  if (rows.length === 0) return;
+  const { error } = await supabase.from('radnici_povijest').insert(rows);
+  if (error) throw error;
+}
+
+export async function fetchOdsustva(radnikId?: string): Promise<RadnikOdsustvo[]> {
+  let q = supabase.from('radnici_odsustva').select('*').order('datum_od', { ascending: false });
+  if (radnikId) q = q.eq('radnik_id', radnikId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data ?? []) as RadnikOdsustvo[];
+}
+
+export async function addOdsustvo(o: { radnik_id: string; vrsta: OdsustvoVrsta; datum_od: string; datum_do: string; napomena: string | null }) {
+  const { error } = await supabase.from('radnici_odsustva').insert(o);
+  if (error) throw error;
+}
+
+export async function deleteOdsustvo(id: string) {
+  const { error } = await supabase.from('radnici_odsustva').delete().eq('id', id);
+  if (error) throw error;
 }
 
 export async function fetchSviRadnikDokumenti(): Promise<RadnikDokument[]> {
@@ -823,7 +860,7 @@ export async function syncNalogTroskovi(nalogId: string) {
     vrijeme_do: string | null;
     radnik: { ime: string; prezime: string; cijena_sata: number; nocni_dodatak: number | null; teren_dnevnica: number | null } | null;
   };
-  const sati: { radnik_id: string; gradiliste_id: string | null; datum: string; sati: number; napomena: string; nalog_id: string }[] = [];
+  const sati: { radnik_id: string; gradiliste_id: string | null; datum: string; sati: number; napomena: string | null; nalog_id: string }[] = [];
   const dodatni: { gradiliste_id: string | null; kategorija: 'place'; opis: string; iznos: number; datum: string; nalog_id: string }[] = [];
   const round2 = (n: number) => Math.round(n * 100) / 100;
 

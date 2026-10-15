@@ -4,6 +4,23 @@ export interface RadnikBonus {
   iznos: number;
   tip: BonusTip;
 }
+export interface RadnikPovijest {
+  id: string;
+  radnik_id: string;
+  polje: string;
+  stara_vrijednost: string | null;
+  nova_vrijednost: string | null;
+  created_at: string;
+}
+export type OdsustvoVrsta = 'praznik' | 'godisnji' | 'bolovanje';
+export interface RadnikOdsustvo {
+  id: string;
+  radnik_id: string;
+  vrsta: OdsustvoVrsta;
+  datum_od: string;
+  datum_do: string;
+  napomena: string | null;
+}
 export type RadnikDokumentVrsta = 'lijecnicki' | 'atest' | 'zastita_na_radu' | 'osposobljavanje' | 'ostalo';
 export interface RadnikDokument {
   id: string;
@@ -147,6 +164,9 @@ export interface DnevniRasporedRadnik {
                                                                                       godina_proizvodnje: number | null;
                                                                                         broj_mjesta: number;
                                                                                         cijena_km?: number;
+                                                                                        u_rasporedu?: boolean;
+                                                                                        nosivost_kg?: number | null;
+                                                                                        masa_kg?: number | null;
                                                                                         enc_broj?: string | null;
                                                                                         servis_interval_km?: number | null;
                                                                                         servis_interval_mjeseci?: number | null;
@@ -203,6 +223,7 @@ export interface DnevniRasporedRadnik {
                                                                                                                           id: string;
                                                                                                                             gradiliste_id: string | null;
                                                                                                                               kategorija: TrosakKategorija;
+                                                                                                                                opis: string;
                                                                                                                                 kooperant_id?: string | null;
                                                                                                                                 kooperanti?: Pick<Kooperant, 'id' | 'naziv'> | null;
                                                                                                                                   iznos: number;
@@ -217,6 +238,7 @@ export interface DnevniRasporedRadnik {
                                                                                                                                               gradiliste_id: string | null;
                                                                                                                                                 datum: string;
                                                                                                                                                   sati: number;
+                                                                                                                                                    nalog_id?: string | null;
                                                                                                                                                     napomena: string | null;
                                                                                                                                                       created_at: string;
                                                                                                                                                         radnici?: Pick<Radnik, 'id' | 'ime' | 'prezime' | 'uloga' | 'cijena_sata'> | null;

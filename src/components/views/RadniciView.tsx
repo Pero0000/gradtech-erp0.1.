@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react';
-import { Users, Plus, Pencil, Trash2, Phone, Mail, HardHat, Euro } from 'lucide-react';
-import type { Radnik, RadnikStatus, BonusTip } from '@/types';
+import { useState, useEffect, useMemo } from 'react';
+import { Users, Plus, Pencil, Trash2, Phone, Mail, HardHat, ArrowDown, ArrowUp, ArrowUpDown, Eye, EyeOff, History } from 'lucide-react';
+import type { Radnik, RadnikStatus, BonusTip, RadnikPovijest } from '@/types';
 import { RadnikDokumenti } from '@/components/views/RadnikDokumenti';
-import { fetchRadnici, createRadnik, updateRadnik, deleteRadnik } from '@/lib/api';
+import { fetchRadnici, createRadnik, updateRadnik, deleteRadnik, fetchRadnikPovijest, addRadnikPovijest } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Field, TextInput, Select } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ExportMenu } from '@/components/ui/ExportMenu';
 
 const statusBadge: Record<RadnikStatus, { variant: 'green' | 'gray' | 'orange'; label: string }> = {
   aktivan: { variant: 'green', label: 'Aktivan' },
@@ -43,8 +44,30 @@ const emptyForm = {
   bonusi: [emptyBonus(), emptyBonus(), emptyBonus()],
 };
 
+type SortKey = 'ime' | 'satnica' | 'nocna' | 'teren' | 'praznik' | 'godisnji' | 'bolovanje' | 'put';
+
+const eur = (v: number | null | undefined) => (v ? `${v.toLocaleString('hr-HR', { minimumFractionDigits: 2 })} €` : '—');
+
+const polja: Record<string, string> = {
+  cijena_sata: 'Satnica (€/h)',
+  nocni_dodatak: 'Noćni dodatak (%)',
+  teren_dnevnica: 'Teren dnevnica (€)',
+  cijena_praznik: 'Praznik (€/dan)',
+  cijena_godisnji: 'Godišnji (€/dan)',
+  cijena_bolovanje: 'Bolovanje (€/dan)',
+  cijena_put_sat: 'Plaćeni put (€/h)',
+  bonusi: 'Bonusi',
+};
+
+const bonusText = (b: Radnik['bonusi'] | undefined) =>
+  (b ?? []).filter((x) => x.naziv || x.iznos).map((x) => `${x.naziv || '?'}: ${x.iznos} € (${x.tip})`).join('; ');
+
 export function RadniciView() {
   const [items, setItems] = useState<Radnik[]>([]);
+  const [prikaz, setPrikaz] = useState(() => localStorage.getItem('tm_prikaz_cijene_radnika') !== '0');
+  const [povijest, setPovijest] = useState<RadnikPovijest[]>([]);
+  const [sortKey, setSortKey] = useState<SortKey>('ime');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -52,6 +75,16 @@ export function RadniciView() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  const togglePrikaz = () => {
+    const next = !prikaz;
+    setPrikaz(next);
+    localStorage.setItem('tm_prikaz_cijene_radnika', next ? '1' : '0');
+  };
+
+  const loadPovijest = (id: string) => {
+    fetchRadnikPovijest(id).then(setPovijest).catch(() => setPovijest([]));
+  };
 
   const load = async () => {
     setLoading(true);
@@ -77,6 +110,7 @@ export function RadniciView() {
 
   const openEdit = (r: Radnik) => {
     setEditing(r);
+    loadPovijest(r.id);
     setForm({
       ime: r.ime,
       prezime: r.prezime,
@@ -121,6 +155,16 @@ export function RadniciView() {
       };
       if (editing) {
         await updateRadnik(editing.id, payload);
+        const before = editing as unknown as Record<string, number | null>;
+        const after = payload as unknown as Record<string, number>;
+        const rows = Object.keys(polja)
+          .filter((k) => k !== 'bonusi' && Number(before[k] ?? 0) !== Number(after[k] ?? 0))
+          .map((k) => ({ radnik_id: editing.id, polje: polja[k], stara_vrijednost: String(before[k] ?? 0), nova_vrijednost: String(after[k]) }));
+        const oldB = bonusText(editing.bonusi);
+        const newB = bonusText(payload.bonusi);
+        if (oldB !== newB) rows.push({ radnik_id: editing.id, polje: polja.bonusi, stara_vrijednost: oldB || '—', nova_vrijednost: newB || '—' });
+        // Povijest je opcionalna: tablica postoji tek nakon migracije
+        await addRadnikPovijest(rows).catch(() => undefined);
         setModalOpen(false);
       } else {
         // Nakon kreiranja ostaje otvoreno da se odmah mogu dodati dokumenti
@@ -145,6 +189,44 @@ export function RadniciView() {
     }
   };
 
+  const sorted = useMemo(() => {
+    const val = (r: Radnik) => {
+      switch (sortKey) {
+        case 'ime': return `${r.prezime} ${r.ime}`.toLowerCase();
+        case 'satnica': return r.cijena_sata ?? 0;
+        case 'nocna': return r.nocni_dodatak ?? 0;
+        case 'teren': return r.teren_dnevnica ?? 0;
+        case 'praznik': return r.cijena_praznik ?? 0;
+        case 'godisnji': return r.cijena_godisnji ?? 0;
+        case 'bolovanje': return r.cijena_bolovanje ?? 0;
+        case 'put': return r.cijena_put_sat ?? 0;
+      }
+    };
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...items].sort((a, b) => {
+      const x = val(a);
+      const y = val(b);
+      return (x < y ? -1 : x > y ? 1 : 0) * dir;
+    });
+  }, [items, sortKey, sortDir]);
+
+  const toggleSort = (k: SortKey) => {
+    if (sortKey === k) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    else {
+      setSortKey(k);
+      setSortDir(k === 'ime' ? 'asc' : 'desc');
+    }
+  };
+
+  const sortTh = (k: SortKey, label: string, align: 'left' | 'right' = 'right') => (
+    <th className={`px-3 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 text-${align}`}>
+      <button type="button" onClick={() => toggleSort(k)} className={`inline-flex items-center gap-1 hover:text-sky-600 ${sortKey === k ? 'text-sky-600' : ''}`}>
+        {label}
+        {sortKey === k ? (sortDir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-40" />}
+      </button>
+    </th>
+  );
+
   if (loading) {
     return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
   }
@@ -156,13 +238,34 @@ export function RadniciView() {
           <h1 className="text-2xl font-bold text-slate-900">Radnici</h1>
           <p className="text-sm text-slate-500 mt-1">Upravljajte radnicima i njihovim ulogama</p>
         </div>
-        <button
-          onClick={openCreate}
-          className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700 transition-colors shadow-sm"
-        >
-          <Plus className="h-4 w-4" />
-          Novi radnik
-        </button>
+        <div className="flex items-center gap-2">
+          <ExportMenu
+            disabled={sorted.length === 0}
+            build={() => ({
+              file: 'Radnici',
+              title: 'Radnici',
+              rows: sorted,
+              columns: [
+                { header: 'Prezime', get: (r: Radnik) => r.prezime },
+                { header: 'Ime', get: (r: Radnik) => r.ime },
+                { header: 'Uloga', get: (r: Radnik) => r.uloga },
+                { header: 'Status', get: (r: Radnik) => statusBadge[r.status].label },
+                { header: 'Telefon', get: (r: Radnik) => r.telefon ?? '' },
+                { header: 'Email', get: (r: Radnik) => r.email ?? '' },
+                { header: 'Cijena sata', kind: 'eur', get: (r: Radnik) => r.cijena_sata },
+                { header: 'Noćni dodatak', kind: 'eur', get: (r: Radnik) => r.nocni_dodatak ?? 0 },
+                { header: 'Teren dnevnica', kind: 'eur', get: (r: Radnik) => r.teren_dnevnica ?? 0 },
+              ],
+            })}
+          />
+          <button
+            onClick={openCreate}
+            className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700 transition-colors shadow-sm"
+          >
+            <Plus className="h-4 w-4" />
+            Novi radnik
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -187,20 +290,38 @@ export function RadniciView() {
           }
         />
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <>
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <button type="button" onClick={togglePrikaz} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50">
+            {prikaz ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            {prikaz ? 'Sakrij cijene' : 'Prikaži cijene'}
+          </button>
+          <span className="text-xs text-slate-400">Ugovorene cijene: satnica €/h, noćna %, teren/praznik/godišnji/bolovanje €/dan, put €/h</span>
+        </div>
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Radnik</th>
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Uloga</th>
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Kontakt</th>
-                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Satnica</th>
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Status</th>
-                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Akcije</th>
+                {sortTh('ime', 'Radnik', 'left')}
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Uloga</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Kontakt</th>
+                {prikaz && (
+                  <>
+                    {sortTh('satnica', 'Satnica')}
+                    {sortTh('nocna', 'Noćna')}
+                    {sortTh('teren', 'Teren')}
+                    {sortTh('praznik', 'Praznik')}
+                    {sortTh('godisnji', 'Godišnji')}
+                    {sortTh('bolovanje', 'Bolovanje')}
+                    {sortTh('put', 'Put')}
+                  </>
+                )}
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Status</th>
+                <th className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Akcije</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {items.map((r) => {
+              {sorted.map((r) => {
                 const sb = statusBadge[r.status];
                 return (
                   <tr key={r.id} className="group hover:bg-slate-50 transition-colors">
@@ -231,16 +352,17 @@ export function RadniciView() {
                         )}
                       </div>
                     </td>
-                    <td className="px-5 py-3.5 text-right">
-                      {r.cijena_sata > 0 ? (
-                        <span className="inline-flex items-center gap-1 text-sm font-medium text-slate-700">
-                          <Euro className="h-3.5 w-3.5 text-slate-400" />
-                          {r.cijena_sata.toLocaleString('hr-HR', { minimumFractionDigits: 2 })} €/h
-                        </span>
-                      ) : (
-                        <span className="text-xs text-slate-300">—</span>
-                      )}
-                    </td>
+                    {prikaz && (
+                      <>
+                        <td className="px-3 py-3.5 text-right text-sm font-semibold text-slate-800">{r.cijena_sata > 0 ? `${eur(r.cijena_sata)}/h` : '—'}</td>
+                        <td className="px-3 py-3.5 text-right text-sm text-indigo-700">{r.nocni_dodatak ? `${r.nocni_dodatak} %` : '—'}</td>
+                        <td className="px-3 py-3.5 text-right text-sm text-amber-700">{eur(r.teren_dnevnica)}</td>
+                        <td className="px-3 py-3.5 text-right text-sm text-slate-600">{eur(r.cijena_praznik)}</td>
+                        <td className="px-3 py-3.5 text-right text-sm text-emerald-700">{eur(r.cijena_godisnji)}</td>
+                        <td className="px-3 py-3.5 text-right text-sm text-red-600">{eur(r.cijena_bolovanje)}</td>
+                        <td className="px-3 py-3.5 text-right text-sm text-slate-600">{eur(r.cijena_put_sat)}</td>
+                      </>
+                    )}
                     <td className="px-5 py-3.5">
                       <Badge variant={sb.variant}>{sb.label}</Badge>
                     </td>
@@ -266,6 +388,7 @@ export function RadniciView() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       <Modal
@@ -401,7 +524,25 @@ export function RadniciView() {
             </div>
           </div>
           {editing ? (
-            <RadnikDokumenti radnikId={editing.id} />
+            <>
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-800"><History className="h-4 w-4" /> Povijest promjena plaće</p>
+                {povijest.length === 0 ? (
+                  <p className="text-xs text-slate-400">Još nema zabilježenih promjena (bilježe se od sada pri svakom spremanju).</p>
+                ) : (
+                  <ul className="max-h-48 divide-y divide-slate-100 overflow-y-auto text-xs">
+                    {povijest.map((p) => (
+                      <li key={p.id} className="flex flex-wrap items-center gap-x-2 py-1.5">
+                        <span className="w-20 text-slate-400">{new Date(p.created_at).toLocaleDateString('hr-HR')}</span>
+                        <span className="font-medium text-slate-700">{p.polje}</span>
+                        <span className="text-slate-500">{p.stara_vrijednost} → <b className="text-slate-800">{p.nova_vrijednost}</b></span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <RadnikDokumenti radnikId={editing.id} />
+            </>
           ) : (
             <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Dokumenti i rokovi mogu se dodati nakon prvog spremanja radnika.</p>
           )}

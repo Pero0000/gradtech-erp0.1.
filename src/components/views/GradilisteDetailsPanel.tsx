@@ -44,6 +44,7 @@ import {
 } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { GradilisteMaterijalDokumenti } from '@/components/views/GradilisteMaterijalDokumenti';
+import { GradilisteTroskovnik } from '@/components/views/GradilisteTroskovnik';
 import { Modal } from '@/components/ui/Modal';
 import { Field, Select, TextInput, Textarea } from '@/components/ui/Field';
 
@@ -402,6 +403,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
       kategorija: cost?.kategorija ?? 'materijal',
       kooperant_id: cost?.kooperant_id ?? '',
       novi_kooperant: '',
+      opis: cost?.opis ?? '',
       iznos: cost ? String(cost.iznos) : '',
       datum: cost?.datum ?? new Date().toISOString().slice(0, 10),
     });
@@ -795,6 +797,8 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                 </button>
               </div>
             </Section>
+
+            <GradilisteTroskovnik gradilisteId={gradiliste.id} naziv={gradiliste.naziv} />
 
             <GradilisteMaterijalDokumenti gradilisteId={gradiliste.id} />
 

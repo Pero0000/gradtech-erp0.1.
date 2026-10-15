@@ -10,7 +10,10 @@ import {
   FileBarChart,
   FileText,
   Handshake,
+  ListChecks,
+  FileSignature,
   Bell,
+  Sparkles,
   Settings,
 } from 'lucide-react';
 
@@ -20,6 +23,8 @@ export type View =
   | 'investitori'
   | 'objekti'
   | 'kooperanti'
+  | 'stavke'
+  | 'ponude'
   | 'radnici'
   | 'vozila'
   | 'raspored'
@@ -29,6 +34,7 @@ export type View =
   | 'radni_nalozi'
   | 'rekapitulacija'
   | 'obavijesti'
+  | 'asistent'
   | 'postavke';
 
 interface SidebarProps {
@@ -51,7 +57,7 @@ const navSections: {
 }[] = [
   {
     title: 'Pregled',
-    items: [{ view: 'dashboard', label: 'Nadzorna ploča', icon: LayoutDashboard }, { view: 'obavijesti', label: 'Obavijesti', icon: Bell }],
+    items: [{ view: 'dashboard', label: 'Nadzorna ploča', icon: LayoutDashboard }, { view: 'obavijesti', label: 'Obavijesti', icon: Bell }, { view: 'asistent', label: 'AI asistent', icon: Sparkles }],
   },
   {
     title: 'Resursi',
@@ -67,11 +73,13 @@ const navSections: {
       { view: 'investitori', label: 'Investitori', icon: Users },
       { view: 'objekti', label: 'Objekti', icon: Building2 },
       { view: 'kooperanti', label: 'Kooperanti', icon: Handshake },
+      { view: 'stavke', label: 'Stavke', icon: ListChecks },
     ],
   },
   {
     title: 'Operacije',
     items: [
+      { view: 'ponude', label: 'Ponude', icon: FileSignature },
       { view: 'raspored', label: 'Dnevni raspored', icon: CalendarDays },
       { view: 'radni_nalozi', label: 'Radni nalozi', icon: ClipboardList },
     ],

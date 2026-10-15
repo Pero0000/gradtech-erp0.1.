@@ -37,7 +37,7 @@ import {
 type DragPayload =
   | { type: 'gradiliste'; id: string; assignmentId?: string }
   | { type: 'radnik'; id: string; assignmentId?: string }
-  | { type: 'ostalo'; id: string };
+  | { type: 'ostalo'; id: string; assignmentId?: string };
 
 type SortMode = 'manual' | 'datum_pocetka' | 'datum_zavrsetka';
 
@@ -243,7 +243,7 @@ export function RasporedView() {
         if (cancelled) return;
         setGradilista(nextGradilista);
         setRadnici(nextRadnici);
-        setVozila(nextVozila);
+        setVozila(nextVozila.filter((v) => v.u_rasporedu !== false));
         setRokovi(nextRokovi);
       })
       .catch((e: unknown) => {

@@ -113,7 +113,7 @@ export function NalogIzvrsenje({
   onChange,
   slotId,
 }: {
-  nalog: Pick<RadniNalog, 'id' | 'gradiliste_id'>;
+  nalog: Pick<RadniNalog, 'id' | 'gradiliste_id'> & Partial<Pick<RadniNalog, 'mobile_status'>>;
   radnikIds?: string[];
   hideZadaci?: boolean;
   slotId?: string;
@@ -222,6 +222,10 @@ export function NalogIzvrsenje({
 
   const toggleZavrsen = (value: boolean) => {
     if (value) {
+      if (nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku') {
+        setError('Djelatnici još rade na nalogu. Zaključivanje je moguće tek nakon što poslovođa preda završni izvještaj.');
+        return;
+      }
       const radnici = radnikIds ? vremena.filter((v) => radnikIds.includes(v.radnik_id)) : vremena;
       if (radnici.some((v) => !v.vrijeme_od || !v.vrijeme_do)) {
         setError('Nalog se ne može zaključiti dok nije upisan završetak rada (Do) za sve radnike.');
@@ -353,9 +357,9 @@ export function NalogIzvrsenje({
             <button onClick={() => toggleZavrsen(false)} className="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100">Ponovno otvori</button>
           </div>
         ) : (
-          <button onClick={() => toggleZavrsen(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">
+          <button onClick={() => toggleZavrsen(true)} disabled={nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku'} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
             <Check className="h-4 w-4" />
-            Zaključi radni nalog
+            {nalog.mobile_status === 'predan' ? 'Odobri i zaključi nalog' : nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku' ? 'Čeka izvještaj djelatnika' : 'Zaključi radni nalog'}
           </button>
         ),
         slot,

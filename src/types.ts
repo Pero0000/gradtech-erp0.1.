@@ -52,6 +52,48 @@ export type GradilisteRegija = 'dalmacija' | 'istra_kvarner' | 'slavonija' | 'za
 export type RadnikStatus = 'aktivan' | 'neaktivan' | 'bolovanje';
 export type VoziloStatus = 'slobodno' | 'zauzeto' | 'servis';
 export type VoziloTip = 'teretno' | 'dostavno' | 'radno' | 'putnicko';
+export type OpremaKategorija = 'alat' | 'stroj';
+export type OpremaStatus = 'slobodno' | 'na_gradilistu' | 'servis' | 'neaktivno';
+export type OpremaStanje = 'novo' | 'dobro' | 'osteceno';
+export type OpremaDokumentVrsta = 'servis' | 'atest' | 'dokument' | 'ostalo';
+
+export interface Oprema {
+  id: string;
+  kategorija: OpremaKategorija;
+  naziv: string;
+  marka: string | null;
+  model: string | null;
+  inventarski_broj: string | null;
+  serijski_broj: string | null;
+  status: OpremaStatus;
+  stanje: OpremaStanje;
+  gradiliste_id: string | null;
+  kolicina: number;
+  datum_nabave: string | null;
+  nabavna_vrijednost: number;
+  radni_sati: number;
+  servisni_interval_sati: number | null;
+  servis_upozorenje_sati: number;
+  napomena: string | null;
+  created_at: string;
+  updated_at: string;
+  gradilista?: Pick<Gradiliste, 'id' | 'naziv'> | null;
+}
+
+export interface OpremaDokument {
+  id: string;
+  oprema_id: string;
+  vrsta: OpremaDokumentVrsta;
+  naziv: string;
+  putanja: string | null;
+  datum_od: string | null;
+  datum_do: string | null;
+  radni_sati: number | null;
+  iznos: number | null;
+  napomena: string | null;
+  created_at: string;
+  url?: string | null;
+}
 
 export interface Investitor {
   id: string;
@@ -97,6 +139,8 @@ export interface DnevniRasporedGradiliste {
   gradiliste_id: string | null;
   tekst?: string | null;
   nalog_id?: string | null;
+  iz_ostalo?: boolean;
+  gradiliste_potvrdeno?: boolean;
   vrijeme: string;
 }
 
@@ -117,8 +161,8 @@ export interface DnevniRasporedRadnik {
                     export interface Gradiliste {
                       id: string;
                         naziv: string;
-                          adresa: string | null;
-                            regija: GradilisteRegija | null;
+                      adresa: string | null;
+                    regija: GradilisteRegija | null;
                             objekt_id: string | null;
                               voditelj_gradilista: string | null;
                                 ugovorena_vrijednost: number | null;
@@ -247,6 +291,7 @@ export interface DnevniRasporedRadnik {
 
                                                                                                                                                           export type NalogStatus = 'otvoren' | 'u_tijeku' | 'zavrsen' | 'otkazan';
                                                                                                                                                           export type NalogPrioritet = 'niski' | 'srednji' | 'visoki' | 'hitno';
+                                                                                                                                                          export type MobileNalogStatus = 'nije_poslan' | 'dodijeljen' | 'u_tijeku' | 'predan' | 'odobren';
 
                                                                                                                                                           export interface RadniNalog {
                                                                                                                                                             id: string;
@@ -258,6 +303,7 @@ export interface DnevniRasporedRadnik {
                                                                                                                                                                         prioritet: NalogPrioritet;
                                                                                                                                                                           datum_kreiranja: string;
   zakljucen_at?: string | null;
+  mobile_status?: MobileNalogStatus;
   teren?: boolean;
   poslovodja_id?: string | null;
                                                                                                                                                                             rok: string | null;
@@ -308,6 +354,7 @@ export type FakturaStatus = 'izdana' | 'placena' | 'nep placena';
                                                                                                                                                                                                                       }
 
                                                                                                                                                                                                                       export type UgovoreniRadStatus = 'planirano' | 'u_tijeku' | 'zavrseno';
+                                                                                                                                                                                                                      export type UgovoreniRadVrsta = 'ugovoreni' | 'vtr';
 
                                                                                                                                                                                                                       export interface UgovoreniRad {
                                                                                                                                                                                                                         id: string;
@@ -317,6 +364,10 @@ export type FakturaStatus = 'izdana' | 'placena' | 'nep placena';
                                                                                                                                                                                                                                 ugovoreni_iznos: number;
                                                                                                                                                                                                                                   ostvareni_iznos: number;
                                                                                                                                                                                                                                     status: UgovoreniRadStatus;
+                                                                                                                                                                                                                                    vrsta?: UgovoreniRadVrsta;
+                                                                                                                                                                                                                                    ponuda_id?: string | null;
+                                                                                                                                                                                                                                    dokument_putanja?: string | null;
+                                                                                                                                                                                                                                    dokument_naziv?: string | null;
                                                                                                                                                                                                                                       created_at: string;
                                                                                                                                                                                                                                         gradilista?: Pick<Gradiliste, 'id' | 'naziv'> | null;
                                                                                                                                                                                                                                         }

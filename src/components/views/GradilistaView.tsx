@@ -167,7 +167,6 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<GradilisteCategory>('aktivna');
   const [selectedGradilisteId, setSelectedGradilisteId] = useState<string | null>(null);
-  const [selectedColumnIndex, setSelectedColumnIndex] = useState(0);
   const [targetColumn, setTargetColumn] = useState('');
   const [investitori, setInvestitori] = useState<Investitor[]>([]);
   const [objekti, setObjekti] = useState<Objekt[]>([]);
@@ -524,33 +523,13 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
           }
         />
       ) : (
-        <div className={`grid items-start gap-5 ${selectedGradiliste ? 'md:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)]' : 'grid-cols-1'}`}>
+        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
           <div className="min-w-0">
-          {selectedGradiliste && (
-            <div className="mb-4 space-y-1.5" role="group" aria-label="Vrsta gradilišta">
-              {gradilisteColumnLabels.map((label, index) => {
-                const count = (columnIds[index] ?? []).filter((id) => visibleItems.some((item) => item.id === id)).length;
-                const active = selectedColumnIndex === index;
-                return (
-                  <button
-                    key={label}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setSelectedColumnIndex(index)}
-                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs font-semibold transition-colors ${active ? 'bg-sky-100 text-sky-900' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
-                  >
-                    <span>{label}</span>
-                    <span className={`rounded-full px-2 py-0.5 tabular-nums ${active ? 'bg-white/80 text-sky-800' : 'bg-slate-100 text-slate-500'}`}>{count}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
           {visibleItems.length === 0 && (
             <p className="mb-3 text-sm text-slate-500">Nema gradilišta u kategoriji {gradilisteCategories.find((category) => category.key === activeCategory)?.label.toLocaleLowerCase()}.</p>
           )}
-          <div className={`grid items-start gap-4 ${selectedGradiliste ? 'grid-cols-1' : 'md:grid-cols-3'}`}>
-          {(selectedGradiliste ? [selectedColumnIndex] : [0, 1, 2]).map((columnIndex) => {
+          <div className="grid items-start gap-4 md:grid-cols-3">
+          {[0, 1, 2].map((columnIndex) => {
             const column = columnIds[columnIndex] ?? [];
             const columnItems = column
               .map((id) => visibleItems.find((item) => item.id === id))
@@ -630,10 +609,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                         setDropTargetId(g.id);
                       }}
                       onDrop={(event) => handleDrop(event, columnIndex, g.id)}
-                      onClick={() => {
-                        setSelectedColumnIndex(columnIndex);
-                        setSelectedGradilisteId(g.id);
-                      }}
+                      onClick={() => setSelectedGradilisteId(g.id)}
                       className={`group relative cursor-grab rounded-xl border bg-white p-3 shadow-sm transition-all active:cursor-grabbing hover:shadow-md ${selectedGradilisteId === g.id ? 'border-sky-500 ring-1 ring-sky-200' : 'border-slate-200'} ${draggedId === g.id ? 'opacity-50' : ''} ${dropTargetId === g.id ? 'ring-2 ring-sky-400' : ''}`}
                     >
                       <div className="mb-2 flex min-w-0 items-center gap-2">
@@ -762,6 +738,11 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
               onRokoviChange={() => void loadRokovi()}
               onOpenNalog={onOpenNalog}
             />
+          )}
+          {!selectedGradiliste && (
+            <div className="hidden min-h-72 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-sm text-slate-400 lg:flex">
+              Odaberite gradilište za prikaz detalja.
+            </div>
           )}
         </div>
       )}

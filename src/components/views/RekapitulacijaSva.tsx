@@ -36,12 +36,23 @@ interface Red {
   placeno: number;
   ugovoreno: number;
   sati: number;
+  radnoVrijeme: RadnoVrijeme[];
   kategorije: Partial<Record<TrosakKategorija, number>>;
 }
 
 type SortKey = 'naziv' | 'proracun' | 'troskovi' | 'razlika' | 'fakture' | 'ugovoreno';
 
-export function RekapitulacijaSva({ gradilista, onOpen }: { gradilista: Gradiliste[]; onOpen: (id: string) => void }) {
+export function RekapitulacijaSva({
+  gradilista,
+  onOpen,
+  satnica,
+  nettoPoRadnicima,
+}: {
+  gradilista: Gradiliste[];
+  onOpen: (id: string) => void;
+  satnica: number;
+  nettoPoRadnicima: boolean;
+}) {
   const [rows, setRows] = useState<Red[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,16 +72,16 @@ export function RekapitulacijaSva({ gradilista, onOpen }: { gradilista: Gradilis
           const fakture = d.fakture as Faktura[];
           const ugovoreni = d.ugovoreniRadovi as UgovoreniRad[];
           const direktni = troskovi.reduce((s, t) => s + t.iznos, 0);
-          const rad = rv.reduce((s, r) => s + r.sati * (r.radnici?.cijena_sata ?? 0), 0);
           const kategorije: Partial<Record<TrosakKategorija, number>> = {};
           troskovi.forEach((t) => { kategorije[t.kategorija] = (kategorije[t.kategorija] ?? 0) + t.iznos; });
           const proracun = g.proracun ?? 0;
           return {
-            g, proracun, direktni, rad, troskovi: direktni + rad, razlika: proracun - direktni - rad,
+            g, proracun, direktni, rad: 0, troskovi: direktni, razlika: proracun - direktni,
             fakture: fakture.reduce((s, f) => s + f.iznos, 0),
             placeno: fakture.filter((f) => f.status === 'placena').reduce((s, f) => s + f.iznos, 0),
             ugovoreno: ugovoreni.reduce((s, u) => s + u.ugovoreni_iznos, 0),
             sati: rv.reduce((s, r) => s + r.sati, 0),
+            radnoVrijeme: rv,
             kategorije,
           };
         }));
@@ -87,11 +98,17 @@ export function RekapitulacijaSva({ gradilista, onOpen }: { gradilista: Gradilis
   const visible = useMemo(() => {
     const list = rows.filter((r) => !status || r.g.status === status);
     const dir = sortDir === 'asc' ? 1 : -1;
-    return [...list].sort((a, b) => {
+    return list.map((row) => {
+      const rad = row.radnoVrijeme.reduce((sum, item) => {
+        const rate = nettoPoRadnicima ? item.radnici?.cijena_sata ?? satnica : satnica;
+        return sum + item.sati * rate;
+      }, 0);
+      return { ...row, rad, troskovi: row.direktni + rad, razlika: row.proracun - row.direktni - rad };
+    }).sort((a, b) => {
       if (sortKey === 'naziv') return a.g.naziv.localeCompare(b.g.naziv, 'hr') * dir;
       return (a[sortKey] - b[sortKey]) * dir;
     });
-  }, [rows, status, sortKey, sortDir]);
+  }, [rows, status, sortKey, sortDir, satnica, nettoPoRadnicima]);
 
   const tot = useMemo(() => visible.reduce((a, r) => ({
     proracun: a.proracun + r.proracun, troskovi: a.troskovi + r.troskovi, rad: a.rad + r.rad, direktni: a.direktni + r.direktni,

@@ -58,6 +58,11 @@ function daysUntil(d: string): number {
 }
 
 export function RekapitulacijaView() {
+  const [satnica, setSatnica] = useState(() => {
+    const saved = Number(localStorage.getItem('tm_univerzalna_satnica'));
+    return saved > 0 ? saved : 18;
+  });
+  const [nettoPoRadnicima, setNettoPoRadnicima] = useState(() => localStorage.getItem('tm_netto_po_radnicima') === '1');
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [troskovi, setTroskovi] = useState<Trosak[]>([]);
@@ -111,7 +116,7 @@ export function RekapitulacijaView() {
   // Financial calculations
   const direktniTroskovi = troskovi.reduce((sum, t) => sum + t.iznos, 0);
   const trosakRada = radnoVrijeme.reduce((sum, rv) => {
-    const cijena = rv.radnici?.cijena_sata ?? 0;
+    const cijena = nettoPoRadnicima ? rv.radnici?.cijena_sata ?? satnica : satnica;
     return sum + rv.sati * cijena;
   }, 0);
   const ukupniTroskovi = direktniTroskovi + trosakRada;
@@ -124,15 +129,24 @@ export function RekapitulacijaView() {
     return acc;
   }, {});
 
-  const satiPoRadniku = radnoVrijeme.reduce<Record<string, { ime: string; sati: number; trosak: number }>>((acc, rv) => {
+  const satiPoRadniku = radnoVrijeme.reduce<Record<string, { ime: string; sati: number; trosak: number; satnica: number }>>((acc, rv) => {
     const key = rv.radnik_id;
     const ime = rv.radnici ? `${rv.radnici.ime} ${rv.radnici.prezime}` : 'Nepoznato';
-    const cijena = rv.radnici?.cijena_sata ?? 0;
-    if (!acc[key]) acc[key] = { ime, sati: 0, trosak: 0 };
+    const cijena = nettoPoRadnicima ? rv.radnici?.cijena_sata ?? satnica : satnica;
+    if (!acc[key]) acc[key] = { ime, sati: 0, trosak: 0, satnica: cijena };
     acc[key].sati += rv.sati;
     acc[key].trosak += rv.sati * cijena;
     return acc;
   }, {});
+  const setUniversalRate = (value: number) => {
+    const next = Math.max(0, value);
+    setSatnica(next);
+    localStorage.setItem('tm_univerzalna_satnica', String(next));
+  };
+  const setNettoMode = (value: boolean) => {
+    setNettoPoRadnicima(value);
+    localStorage.setItem('tm_netto_po_radnicima', value ? '1' : '0');
+  };
 
   const ukupnoFakture = fakture.reduce((sum, f) => sum + f.iznos, 0);
   const placenoFakture = fakture.filter((f) => f.status === 'placena').reduce((sum, f) => sum + f.iznos, 0);
@@ -175,7 +189,38 @@ export function RekapitulacijaView() {
             </Select>
           </div>
 
-          {selectedId === 'all' && <RekapitulacijaSva gradilista={gradilista} onOpen={setSelectedId} />}
+          <div className="mb-5 flex flex-wrap items-center gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+            <label className="inline-flex items-center gap-2">
+              Univerzalna satnica
+              <input
+                type="number"
+                min={0}
+                step="0.5"
+                value={satnica}
+                onChange={(event) => setUniversalRate(Number(event.target.value))}
+                className="w-20 rounded border border-slate-300 px-2 py-1"
+              />
+              €/h
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={nettoPoRadnicima}
+                onChange={(event) => setNettoMode(event.target.checked)}
+                className="h-4 w-4 accent-sky-600"
+              />
+              Netto po radnicima
+            </label>
+          </div>
+
+          {selectedId === 'all' && (
+            <RekapitulacijaSva
+              gradilista={gradilista}
+              onOpen={setSelectedId}
+              satnica={satnica}
+              nettoPoRadnicima={nettoPoRadnicima}
+            />
+          )}
 
           {selectedId !== 'all' && selectedGradiliste && (
             <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -447,7 +492,7 @@ export function RekapitulacijaView() {
                       <div key={id} className="flex items-center justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium text-slate-700">{data.ime}</p>
-                          <p className="text-xs text-slate-400">{data.sati.toFixed(1)}h</p>
+                          <p className="text-xs text-slate-400">{data.sati.toFixed(1)}h × {data.satnica.toLocaleString('hr-HR')} €/h</p>
                         </div>
                         <span className="text-sm font-semibold text-slate-900 whitespace-nowrap">
                           {data.trosak.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}

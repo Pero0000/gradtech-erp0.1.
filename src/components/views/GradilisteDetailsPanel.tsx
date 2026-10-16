@@ -10,6 +10,8 @@ import {
   Save,
   Trash2,
   X,
+  ExternalLink,
+  FolderOpen,
 } from 'lucide-react';
 import type {
   Faktura,
@@ -38,15 +40,21 @@ import {
   fetchKooperanti,
   deleteTrosak,
   fetchFullRekapitulacija,
+  createUgovoreniRad,
+  deleteUgovoreniRad,
+  deleteUgovoreniRadDokument,
+  uploadUgovoreniRadDokument,
   updateFaktura,
   updateGradiliste,
   updateTrosak,
+  getPrivateFileUrl,
 } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { GradilisteMaterijalDokumenti } from '@/components/views/GradilisteMaterijalDokumenti';
 import { GradilisteTroskovnik } from '@/components/views/GradilisteTroskovnik';
 import { Modal } from '@/components/ui/Modal';
 import { Field, Select, TextInput, Textarea } from '@/components/ui/Field';
+import { fetchPonude, fetchSvePonudeStavke, ponudaBroj, ponudaUkupno, updatePonuda, type Ponuda, type PonudaStavka } from '@/lib/ponude';
 
 interface GradilisteDetailsPanelProps {
   gradiliste: Gradiliste;
@@ -103,17 +111,22 @@ function Section({ title, icon, children, action }: { title: string; icon: React
 
 export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilisteUpdate, onRokoviChange, onOpenNalog }: GradilisteDetailsPanelProps) {
   const [details, setDetails] = useState<GradilisteDetails | null>(null);
+  const [vtrDocumentUrls, setVtrDocumentUrls] = useState<Record<string, string>>({});
   const [openCostGroups, setOpenCostGroups] = useState<Set<string>>(new Set());
   const [satnica, setSatnicaState] = useState<number>(() => {
     const saved = Number(localStorage.getItem('tm_univerzalna_satnica'));
     return saved > 0 ? saved : 18;
   });
-  const [showWorkers, setShowWorkers] = useState(false);
+  const [showWorkers, setShowWorkersState] = useState(() => localStorage.getItem('tm_netto_po_radnicima') === '1');
   const [showTeren, setShowTerenState] = useState(() => localStorage.getItem('tm_prikaz_teren') !== '0');
   const [showNight, setShowNightState] = useState(() => localStorage.getItem('tm_prikaz_nocna') !== '0');
   const setSatnica = (value: number) => {
     setSatnicaState(value);
     localStorage.setItem('tm_univerzalna_satnica', String(value));
+  };
+  const setShowWorkers = (value: boolean) => {
+    setShowWorkersState(value);
+    localStorage.setItem('tm_netto_po_radnicima', value ? '1' : '0');
   };
   const setShowTeren = (value: boolean) => {
     setShowTerenState(value);
@@ -130,11 +143,21 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const [financialForm, setFinancialForm] = useState({
     ugovorena_vrijednost: String(gradiliste.ugovorena_vrijednost ?? 0),
     proracun: String(gradiliste.proracun ?? 0),
-    predvidena_marza: String(gradiliste.predvidena_marza ?? 0),
+    predvidena_marza: '30',
   });
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Faktura | null>(null);
   const [savingInvoice, setSavingInvoice] = useState(false);
+  const [vtrModalOpen, setVtrModalOpen] = useState(false);
+  const [savingVtr, setSavingVtr] = useState(false);
+  const [loadingVtrOffers, setLoadingVtrOffers] = useState(false);
+  const [vtrOffers, setVtrOffers] = useState<Ponuda[]>([]);
+  const [vtrOfferLines, setVtrOfferLines] = useState<PonudaStavka[]>([]);
+  const [vtrSource, setVtrSource] = useState<'ponuda' | 'rucno'>('ponuda');
+  const [vtrOfferMethod, setVtrOfferMethod] = useState<'existing' | 'file'>('existing');
+  const [vtrOfferId, setVtrOfferId] = useState('');
+  const [vtrFile, setVtrFile] = useState<File | null>(null);
+  const [vtrForm, setVtrForm] = useState({ naziv: '', opis: '', ugovoreni_iznos: '', ostvareni_iznos: '0' });
   const [invoiceForm, setInvoiceForm] = useState({
     broj: '',
     kupac: gradiliste.objekti?.investitori?.naziv ?? '',
@@ -185,10 +208,31 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   }, [gradiliste.id]);
 
   useEffect(() => {
+    const documents = (details?.ugovoreniRadovi ?? []) as UgovoreniRad[];
+    const withDocuments = documents.filter((item) => item.dokument_putanja);
+    setVtrDocumentUrls({});
+    if (withDocuments.length === 0) return;
+    let cancelled = false;
+    void Promise.all(withDocuments.map(async (item) => [
+      item.id,
+      await getPrivateFileUrl(item.dokument_putanja!),
+    ] as const))
+      .then((entries) => {
+        if (!cancelled) setVtrDocumentUrls(Object.fromEntries(entries));
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(errText(reason, 'VTR dokument nije moguće otvoriti.'));
+      });
+    return () => { cancelled = true; };
+  }, [details?.ugovoreniRadovi]);
+
+  useEffect(() => {
     setFinancialForm({
       ugovorena_vrijednost: String(gradiliste.ugovorena_vrijednost ?? 0),
       proracun: String(gradiliste.proracun ?? 0),
-      predvidena_marza: String(gradiliste.predvidena_marza ?? 0),
+      predvidena_marza: gradiliste.predvidena_marza && gradiliste.ugovorena_vrijednost
+        ? String((gradiliste.predvidena_marza / gradiliste.ugovorena_vrijednost) * 100)
+        : '30',
     });
   }, [gradiliste.id, gradiliste.ugovorena_vrijednost, gradiliste.proracun, gradiliste.predvidena_marza]);
 
@@ -328,20 +372,31 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   };
 
   const beginFinancialEdit = () => {
+    const vtrValue = ((details?.ugovoreniRadovi ?? []) as UgovoreniRad[])
+      .filter((item) => item.vrsta === 'vtr')
+      .reduce((sum, item) => sum + (item.ugovoreni_iznos ?? 0), 0);
+    const currentOffer = (gradiliste.ugovorena_vrijednost ?? 0) + vtrValue;
     setFinancialForm({
       ugovorena_vrijednost: String(gradiliste.ugovorena_vrijednost ?? 0),
       proracun: String(gradiliste.proracun ?? 0),
-      predvidena_marza: String(gradiliste.predvidena_marza ?? 0),
+      predvidena_marza: gradiliste.predvidena_marza && currentOffer > 0
+        ? String((gradiliste.predvidena_marza / currentOffer) * 100)
+        : '30',
     });
     setEditingFinancials(true);
     setError(null);
   };
 
   const saveFinancials = async () => {
+    const vtrValue = ((details?.ugovoreniRadovi ?? []) as UgovoreniRad[])
+      .filter((item) => item.vrsta === 'vtr')
+      .reduce((sum, item) => sum + (item.ugovoreni_iznos ?? 0), 0);
+    const currentOffer = (Number(financialForm.ugovorena_vrijednost) || 0) + vtrValue;
+    const marginPercent = Number(financialForm.predvidena_marza);
     const updates = {
       ugovorena_vrijednost: Number(financialForm.ugovorena_vrijednost) || 0,
       proracun: Number(financialForm.proracun) || 0,
-      predvidena_marza: Number(financialForm.predvidena_marza) || 0,
+      predvidena_marza: currentOffer * (Number.isFinite(marginPercent) ? marginPercent : 30) / 100,
     };
     setSavingFinancials(true);
     setError(null);
@@ -394,6 +449,121 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
       setError(reason instanceof Error ? reason.message : 'Greška pri spremanju fakture.');
     } finally {
       setSavingInvoice(false);
+    }
+  };
+
+  const openVtrEditor = async () => {
+    setError(null);
+    setVtrSource('ponuda');
+    setVtrOfferMethod('existing');
+    setVtrOfferId('');
+    setVtrForm({ naziv: '', opis: '', ugovoreni_iznos: '', ostvareni_iznos: '0' });
+    setVtrFile(null);
+    setVtrModalOpen(true);
+    setLoadingVtrOffers(true);
+    try {
+      const [offers, lines] = await Promise.all([fetchPonude(), fetchSvePonudeStavke()]);
+      const siteSearchTerms = [gradiliste.naziv, gradiliste.adresa]
+        .filter((value): value is string => Boolean(value?.trim()))
+        .map((value) => value.trim().toLocaleLowerCase());
+      setVtrOffers(offers.filter((offer) => {
+        if (offer.status === 'odbijena') return false;
+        const linkedByLocation = Boolean(offer.adresa_radova?.trim())
+          && siteSearchTerms.some((term) => offer.adresa_radova!.toLocaleLowerCase().includes(term));
+        return offer.gradiliste_id === gradiliste.id
+          || offer.gradiliste_id === null
+          || (Boolean(gradiliste.objekt_id) && offer.objekt_id === gradiliste.objekt_id)
+          || linkedByLocation;
+      }));
+      setVtrOfferLines(lines);
+    } catch (reason) {
+      setError(errText(reason, 'Greška pri učitavanju potvrđenih ponuda.'));
+    } finally {
+      setLoadingVtrOffers(false);
+    }
+  };
+
+  const saveVtr = async () => {
+    const selectedOffer = vtrSource === 'ponuda' && vtrOfferMethod === 'existing'
+      ? vtrOffers.find((offer) => offer.id === vtrOfferId)
+      : undefined;
+    const uploadedOffer = vtrSource === 'ponuda' && vtrOfferMethod === 'file';
+    if (vtrSource === 'ponuda' && vtrOfferMethod === 'existing' && (!selectedOffer || contractedWorks.some((item) => item.ponuda_id === selectedOffer.id))) return;
+    if (vtrSource === 'rucno' && !vtrForm.naziv.trim()) return;
+    if (uploadedOffer && (!vtrForm.naziv.trim() || !vtrForm.ugovoreni_iznos || !vtrFile)) return;
+    setSavingVtr(true);
+    setError(null);
+    let dokumentPutanja: string | null = null;
+    let created = false;
+    try {
+      const offerLines = selectedOffer ? vtrOfferLines.filter((line) => line.ponuda_id === selectedOffer.id) : [];
+      const offerTotal = selectedOffer ? ponudaUkupno(selectedOffer, offerLines).neto : 0;
+      const naziv = selectedOffer ? `VTR · ${selectedOffer.naslov}` : vtrForm.naziv.trim();
+      const opis = selectedOffer
+        ? `Ponuda ${ponudaBroj(selectedOffer)}${offerLines.length ? `\n${offerLines.map((line) => line.opis).join('\n')}` : ''}`
+        : vtrForm.opis.trim() || null;
+      if (vtrFile) dokumentPutanja = await uploadUgovoreniRadDokument(gradiliste.id, vtrFile);
+      await createUgovoreniRad({
+        gradiliste_id: gradiliste.id,
+        naziv,
+        opis,
+        ugovoreni_iznos: selectedOffer ? offerTotal : Number(vtrForm.ugovoreni_iznos) || 0,
+        ostvareni_iznos: selectedOffer ? 0 : Number(vtrForm.ostvareni_iznos) || 0,
+        status: 'planirano',
+        vrsta: 'vtr',
+        ponuda_id: selectedOffer?.id ?? null,
+        dokument_putanja: dokumentPutanja,
+        dokument_naziv: vtrFile?.name ?? null,
+      });
+      created = true;
+      if (selectedOffer && (selectedOffer.status !== 'potvrdena' || selectedOffer.gradiliste_id !== gradiliste.id)) {
+        await updatePonuda(selectedOffer.id, { status: 'potvrdena', gradiliste_id: gradiliste.id });
+      }
+      setVtrModalOpen(false);
+      await reloadDetails();
+    } catch (reason) {
+      const message = errText(reason, 'Greška pri spremanju VTR rada.');
+      if (created) {
+        setVtrModalOpen(false);
+        try {
+          await reloadDetails();
+        } catch (refreshReason) {
+          setError(`VTR rad je spremljen, ali nije dovršena potvrda ponude ili osvježavanje: ${message}. Osvježavanje: ${errText(refreshReason, 'nepoznata greška')}`);
+          return;
+        }
+        setError(`VTR rad je spremljen, ali ponuda nije automatski potvrđena: ${message}`);
+        return;
+      }
+      if (dokumentPutanja) {
+        try {
+          await deleteUgovoreniRadDokument(dokumentPutanja);
+        } catch (cleanupReason) {
+          setError(`${message} Datoteku nije bilo moguće očistiti: ${errText(cleanupReason, 'nepoznata greška')}`);
+          return;
+        }
+      }
+      setError(message);
+    } finally {
+      setSavingVtr(false);
+    }
+  };
+
+  const removeVtr = async (item: UgovoreniRad) => {
+    if (!window.confirm(`Obrisati VTR rad „${item.naziv}”?`)) return;
+    setError(null);
+    try {
+      await deleteUgovoreniRad(item.id);
+      await reloadDetails();
+    } catch (reason) {
+      setError(errText(reason, 'Greška pri brisanju VTR rada.'));
+      return;
+    }
+    if (item.dokument_putanja) {
+      try {
+        await deleteUgovoreniRadDokument(item.dokument_putanja);
+      } catch (reason) {
+        setError(`VTR rad je obrisan, ali njegova datoteka nije uklonjena: ${errText(reason, 'nepoznata greška')}`);
+      }
     }
   };
 
@@ -459,31 +629,47 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const invoices = (details?.fakture ?? []) as Faktura[];
   const contractedWorks = (details?.ugovoreniRadovi ?? []) as UgovoreniRad[];
   const tasks = (details?.nalozi ?? []) as RadniNalog[];
+  const vtrAvailableOffers = vtrOffers.filter((offer) => !contractedWorks.some((item) => item.ponuda_id === offer.id));
+  const selectedVtrOffer = vtrOffers.find((offer) => offer.id === vtrOfferId);
+  const selectedVtrLines = selectedVtrOffer ? vtrOfferLines.filter((line) => line.ponuda_id === selectedVtrOffer.id) : [];
+  const selectedVtrOfferTotal = selectedVtrOffer ? ponudaUkupno(selectedVtrOffer, selectedVtrLines).neto : 0;
 
   const directCosts = costs.reduce((sum, item) => sum + item.iznos, 0) - (showTeren ? 0 : costs.filter((t) => t.kategorija === 'place' && t.opis.startsWith('Teren')).reduce((s, t) => s + t.iznos, 0)) - (showNight ? 0 : costs.filter((t) => t.kategorija === 'place' && t.opis.startsWith('Noćni rad')).reduce((s, t) => s + t.iznos, 0));
   const totalHours = workTime.reduce((sum, item) => sum + item.sati, 0);
-  const laborCosts = totalHours * satnica;
-  const totalCosts = directCosts + laborCosts;
-  const invoiced = invoices.reduce((sum, item) => sum + item.iznos, 0);
-  const paid = invoices.filter((item) => item.status === 'placena').reduce((sum, item) => sum + item.iznos, 0);
-  const unpaid = invoices.filter((item) => item.status !== 'placena').reduce((sum, item) => sum + item.iznos, 0);
-  const balance = paid - totalCosts;
-  const offer = gradiliste.ugovorena_vrijednost ?? 0;
-  const offerMargin = offer - totalCosts;
-  const marginPct = offer > 0 ? (offerMargin / offer) * 100 : 0;
-  const invoicedBalance = invoiced - totalCosts;
-  const invoicedMarginPct = invoiced > 0 ? (invoicedBalance / invoiced) * 100 : 0;
-  const invoicedPct = offer > 0 ? (invoiced / offer) * 100 : 0;
-  const costPct = offer > 0 ? (totalCosts / offer) * 100 : 0;
-  const workerTotals = workTime.reduce<Record<string, { name: string; hours: number; cost: number }>>((totals, item) => {
+  const workerTotals = workTime.reduce<Record<string, { name: string; hours: number; cost: number; rate: number }>>((totals, item) => {
     const key = item.radnik_id;
-    const rate = satnica;
+    const rate = showWorkers ? item.radnici?.cijena_sata ?? satnica : satnica;
     const name = item.radnici ? `${item.radnici.ime} ${item.radnici.prezime}` : 'Nepoznat radnik';
-    totals[key] ??= { name, hours: 0, cost: 0 };
+    totals[key] ??= { name, hours: 0, cost: 0, rate };
     totals[key].hours += item.sati;
     totals[key].cost += item.sati * rate;
     return totals;
   }, {});
+  const laborCosts = showWorkers
+    ? Object.values(workerTotals).reduce((sum, worker) => sum + worker.cost, 0)
+    : totalHours * satnica;
+  const totalCosts = directCosts + laborCosts;
+  const invoiced = invoices.reduce((sum, item) => sum + item.iznos, 0);
+  const paid = invoices.filter((item) => item.status === 'placena').reduce((sum, item) => sum + item.iznos, 0);
+  const collectionDebt = invoiced - paid;
+  const baseOffer = gradiliste.ugovorena_vrijednost ?? 0;
+  const vtrOffer = contractedWorks
+    .filter((item) => item.vrsta === 'vtr')
+    .reduce((sum, item) => sum + (item.ugovoreni_iznos ?? 0), 0);
+  const offer = baseOffer + vtrOffer;
+  const baseOfferPct = offer > 0 ? (baseOffer / offer) * 100 : 0;
+  const vtrOfferPct = offer > 0 ? (vtrOffer / offer) * 100 : 0;
+  const offerMargin = offer - totalCosts;
+  const plannedMargin = gradiliste.predvidena_marza && gradiliste.predvidena_marza > 0
+    ? gradiliste.predvidena_marza
+    : offer * 0.3;
+  const marginVariance = offerMargin - plannedMargin;
+  const marginPct = offer > 0 ? (offerMargin / offer) * 100 : 0;
+  const plannedMarginPct = offer > 0 ? (plannedMargin / offer) * 100 : 0;
+  const invoicedBalance = invoiced - totalCosts;
+  const invoicedMarginPct = invoiced > 0 ? (invoicedBalance / invoiced) * 100 : 0;
+  const invoicedPct = offer > 0 ? (invoiced / offer) * 100 : 0;
+  const costPct = offer > 0 ? (totalCosts / offer) * 100 : 0;
   const costRow = (t: Trosak) => ({ id: t.id, title: t.opis, sub: `${t.kooperanti?.naziv ? `${t.kooperanti.naziv} · ` : kooperanti.find((k) => k.id === t.kooperant_id)?.naziv ? `${kooperanti.find((k) => k.id === t.kooperant_id)?.naziv} · ` : ''}${expenseLabels[t.kategorija]} · ${date(t.datum)}`, amount: t.iznos, trosak: t });
   const isTeren = (t: Trosak) => t.kategorija === 'place' && t.opis.startsWith('Teren');
   const isNight = (t: Trosak) => t.kategorija === 'place' && t.opis.startsWith('Noćni rad');
@@ -497,9 +683,11 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     {
       key: 'sati',
       label: 'Utrošeni sati',
-      hint: `${totalHours.toLocaleString('hr-HR')} h × ${satnica.toLocaleString('hr-HR')} €`,
+      hint: showWorkers
+        ? `${totalHours.toLocaleString('hr-HR')} h · neto satnica po radniku`
+        : `${totalHours.toLocaleString('hr-HR')} h × ${satnica.toLocaleString('hr-HR')} €`,
       total: laborCosts,
-      rows: showWorkers ? Object.entries(workerTotals).map(([id, w]) => ({ id, title: w.name, sub: `${w.hours.toLocaleString('hr-HR')} h × ${satnica.toLocaleString('hr-HR')} €`, amount: w.cost })) : [],
+      rows: showWorkers ? Object.entries(workerTotals).map(([id, w]) => ({ id, title: w.name, sub: `${w.hours.toLocaleString('hr-HR')} h × ${w.rate.toLocaleString('hr-HR')} €`, amount: w.cost })) : [],
     },
     { key: 'teren', label: 'Teren', total: showTeren ? sumOf(terenList) : 0, hidden: !showTeren, toggle: 'teren', rows: terenList.map(costRow) },
     { key: 'nocna', label: 'Noćna', total: showNight ? sumOf(nightList) : 0, hidden: !showNight, toggle: 'nocna', rows: nightList.map(costRow) },
@@ -524,7 +712,6 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     pauzirano: 'Pauzirano',
     zavrseno: 'Završeno',
   }[gradiliste.status];
-
   return (
     <aside className="flex min-h-[28rem] min-w-0 flex-col border-l border-slate-200 bg-white lg:sticky lg:top-4 lg:max-h-[calc(100vh-4rem)]">
       <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-4">
@@ -542,8 +729,25 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               gradiliste.voditelj_gradilista ? `Voditelj: ${gradiliste.voditelj_gradilista}` : null,
             ].filter(Boolean).join(' · ') || 'Detalji gradilišta'}
           </p>
+          <p className="mt-1 text-xs text-slate-500">Za otvaranje u Exploreru instaliraj pomoćni program iz mape windows-helper.</p>
         </div>
         <div className="flex flex-shrink-0 items-center gap-1">
+          <a
+            href={`tmcolor-folder://open/${encodeURIComponent(gradiliste.id)}`}
+            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700 hover:bg-sky-100"
+            title="Otvori lokalnu mapu u Windows Exploreru"
+          >
+            <FolderOpen className="h-4 w-4" />
+            Otvori u Exploreru
+          </a>
+          <a
+            href={`tmcolor-folder://select/${encodeURIComponent(gradiliste.id)}`}
+            className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-sky-700"
+            aria-label="Odaberi ili promijeni mapu za Windows Explorer"
+            title="Odaberi ili promijeni mapu"
+          >
+            <Pencil className="h-4 w-4" />
+          </a>
           <button
             type="button"
             onClick={onEdit}
@@ -588,56 +792,83 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
           </div>
           {editingFinancials ? (
             <div className="grid grid-cols-2 gap-2">
-              <Field label="Ugovorena vrijednost">
+              <Field label="Osnovna ugovorena ponuda">
                 <TextInput type="number" min="0" step="0.01" value={financialForm.ugovorena_vrijednost} onChange={(event) => setFinancialForm((previous) => ({ ...previous, ugovorena_vrijednost: event.target.value }))} />
               </Field>
               <Field label="Proračun">
                 <TextInput type="number" min="0" step="0.01" value={financialForm.proracun} onChange={(event) => setFinancialForm((previous) => ({ ...previous, proracun: event.target.value }))} />
               </Field>
-              <Field label="Predviđena marža">
-                <TextInput type="number" min="0" step="0.01" value={financialForm.predvidena_marza} onChange={(event) => setFinancialForm((previous) => ({ ...previous, predvidena_marza: event.target.value }))} />
+              <Field label="Planirana marža (%)">
+                <TextInput type="number" min="0" step="0.1" value={financialForm.predvidena_marza} onChange={(event) => setFinancialForm((previous) => ({ ...previous, predvidena_marza: event.target.value }))} />
               </Field>
               <div className="self-end pb-2 text-[10px] text-slate-500">Naplaćeno i troškovi računaju se iz povezanih zapisa.</div>
             </div>
           ) : (
             <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-lg border border-sky-100 bg-sky-50 p-3">
+              <div className="grid grid-cols-3 gap-2">
+                <div className="min-w-0 rounded-lg border border-sky-100 bg-sky-50 p-2 sm:p-3">
                   <p className="text-[10px] font-bold uppercase text-sky-800">Ponuda (ugovoreno)</p>
-                  <p className="mt-1 text-base font-bold text-slate-900">{currency(offer)}</p>
+                  <p className="mt-1 break-words text-sm font-bold text-slate-900 sm:text-base">{currency(offer)}</p>
+                  <div className="mt-1 space-y-0.5 border-t border-sky-100 pt-1 text-[10px] text-sky-800">
+                    <p className="flex justify-between gap-2">
+                      <span>Osnovna ponuda ({baseOfferPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} %)</span>
+                      <span>{currency(baseOffer)}</span>
+                    </p>
+                    <p className="flex justify-between gap-2">
+                      <span>VTR ({vtrOfferPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} %)</span>
+                      <span>{currency(vtrOffer)}</span>
+                    </p>
+                  </div>
                   {(gradiliste.proracun ?? 0) > 0 && <p className="mt-0.5 text-[10px] text-sky-800">Proračun {currency(gradiliste.proracun ?? 0)}</p>}
                 </div>
-                <div className="rounded-lg border border-red-100 bg-red-50 p-3">
+                <div className="min-w-0 rounded-lg border border-red-100 bg-red-50 p-2 sm:p-3">
                   <p className="text-[10px] font-bold uppercase text-red-800">Trošak</p>
-                  <p className="mt-1 text-base font-bold text-red-800">{currency(totalCosts)}</p>
+                  <p className="mt-1 break-words text-sm font-bold text-red-800 sm:text-base">{currency(totalCosts)}</p>
                   <p className="mt-0.5 text-[10px] text-red-700">Direktno {currency(directCosts)} · Rad {currency(laborCosts)}</p>
                 </div>
-                <div className={`rounded-lg border p-3 ${offerMargin >= 0 ? 'border-emerald-100 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}>
+                <div className={`min-w-0 rounded-lg border p-2 sm:p-3 ${offerMargin >= 0 ? 'border-emerald-100 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}>
                   <p className={`text-[10px] font-bold uppercase ${offerMargin >= 0 ? 'text-emerald-900' : 'text-rose-800'}`}>Razlika ponuda − trošak</p>
-                  <p className={`mt-1 text-base font-bold ${offerMargin >= 0 ? 'text-emerald-800' : 'text-rose-800'}`}>{currency(offerMargin)}</p>
+                  <p className={`mt-1 break-words text-sm font-bold sm:text-base ${offerMargin >= 0 ? 'text-emerald-800' : 'text-rose-800'}`}>{currency(offerMargin)}</p>
                   <p className={`mt-0.5 text-[10px] ${offerMargin >= 0 ? 'text-emerald-800' : 'text-rose-700'}`}>
                     Marža {offer > 0 ? `${marginPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} %` : '—'}
                     {(gradiliste.predvidena_marza ?? 0) > 0 && ` · planirano ${currency(gradiliste.predvidena_marza ?? 0)}`}
                   </p>
                 </div>
-                <div className="rounded-lg border border-violet-100 bg-violet-50 p-3">
+                <div className="min-w-0 rounded-lg border border-violet-100 bg-violet-50 p-2 sm:p-3">
                   <p className="text-[10px] font-bold uppercase text-violet-900">Fakturirano</p>
-                  <p className="mt-1 text-base font-bold text-violet-800">{currency(invoiced)}</p>
+                  <p className="mt-1 break-words text-sm font-bold text-violet-800 sm:text-base">{currency(invoiced)}</p>
                   <p className="mt-0.5 text-[10px] text-violet-800">
                     {offer > 0 ? `${invoicedPct.toLocaleString('hr-HR', { maximumFractionDigits: 0 })} % ponude · ` : ''}za fakturirati {currency(Math.max(0, offer - invoiced))}
                   </p>
                 </div>
-                <div className={`rounded-lg border p-3 ${invoicedBalance >= 0 ? 'border-teal-100 bg-teal-50' : 'border-rose-200 bg-rose-50'}`}>
+                <div className={`min-w-0 rounded-lg border p-2 sm:p-3 ${invoicedBalance >= 0 ? 'border-teal-100 bg-teal-50' : 'border-rose-200 bg-rose-50'}`}>
                   <p className={`text-[10px] font-bold uppercase ${invoicedBalance >= 0 ? 'text-teal-900' : 'text-rose-800'}`}>Razlika fakturirano − trošak</p>
-                  <p className={`mt-1 text-base font-bold ${invoicedBalance >= 0 ? 'text-teal-800' : 'text-rose-800'}`}>{currency(invoicedBalance)}</p>
+                  <p className={`mt-1 break-words text-sm font-bold sm:text-base ${invoicedBalance >= 0 ? 'text-teal-800' : 'text-rose-800'}`}>{currency(invoicedBalance)}</p>
                   <p className={`mt-0.5 text-[10px] ${invoicedBalance >= 0 ? 'text-teal-800' : 'text-rose-700'}`}>
                     {invoiced > 0 ? `Marža na fakturirano ${invoicedMarginPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} %` : 'Nema faktura'}
                   </p>
                 </div>
-                <div className="rounded-lg border border-amber-100 bg-amber-50 p-3">
-                  <p className="text-[10px] font-bold uppercase text-amber-900">Naplaćeno</p>
-                  <p className="mt-1 text-base font-bold text-amber-900">{currency(paid)}</p>
-                  <p className="mt-0.5 text-[10px] text-amber-800">Neplaćeno {currency(unpaid)} · razlika naplaćeno − trošak {currency(balance)}</p>
+                <div className="min-w-0 rounded-lg border border-amber-100 bg-amber-50 p-2 sm:p-3">
+                  <p className="text-[10px] font-bold uppercase text-amber-900">Preostalo za naplatu</p>
+                  <p className="mt-1 break-words text-sm font-bold text-amber-900 sm:text-base">{currency(offer - invoiced)}</p>
+                  <p className="mt-0.5 text-[10px] text-amber-800">Ponuda {currency(offer)} − fakturirano {currency(invoiced)}</p>
+                </div>
+                <div className="min-w-0 rounded-lg border border-emerald-100 bg-emerald-50 p-2 sm:p-3">
+                  <p className="text-[10px] font-bold uppercase text-emerald-900">Naplaćeno</p>
+                  <p className="mt-1 break-words text-sm font-bold text-emerald-800 sm:text-base">{currency(paid)}</p>
+                  <p className="mt-0.5 text-[10px] text-emerald-800">{offer > 0 ? `${((paid / offer) * 100).toLocaleString('hr-HR', { maximumFractionDigits: 1 })} % ponude` : 'Plaćene fakture'}</p>
+                </div>
+                <div className={`min-w-0 rounded-lg border p-2 sm:p-3 ${collectionDebt > 0 ? 'border-amber-100 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
+                  <p className={`text-[10px] font-bold uppercase ${collectionDebt > 0 ? 'text-amber-900' : 'text-slate-700'}`}>Dug za naplatu</p>
+                  <p className={`mt-1 break-words text-sm font-bold sm:text-base ${collectionDebt > 0 ? 'text-amber-900' : 'text-slate-800'}`}>{currency(collectionDebt)}</p>
+                  <p className={`mt-0.5 text-[10px] ${collectionDebt > 0 ? 'text-amber-800' : 'text-slate-600'}`}>Fakturirano {currency(invoiced)} − naplaćeno {currency(paid)}</p>
+                </div>
+                <div className={`min-w-0 rounded-lg border p-2 sm:p-3 ${marginVariance >= 0 ? 'border-teal-100 bg-teal-50' : 'border-rose-200 bg-rose-50'}`}>
+                  <p className={`text-[10px] font-bold uppercase ${marginVariance >= 0 ? 'text-teal-900' : 'text-rose-800'}`}>Planirana vs. stvarna marža</p>
+                  <p className={`mt-1 break-words text-sm font-bold sm:text-base ${marginVariance >= 0 ? 'text-teal-800' : 'text-rose-800'}`}>{currency(plannedMargin)} / {currency(offerMargin)}</p>
+                  <p className={`mt-0.5 text-[10px] ${marginVariance >= 0 ? 'text-teal-800' : 'text-rose-700'}`}>
+                    Planirana {plannedMarginPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} % · stvarna {marginPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} % · razlika {currency(marginVariance)}
+                  </p>
                 </div>
               </div>
               {offer > 0 && (
@@ -917,13 +1148,48 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               </div>
             </Section>
 
-            <Section title={`Ugovoreni radovi (${contractedWorks.length})`} icon={<FileText className="h-4 w-4" />}>
+            <Section
+              title={`Ugovoreni radovi (${contractedWorks.length})`}
+              icon={<FileText className="h-4 w-4" />}
+              action={(
+                <button type="button" onClick={() => void openVtrEditor()} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50">
+                  <Plus className="h-3.5 w-3.5" />
+                  Dodaj VTR rad
+                </button>
+              )}
+            >
               {contractedWorks.length === 0 ? <p className="text-xs text-slate-400">Nema ugovorenih radova.</p> : (
                 <div className="space-y-2">
                   {contractedWorks.map((item) => (
-                    <div key={item.id} className="flex items-start justify-between gap-3 text-xs">
-                      <span className="min-w-0 text-slate-700">{item.naziv}</span>
-                      <span className="flex-shrink-0 font-medium text-slate-600">{currency(item.ostvareni_iznos ?? 0)} / {currency(item.ugovoreni_iznos)}</span>
+                    <div key={item.id} className="flex items-start justify-between gap-3 rounded-md border border-slate-100 px-2 py-1.5 text-xs">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {item.vrsta === 'vtr' && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">VTR</span>}
+                          <span className="text-slate-700">{item.naziv}</span>
+                        </div>
+                        {item.opis && <p className="mt-1 whitespace-pre-line text-[10px] text-slate-500">{item.opis}</p>}
+                        {item.dokument_putanja && item.dokument_naziv && (
+                          <a
+                            href={vtrDocumentUrls[item.id] ?? '#'}
+                            aria-disabled={!vtrDocumentUrls[item.id]}
+                            onClick={(event) => { if (!vtrDocumentUrls[item.id]) event.preventDefault(); }}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-1 inline-flex items-center gap-1 text-[10px] text-sky-700 hover:underline"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            {item.dokument_naziv}
+                          </a>
+                        )}
+                      </div>
+                      <div className="flex flex-shrink-0 items-center gap-1">
+                        <span className="font-medium text-slate-600">{currency(item.ostvareni_iznos ?? 0)} / {currency(item.ugovoreni_iznos)}</span>
+                        {item.vrsta === 'vtr' && (
+                          <button type="button" onClick={() => void removeVtr(item)} className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-600" aria-label={`Obriši VTR rad ${item.naziv}`}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1003,6 +1269,116 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
           <Field label="Opis">
             <Textarea rows={2} value={invoiceForm.opis} onChange={(event) => setInvoiceForm((previous) => ({ ...previous, opis: event.target.value }))} />
           </Field>
+        </div>
+      </Modal>
+
+      <Modal
+        open={vtrModalOpen}
+        onClose={() => setVtrModalOpen(false)}
+        title="Dodaj VTR rad"
+        footer={(
+          <>
+            <button type="button" onClick={() => setVtrModalOpen(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
+              Odustani
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveVtr()}
+              disabled={savingVtr || (vtrSource === 'ponuda'
+                ? vtrOfferMethod === 'existing'
+                  ? !vtrOfferId || loadingVtrOffers
+                  : !vtrForm.naziv.trim() || !vtrForm.ugovoreni_iznos || !vtrFile
+                : !vtrForm.naziv.trim())}
+              className="rounded-lg bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:opacity-50"
+            >
+              {savingVtr ? 'Spremanje…' : 'Spremi VTR rad'}
+            </button>
+          </>
+        )}
+      >
+        {error && <p className="mb-3 rounded-md bg-red-50 p-2 text-xs text-red-700">{error}</p>}
+        <div className="space-y-3">
+          <p className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">VTR rad će biti povezan s gradilištem <strong>{gradiliste.naziv}</strong>.</p>
+          <Field label="Način unosa">
+            <Select value={vtrSource} onChange={(event) => setVtrSource(event.target.value as 'ponuda' | 'rucno')}>
+              <option value="ponuda">Ugovorena ponuda</option>
+              <option value="rucno">Ručni unos</option>
+            </Select>
+          </Field>
+          {vtrSource === 'ponuda' ? (
+            <>
+              <Field label="Izvor ugovorene ponude">
+                <Select value={vtrOfferMethod} onChange={(event) => setVtrOfferMethod(event.target.value as 'existing' | 'file')}>
+                  <option value="existing">Odaberi postojeću ponudu iz aplikacije</option>
+                  <option value="file">Učitaj ponudu kao datoteku</option>
+                </Select>
+              </Field>
+              {vtrOfferMethod === 'existing' ? (
+                <>
+                  <Field label="Potvrđena ponuda *">
+                    <Select
+                      value={vtrOfferId}
+                      disabled={loadingVtrOffers}
+                      onChange={(event) => setVtrOfferId(event.target.value)}
+                    >
+                      <option value="">{loadingVtrOffers ? 'Učitavanje ponuda…' : '— Odaberi ponudu —'}</option>
+                      {vtrAvailableOffers.map((offer) => (
+                        <option key={offer.id} value={offer.id}>
+                          {ponudaBroj(offer)} · {offer.naslov}
+                          {offer.adresa_radova ? ` · ${offer.adresa_radova}` : ''}
+                          {offer.status === 'nepotvrdena' ? ' · nepotvrđena (potvrdit će se)' : ' · potvrđena'}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  {!loadingVtrOffers && vtrAvailableOffers.length === 0 && (
+                    <p className="text-xs text-slate-500">Nema novih potvrđenih ponuda povezanih s ovim gradilištem. Možeš učitati ponudu ili odabrati ručni unos.</p>
+                  )}
+                  {selectedVtrOffer && (
+                    <div className="rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-900">
+                      Ugovoreni iznos bez PDV-a: <strong>{currency(selectedVtrOfferTotal)}</strong>
+                      {selectedVtrLines.length > 0 && <span> · {selectedVtrLines.length} stavki ponude</span>}
+                    </div>
+                  )}
+                  <Field label="Priložiti dodatni dokument (neobavezno)">
+                    <TextInput type="file" onChange={(event) => setVtrFile(event.target.files?.[0] ?? null)} />
+                  </Field>
+                </>
+              ) : (
+                <>
+                  <Field label="Naziv VTR rada *">
+                    <TextInput value={vtrForm.naziv} onChange={(event) => setVtrForm((previous) => ({ ...previous, naziv: event.target.value }))} placeholder="Naziv rada iz ponude" />
+                  </Field>
+                  <Field label="Ugovoreni iznos (EUR) *">
+                    <TextInput type="number" min="0" step="0.01" value={vtrForm.ugovoreni_iznos} onChange={(event) => setVtrForm((previous) => ({ ...previous, ugovoreni_iznos: event.target.value }))} />
+                  </Field>
+                  <Field label="Datoteka ponude *">
+                    <TextInput type="file" onChange={(event) => setVtrFile(event.target.files?.[0] ?? null)} />
+                  </Field>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <Field label="Naziv rada *">
+                <TextInput value={vtrForm.naziv} onChange={(event) => setVtrForm((previous) => ({ ...previous, naziv: event.target.value }))} placeholder="Naziv VTR rada" />
+              </Field>
+              <Field label="Opis">
+                <Textarea rows={3} value={vtrForm.opis} onChange={(event) => setVtrForm((previous) => ({ ...previous, opis: event.target.value }))} placeholder="Opis ili stavke rada" />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Ugovoreni iznos (EUR)">
+                  <TextInput type="number" min="0" step="0.01" value={vtrForm.ugovoreni_iznos} onChange={(event) => setVtrForm((previous) => ({ ...previous, ugovoreni_iznos: event.target.value }))} />
+                </Field>
+                <Field label="Ostvareni iznos (EUR)">
+                  <TextInput type="number" min="0" step="0.01" value={vtrForm.ostvareni_iznos} onChange={(event) => setVtrForm((previous) => ({ ...previous, ostvareni_iznos: event.target.value }))} />
+                </Field>
+              </div>
+              <Field label="Priložiti dokument (neobavezno)">
+                <TextInput type="file" onChange={(event) => setVtrFile(event.target.files?.[0] ?? null)} />
+              </Field>
+            </>
+          )}
         </div>
       </Modal>
 

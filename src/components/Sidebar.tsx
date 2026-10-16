@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   Building2,
   Users,
@@ -15,7 +16,12 @@ import {
   Bell,
   Sparkles,
   Settings,
+  Wrench,
+  Cog,
+  UserCog,
 } from 'lucide-react';
+import { useAuth } from '@/auth/useAuth';
+import { moduleForView } from '@/auth/permissions';
 
 export type View =
   | 'dashboard'
@@ -27,6 +33,8 @@ export type View =
   | 'ponude'
   | 'radnici'
   | 'vozila'
+  | 'alat'
+  | 'strojevi'
   | 'raspored'
   | 'troskovi'
   | 'radno_vrijeme'
@@ -35,7 +43,8 @@ export type View =
   | 'rekapitulacija'
   | 'obavijesti'
   | 'asistent'
-  | 'postavke';
+  | 'postavke'
+  | 'korisnici';
 
 interface SidebarProps {
   current: View;
@@ -65,6 +74,8 @@ const navSections: {
       { view: 'gradilista', label: 'Gradilišta', icon: Building2 },
       { view: 'radnici', label: 'Radnici', icon: Users },
       { view: 'vozila', label: 'Vozila', icon: Truck },
+      { view: 'alat', label: 'Alat', icon: Wrench },
+      { view: 'strojevi', label: 'Strojevi', icon: Cog },
     ],
   },
   {
@@ -95,7 +106,10 @@ const navSections: {
   },
   {
     title: 'Sustav',
-    items: [{ view: 'postavke', label: 'Postavke', icon: Settings }],
+    items: [
+      { view: 'postavke', label: 'Postavke', icon: Settings },
+      { view: 'korisnici', label: 'Korisnici i prava', icon: UserCog },
+    ],
   },
 ];
 
@@ -110,6 +124,8 @@ const countMap: Partial<Record<View, keyof SidebarProps['counts']>> = {
 };
 
 export function Sidebar({ current, onNavigate, counts }: SidebarProps) {
+  const { canAccess, isAdmin, profile, signOut } = useAuth();
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   return (
     <aside className="flex h-screen w-64 flex-shrink-0 flex-col border-r border-slate-200 bg-white">
       <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-200">
@@ -123,13 +139,21 @@ export function Sidebar({ current, onNavigate, counts }: SidebarProps) {
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4">
-        {navSections.map((section) => (
+        {navSections.map((section) => {
+          const items = section.items.filter((item) => item.view === 'korisnici'
+            ? isAdmin
+            : (() => {
+              const module = moduleForView(item.view);
+              return module !== null && canAccess(module);
+            })());
+          if (!items.length) return null;
+          return (
           <div key={section.title} className="mb-5">
             <p className="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
               {section.title}
             </p>
             <div className="space-y-1">
-              {section.items.map((item) => {
+              {items.map((item) => {
                 const Icon = item.icon;
                 const active = current === item.view;
                 const countKey = countMap[item.view];
@@ -161,10 +185,20 @@ export function Sidebar({ current, onNavigate, counts }: SidebarProps) {
               })}
             </div>
           </div>
-        ))}
+          );
+        })}
       </nav>
 
       <div className="border-t border-slate-200 px-6 py-3">
+        <p className="truncate text-xs font-medium text-slate-600" title={profile?.email}>{profile?.email}</p>
+        <button
+          type="button"
+          onClick={() => void signOut().catch((reason: unknown) => setSignOutError(reason instanceof Error ? reason.message : 'Odjava nije uspjela.'))}
+          className="mt-1 text-xs font-medium text-sky-700 hover:underline"
+        >
+          Odjavi se
+        </button>
+        {signOutError && <p role="alert" className="mt-1 text-xs text-red-700">{signOutError}</p>}
         <p className="text-xs text-slate-400">© 2026 GradTech</p>
       </div>
     </aside>

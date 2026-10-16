@@ -7,13 +7,16 @@ import { NalogIzvrsenje } from './NalogIzvrsenje';
 import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import {
   setNalogZadaci,
+  setRasporedGradilistePotvrdeno,
   fetchGradilisteZadaci,
   generateNalogBroj,
   discardRasporedNalog,
   fetchZakljuceniNalozi,
   fetchRadniNalozi,
   updateRadniNalog,
+  notifyLockedNalogWorkers,
   addRasporedOstalo,
+  copyLatestDnevniRaspored,
   createNalogFromRaspored,
   fetchRasporedOstalo,
   removeRasporedOstalo,
@@ -178,6 +181,8 @@ export function RasporedView() {
   const [selectedDate, setSelectedDate] = useState(localDateString());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [copyingSchedule, setCopyingSchedule] = useState(false);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [, setColumnsVersion] = useState(0);
   const [ostalo, setOstalo] = useState<DnevniRasporedOstalo[]>([]);
@@ -224,17 +229,32 @@ export function RasporedView() {
   };
 
   const loadDay = useCallback(async (date: string) => {
-    const [day, nextOstalo] = await Promise.all([fetchDnevniRaspored(date), fetchRasporedOstalo(date).catch((e: unknown) => e as Error)]);
+    const day = await fetchDnevniRaspored(date);
     setSiteAssignments(day.gradilista);
     setWorkerAssignments(day.radnici);
     const nalogIds = day.gradilista.map((a) => a.nalog_id).filter((id): id is string => Boolean(id));
-    setLockedNalozi(await fetchZakljuceniNalozi(nalogIds).catch(() => []));
-    if (Array.isArray(nextOstalo)) setOstalo(nextOstalo);
-    else {
-      setOstalo([]);
-      setError(nextOstalo.message);
+    try {
+      setLockedNalozi(await fetchZakljuceniNalozi(nalogIds));
+    } catch (e) {
+      setLockedNalozi(nalogIds);
+      setError(e instanceof Error ? `Nije moguće provjeriti zaključane naloge; premještanje gradilišta je blokirano. ${e.message}` : 'Nije moguće provjeriti zaključane naloge; premještanje gradilišta je blokirano.');
     }
   }, []);
+
+  const loadOstalo = useCallback(async () => {
+    try {
+      setOstalo(await fetchRasporedOstalo());
+      return true;
+    } catch (e) {
+      setOstalo([]);
+      setError(e instanceof Error ? e.message : 'Greška pri učitavanju popisa Ostalo');
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadOstalo();
+  }, [loadOstalo]);
 
   useEffect(() => {
     let cancelled = false;
@@ -270,11 +290,63 @@ export function RasporedView() {
 
   const run = async (action: () => Promise<void>) => {
     setError(null);
+    setNotice(null);
     try {
       await action();
-      await loadDay(selectedDate);
+      await Promise.all([loadDay(selectedDate), loadOstalo()]);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri spremanju rasporeda');
+    }
+  };
+
+  const isVehicleLocked = (voziloId: string) => siteAssignments.some((assignment) =>
+    assignment.vozilo_id === voziloId
+    && (assignment.gradiliste_potvrdeno
+      || assignment.nalog_id && lockedNalozi.includes(assignment.nalog_id)));
+
+  const isVehicleOrderLocked = (voziloId: string) => siteAssignments.some((assignment) =>
+    assignment.vozilo_id === voziloId
+    && assignment.nalog_id
+    && lockedNalozi.includes(assignment.nalog_id));
+
+  const toggleSiteConfirmation = (assignment: DnevniRasporedGradiliste, confirmed: boolean) => {
+    if (confirmed && isVehicleLocked(assignment.vozilo_id)) {
+      setError('Vozilo je već zaključano zbog druge potvrde ili zaključenog radnog naloga.');
+      return;
+    }
+    void run(() => setRasporedGradilistePotvrdeno(assignment.id, confirmed));
+  };
+
+  const isLockedAssignment = (assignmentId: string) => {
+    const assignment = siteAssignments.find((item) => item.id === assignmentId);
+    return Boolean(assignment && isVehicleLocked(assignment.vozilo_id));
+  };
+
+  const isLockedWorkerAssignment = (assignmentId: string) => {
+    const assignment = workerAssignments.find((item) => item.id === assignmentId);
+    return Boolean(assignment && isVehicleLocked(assignment.vozilo_id));
+  };
+
+  const isWorkerAssignedToLockedVehicle = (radnikId: string) => workerAssignments.some((assignment) =>
+    assignment.radnik_id === radnikId && isVehicleLocked(assignment.vozilo_id));
+
+  const copyLatestSchedule = async () => {
+    setCopyingSchedule(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const sourceDate = await copyLatestDnevniRaspored(selectedDate);
+      if (!sourceDate) {
+        setNotice('Nema ranije napravljenog rasporeda za kopiranje.');
+        return;
+      }
+      const [, ostaloLoaded] = await Promise.all([loadDay(selectedDate), loadOstalo()]);
+      if (!ostaloLoaded) return;
+      setNotice(`Raspored od ${formatShortDate(sourceDate)} dodan je na odabrani datum bez duplikata.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Greška pri kopiranju zadnjeg rasporeda');
+    } finally {
+      setCopyingSchedule(false);
     }
   };
 
@@ -376,13 +448,21 @@ export function RasporedView() {
         prioritet: nalogForm.prioritet,
         rok: nalogForm.rok || null,
         radnik_ids: nalogForm.radnik_ids,
-        zakljucen: lock === 'lock' ? true : lock === 'unlock' ? false : undefined,
+        zakljucen: lock === 'unlock' ? false : undefined,
       };
       if (nalogForm.nalogId) await updateRadniNalog(nalogForm.nalogId, payload);
       const validIds = nalogZadaci.filter((z) => nalogForm.zadatak_ids.includes(z.id)).map((z) => z.id);
-      await setNalogZadaci(nalogId, nalogForm.gradiliste_id || null, validIds).catch(() => {
-        setError('Zadaci nisu spremljeni. Pokreni migraciju 20261015220000_zadaci_nalog_veza.sql.');
-      });
+      try {
+        await setNalogZadaci(nalogId, nalogForm.gradiliste_id || null, validIds);
+      } catch (reason) {
+        const message = errMsg(reason, 'Zadaci nisu spremljeni.');
+        setError(`${message} Pokreni migraciju 20261015220000_zadaci_nalog_veza.sql.`);
+        if (lock === 'lock') throw new Error(message);
+      }
+      if (lock === 'lock') {
+        await updateRadniNalog(nalogId, { ...payload, zakljucen: true });
+        await notifyLockedNalogWorkers(nalogId);
+      }
       closeNalog();
       await loadDay(selectedDate);
     } catch (e) {
@@ -414,14 +494,35 @@ export function RasporedView() {
   const dropOnVehicle = (event: React.DragEvent, voziloId: string) => {
     event.preventDefault();
     setDropTarget(null);
+    if (isVehicleLocked(voziloId)) {
+      setError('Vozilo je zaključano zbog zaključenog radnog naloga.');
+      return;
+    }
     const payload = readPayload(event);
     if (!payload) return;
+    if (payload.type === 'ostalo') {
+      const entry = ostalo.find((item) => item.id === payload.id);
+      if (entry?.radnik_id && isWorkerAssignedToLockedVehicle(entry.radnik_id)) {
+        setError('Radnik je na vozilu sa zaključenim radnim nalogom i ne može se premjestiti.');
+        return;
+      }
+    }
+    if (payload.type === 'radnik' && isWorkerAssignedToLockedVehicle(payload.id)) {
+      setError('Radnik je na vozilu sa zaključenim radnim nalogom i ne može se premjestiti.');
+      return;
+    }
+    if (payload.assignmentId
+      && (payload.type === 'gradiliste' && isLockedAssignment(payload.assignmentId)
+        || payload.type === 'radnik' && isLockedWorkerAssignment(payload.assignmentId))) {
+      setError('Stavke s vozila na kojem je zaključen radni nalog ne mogu se premjestiti.');
+      return;
+    }
     void run(async () => {
       if (payload.type === 'ostalo') {
         const entry = ostalo.find((o) => o.id === payload.id);
         if (!entry) return;
         if (entry.radnik_id) await assignRasporedRadnik(selectedDate, voziloId, entry.radnik_id);
-        else if (entry.tekst) await addRasporedTekst(selectedDate, voziloId, entry.tekst);
+        else if (entry.tekst) await addRasporedTekst(selectedDate, voziloId, entry.tekst, true);
         await removeRasporedOstalo(entry.id);
       } else if (payload.type === 'gradiliste') {
         if (payload.assignmentId) await moveRasporedGradiliste(payload.assignmentId, voziloId);
@@ -455,6 +556,10 @@ export function RasporedView() {
     const payload = readPayload(event);
     if (!payload || payload.type !== 'gradiliste') return;
     if (payload.assignmentId) {
+      if (isLockedAssignment(payload.assignmentId)) {
+        setError('Gradilište sa zaključenim radnim nalogom ne može se premjestiti s vozila.');
+        return;
+      }
       const assignment = siteAssignments.find((a) => a.id === payload.assignmentId);
       if (assignment?.gradiliste_id) placeSite(assignment.gradiliste_id, columnIndex, beforeId);
       const assignmentId = payload.assignmentId;
@@ -470,6 +575,16 @@ export function RasporedView() {
     const payload = readPayload(event);
     if (!payload || payload.type === 'ostalo' || (payload.type === 'radnik' && ostalo.some((o) => o.radnik_id === payload.id))) return;
     const assignmentId = payload.type === 'radnik' || payload.type === 'gradiliste' ? payload.assignmentId : undefined;
+    if (payload.type === 'radnik' && isWorkerAssignedToLockedVehicle(payload.id)) {
+      setError('Radnik je na vozilu sa zaključenim radnim nalogom i ne može se premjestiti.');
+      return;
+    }
+    if (assignmentId && (payload.type === 'radnik'
+      ? isLockedWorkerAssignment(assignmentId)
+      : isLockedAssignment(assignmentId))) {
+      setError('Stavke s vozila na kojem je zaključen radni nalog ne mogu se premjestiti.');
+      return;
+    }
     void run(async () => {
       if (payload.type === 'radnik') {
         await addRasporedOstalo(selectedDate, { radnikId: payload.id });
@@ -494,6 +609,11 @@ export function RasporedView() {
       return;
     }
     if (!payload || payload.type !== type || !payload.assignmentId) return;
+    if ((type === 'gradiliste' && isLockedAssignment(payload.assignmentId))
+      || (type === 'radnik' && isLockedWorkerAssignment(payload.assignmentId))) {
+      setError('Stavke s vozila na kojem je zaključen radni nalog ne mogu se ukloniti.');
+      return;
+    }
     const assignmentId = payload.assignmentId;
     void run(() => type === 'gradiliste' ? removeRasporedGradiliste(assignmentId) : removeRasporedRadnik(assignmentId));
   };
@@ -538,9 +658,22 @@ export function RasporedView() {
               <CalendarDays className="h-5 w-5 text-sky-600" />
               <span className="text-base font-semibold capitalize text-slate-900">{formatDate(selectedDate)}</span>
             </div>
-            <button type="button" onClick={() => setSelectedDate(localDateString())} className="text-xs text-sky-600 hover:text-sky-700">
-              Danas
-            </button>
+            <div className="mt-1 flex items-center justify-center gap-2">
+              <label className="text-xs text-slate-500" htmlFor="raspored-date">Odaberi datum:</label>
+              <input
+                id="raspored-date"
+                type="date"
+                value={selectedDate}
+                onChange={(e) => {
+                  if (e.target.value) setSelectedDate(e.target.value);
+                }}
+                aria-label="Odaberi datum dnevnog rasporeda"
+                className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-xs text-slate-700"
+              />
+              <button type="button" onClick={() => setSelectedDate(localDateString())} className="text-xs text-sky-600 hover:text-sky-700">
+                Danas
+              </button>
+            </div>
           </div>
           <button
             type="button"
@@ -550,10 +683,20 @@ export function RasporedView() {
           >
             <ChevronRight className="h-5 w-5" />
           </button>
+          <button
+            type="button"
+            onClick={() => void copyLatestSchedule()}
+            disabled={copyingSchedule}
+            className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-white px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-50 disabled:cursor-wait disabled:opacity-60"
+          >
+            <ClipboardList className="h-4 w-4" />
+            {copyingSchedule ? 'Kopiranje…' : 'Kopiraj zadnji raspored'}
+          </button>
         </div>
       </div>
 
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+      {notice && <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div>}
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(620px,1.35fr)_minmax(0,1.9fr)_minmax(190px,0.4fr)]">
         {/* Gradilišta */}
@@ -684,22 +827,29 @@ export function RasporedView() {
               const carTime = carSites.find((a) => a.vrijeme)?.vrijeme ?? '';
               const siteSlots = Math.max(minSiteSlots, carSites.length + 2) - 1;
               const over = vozilo.broj_mjesta > 0 && carWorkers.length > vozilo.broj_mjesta;
+              const vehicleLocked = isVehicleLocked(vozilo.id);
               const target = `car-${vozilo.id}`;
               return (
                 <section
                   key={vozilo.id}
-                  onDragOver={(e) => allowDrop(e, target)}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    if (!vehicleLocked) allowDrop(e, target);
+                    else setDropTarget(null);
+                  }}
                   onDragLeave={(e) => {
                     if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null);
                   }}
                   onDrop={(e) => dropOnVehicle(e, vozilo.id)}
-                  className={`min-w-0 rounded-lg border-2 p-3 transition-colors ${dropTarget === target ? 'border-sky-400 bg-sky-50' : 'border-slate-400 bg-slate-200'}`}
+                  title={vehicleLocked ? 'Zaključano zbog potvrđene stavke Ostalo ili zaključenog radnog naloga' : undefined}
+                  className={`min-w-0 rounded-lg border-2 p-3 transition-colors ${vehicleLocked ? 'border-emerald-500 bg-emerald-50/60' : dropTarget === target ? 'border-sky-400 bg-sky-50' : 'border-slate-400 bg-slate-200'}`}
                 >
                   <div className="mb-2 flex items-center gap-1.5">
                     <span className="w-20 flex-shrink-0 rounded border border-slate-800 bg-white px-1.5 py-0.5 text-xs text-slate-900">AUTO:</span>
                     <span className="min-w-0 flex-1 truncate rounded border border-slate-800 bg-amber-200 px-2 py-0.5 text-center text-sm font-bold uppercase text-slate-900" title={[vozilo.marka, vozilo.model, vozilo.registracija].filter(Boolean).join(' ')}>
                       {[vozilo.marka, vozilo.model, vozilo.registracija].filter(Boolean).join(' ')}
                     </span>
+                    {vehicleLocked && <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold text-white">ZAKLJUČANO</span>}
                   </div>
 
                   <div className="mb-2 flex gap-2">
@@ -709,49 +859,99 @@ export function RasporedView() {
                         const g = a.gradiliste_id ? gradilista.find((item) => item.id === a.gradiliste_id) : undefined;
                         const isText = !a.gradiliste_id;
                         const hasNalog = Boolean(a.nalog_id);
-                        const nalogLocked = hasNalog && lockedNalozi.includes(a.nalog_id as string);
+                        const nalogLocked = vehicleLocked;
                         return (
                           <div
                             key={a.id}
-                            draggable
-                            onDragStart={(e) => startDrag(e, { type: 'gradiliste', id: a.gradiliste_id ?? a.id, assignmentId: a.id })}
-                            className={`min-h-[2.25rem] cursor-grab border-b border-slate-100 pb-0.5 ${nalogLocked ? 'bg-emerald-100' : ''}`}
+                            draggable={!nalogLocked}
+                            onDragStart={(e) => {
+                              if (nalogLocked) {
+                                e.preventDefault();
+                                return;
+                              }
+                              startDrag(e, { type: 'gradiliste', id: a.gradiliste_id ?? a.id, assignmentId: a.id });
+                            }}
+                            className={`min-h-[2.25rem] border-b border-slate-100 pb-0.5 ${nalogLocked ? 'cursor-not-allowed bg-emerald-100' : 'cursor-grab'}`}
                           >
                             <div className="flex items-start justify-between gap-1">
                               {isText ? (
-                                <input
-                                  key={`${a.id}-${a.tekst ?? ''}`}
-                                  defaultValue={a.tekst ?? ''}
-                                  aria-label="Ručni unos"
-                                  onBlur={(e) => {
-                                    const next = e.target.value.trim();
-                                    if (!next) void run(() => removeRasporedGradiliste(a.id));
-                                    else if (next !== a.tekst) void run(() => updateRasporedTekst(a.id, next));
-                                  }}
-                                  className="min-w-0 flex-1 bg-transparent text-[13px] font-medium text-slate-900 outline-none focus:ring-1 focus:ring-sky-500"
-                                />
+                                <div className={`flex min-w-0 flex-1 items-center gap-1 rounded px-1 ${a.iz_ostalo ? 'bg-pink-50' : ''}`}>
+                                  <input
+                                    key={`${a.id}-${a.tekst ?? ''}`}
+                                    defaultValue={a.tekst ?? ''}
+                                    aria-label="Ručni unos"
+                                    disabled={vehicleLocked}
+                                    onBlur={(e) => {
+                                      const next = e.target.value.trim();
+                                      if (!next) void run(() => removeRasporedGradiliste(a.id));
+                                      else if (next !== a.tekst) void run(() => updateRasporedTekst(a.id, next));
+                                    }}
+                                    className={`min-w-0 flex-1 bg-transparent text-[13px] font-medium outline-none focus:ring-1 focus:ring-sky-500 ${a.iz_ostalo ? 'text-pink-500' : 'text-slate-900'}`}
+                                  />
+                                  {a.iz_ostalo && (
+                                    <label
+                                      title={a.gradiliste_potvrdeno
+                                        ? isVehicleOrderLocked(vozilo.id) || siteAssignments.some((other) => other.id !== a.id && other.vozilo_id === vozilo.id && other.gradiliste_potvrdeno)
+                                          ? 'Makni ovu potvrdu; vozilo ostaje zaključano dok postoji druga potvrda ili zaključen nalog'
+                                          : 'Odznači za otključavanje vozila'
+                                        : vehicleLocked
+                                          ? 'Vozilo je zaključano zbog druge potvrde ili zaključenog naloga'
+                                          : 'Potvrdi ovu stavku i zaključaj vozilo'}
+                                      className={`flex flex-shrink-0 items-center gap-0.5 rounded px-1 text-[10px] ${vehicleLocked && !a.gradiliste_potvrdeno ? 'cursor-not-allowed text-slate-300' : 'cursor-pointer text-slate-600'}`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(a.gradiliste_potvrdeno)}
+                                        disabled={vehicleLocked && !a.gradiliste_potvrdeno}
+                                        onChange={(event) => toggleSiteConfirmation(a, event.target.checked)}
+                                        aria-label={`Potvrdi stavku Ostalo ${a.tekst ?? ''}`}
+                                        className="h-3.5 w-3.5 accent-emerald-600"
+                                      />
+                                      Potvrdi
+                                    </label>
+                                  )}
+                                </div>
                               ) : (
                                 <span className="min-w-0 flex-1 break-words text-[13px] font-medium leading-tight text-blue-800">{g?.naziv ?? 'Nepoznato gradilište'}</span>
                               )}
                               <button
                                 type="button"
                                 onClick={() => void run(() => removeRasporedGradiliste(a.id))}
+                                disabled={nalogLocked}
                                 aria-label="Ukloni gradilište"
-                                className="flex-shrink-0 text-slate-300 hover:text-red-600"
+                                title={nalogLocked ? 'Nije moguće ukloniti gradilište sa zaključenim radnim nalogom' : 'Ukloni gradilište'}
+                                className="flex-shrink-0 text-slate-300 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                               >
                                 <X className="h-3.5 w-3.5" />
                               </button>
                               {!isText && g && (
-                                <button
-                                  type="button"
-                                  onClick={() => void (a.nalog_id ? openExistingNalog(a.id, a.nalog_id) : openNalog(a.id, g, [vozilo.registracija, carTime].filter(Boolean).join(', '), carWorkers.map((w) => w.radnik_id)))}
-                                  title={nalogLocked ? 'Zaključen radni nalog – otvori' : hasNalog ? 'Nacrt radnog naloga – otvori' : 'Kreiraj radni nalog'}
-                                  aria-label={hasNalog ? 'Otvori radni nalog' : 'Kreiraj radni nalog'}
-                                  className={`flex flex-shrink-0 items-center gap-0.5 rounded px-1 text-[10px] font-semibold ${nalogLocked ? 'bg-emerald-500 text-white' : hasNalog ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-600 hover:bg-sky-100 hover:text-sky-800'}`}
-                                >
-                                  {nalogLocked ? <Check className="h-3 w-3" /> : <ClipboardList className="h-3 w-3" />}
-                                  RN
-                                </button>
+                                <>
+                                  {a.gradiliste_potvrdeno && !a.iz_ostalo && (
+                                    <label
+                                      title="Ukloni ranije spremljenu potvrdu gradilišta"
+                                      className="flex flex-shrink-0 cursor-pointer items-center gap-0.5 rounded px-1 text-[10px] text-amber-700"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked
+                                        onChange={() => toggleSiteConfirmation(a, false)}
+                                        aria-label={`Ukloni staru potvrdu za gradilište ${g.naziv}`}
+                                        className="h-3.5 w-3.5 accent-amber-600"
+                                      />
+                                      Ukloni staru potvrdu
+                                    </label>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => void (a.nalog_id ? openExistingNalog(a.id, a.nalog_id) : openNalog(a.id, g, [vozilo.registracija, carTime].filter(Boolean).join(', '), carWorkers.map((w) => w.radnik_id)))}
+                                    title={nalogLocked ? 'Zaključen radni nalog – otvori' : hasNalog ? 'Nacrt radnog naloga – otvori' : 'Kreiraj radni nalog'}
+                                    aria-label={hasNalog ? 'Otvori radni nalog' : 'Kreiraj radni nalog'}
+                                    className={`flex flex-shrink-0 items-center gap-0.5 rounded px-1 text-[10px] font-semibold ${nalogLocked ? 'bg-emerald-500 text-white' : hasNalog ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-600 hover:bg-sky-100 hover:text-sky-800'}`}
+                                  >
+                                    {nalogLocked ? <Check className="h-3 w-3" /> : <ClipboardList className="h-3 w-3" />}
+                                    RN
+                                  </button>
+                                </>
                               )}
                             </div>
                           </div>
@@ -769,9 +969,10 @@ export function RasporedView() {
                               onBlur={(e) => {
                                 const text = e.target.value.trim();
                                 e.target.value = '';
-                                if (text) void run(() => addRasporedTekst(selectedDate, vozilo.id, text));
+                                if (text && !vehicleLocked) void run(() => addRasporedTekst(selectedDate, vozilo.id, text));
                               }}
-                              className="h-full w-full bg-transparent px-1 text-[13px] text-slate-900 outline-none placeholder:text-slate-300 focus:ring-1 focus:ring-sky-500"
+                              disabled={vehicleLocked}
+                              className="h-full w-full bg-transparent px-1 text-[13px] text-slate-900 outline-none placeholder:text-slate-300 focus:ring-1 focus:ring-sky-500 disabled:cursor-not-allowed disabled:bg-slate-100"
                             />
                           )}
                         </div>
@@ -780,7 +981,7 @@ export function RasporedView() {
                         <input
                           key={`${vozilo.id}-${carTime}`}
                           defaultValue={carTime}
-                          disabled={carSites.length === 0}
+                          disabled={carSites.length === 0 || vehicleLocked}
                           aria-label="Radno vrijeme"
                           onBlur={(e) => {
                             const next = e.target.value.trim();
@@ -800,9 +1001,15 @@ export function RasporedView() {
                         return (
                           <div
                             key={a.id}
-                            draggable
-                            onDragStart={(e) => startDrag(e, { type: 'radnik', id: a.radnik_id, assignmentId: a.id })}
-                            className="flex h-6 cursor-grab items-center justify-between gap-1 border-b border-slate-100"
+                            draggable={!vehicleLocked}
+                            onDragStart={(e) => {
+                              if (vehicleLocked) {
+                                e.preventDefault();
+                                return;
+                              }
+                              startDrag(e, { type: 'radnik', id: a.radnik_id, assignmentId: a.id });
+                            }}
+                            className={`flex h-6 items-center justify-between gap-1 border-b border-slate-100 ${vehicleLocked ? 'cursor-not-allowed' : 'cursor-grab'}`}
                           >
                             <span className={`truncate text-[13px] font-medium ${workerCount(a.radnik_id) > 1 ? 'text-red-600' : 'text-emerald-700'}`}>{r ? `${r.prezime} ${r.ime}` : 'Nepoznat radnik'}</span>
                             <span className="flex flex-shrink-0 items-center gap-1">
@@ -810,8 +1017,10 @@ export function RasporedView() {
                               <button
                                 type="button"
                                 onClick={() => void run(() => removeRasporedRadnik(a.id))}
+                                disabled={vehicleLocked}
                                 aria-label="Ukloni radnika"
-                                className="text-slate-300 hover:text-red-600"
+                                title={vehicleLocked ? 'Vozilo je zaključano' : 'Ukloni radnika'}
+                                className="text-slate-300 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                               >
                                 <X className="h-3.5 w-3.5" />
                               </button>
@@ -852,12 +1061,20 @@ export function RasporedView() {
                 .map((a) => vehicleOf(a.vozilo_id)?.registracija)
                 .filter(Boolean)
                 .join(', ');
+              const workerLocked = isWorkerAssignedToLockedVehicle(r.id);
               return (
-                <div
-                  key={r.id}
-                  draggable
-                  onDragStart={(e) => startDrag(e, { type: 'radnik', id: r.id })}
-                  className={`flex cursor-grab items-center gap-1.5 rounded-lg border bg-white px-2 py-1.5 shadow-sm active:cursor-grabbing ${assignments.length > 1 ? 'border-red-200' : assignments.length === 1 ? 'border-emerald-200' : 'border-slate-200 hover:border-sky-300'}`}
+              <div
+                key={r.id}
+                draggable={!workerLocked}
+                onDragStart={(e) => {
+                  if (workerLocked) {
+                    e.preventDefault();
+                    return;
+                  }
+                  startDrag(e, { type: 'radnik', id: r.id });
+                }}
+                title={workerLocked ? 'Radnik je na vozilu sa zaključenim radnim nalogom' : undefined}
+                className={`flex items-center gap-1.5 rounded-lg border bg-white px-2 py-1.5 shadow-sm ${workerLocked ? 'cursor-not-allowed opacity-70' : 'cursor-grab active:cursor-grabbing'} ${assignments.length > 1 ? 'border-red-200' : assignments.length === 1 ? 'border-emerald-200' : 'border-slate-200 hover:border-sky-300'}`}
                 >
                   <GripVertical className="h-3.5 w-3.5 flex-shrink-0 text-slate-300" />
                   <div className="min-w-0 flex-1">

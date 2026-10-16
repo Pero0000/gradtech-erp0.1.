@@ -34,7 +34,16 @@ import type {
   FakturaStatus,
   UgovoreniRad,
   UgovoreniRadStatus,
+  Oprema,
+  OpremaDokument,
+  OpremaKategorija,
 } from '@/types';
+
+export async function getPrivateFileUrl(path: string, expiresIn = 3600): Promise<string> {
+  const { data, error } = await supabase.storage.from('nalozi-foto').createSignedUrl(path, expiresIn);
+  if (error) throw error;
+  return data.signedUrl;
+}
 
 function throwActionableDbError(error: any, entityName: string) {
   const message = String(error?.message ?? '').toLowerCase();
@@ -218,10 +227,10 @@ export async function deleteRadnik(id: string) {
 export async function fetchRadnikDokumenti(radnikId: string): Promise<RadnikDokument[]> {
   const { data, error } = await supabase.from('radnici_dokumenti').select('*').eq('radnik_id', radnikId).order('datum_do', { ascending: true, nullsFirst: false });
   if (error) throw error;
-  return (data ?? []).map((d: any) => ({
+  return Promise.all((data ?? []).map(async (d: any) => ({
     ...d,
-    url: d.putanja ? supabase.storage.from('nalozi-foto').getPublicUrl(d.putanja).data.publicUrl : null,
-  }));
+    url: d.putanja ? await getPrivateFileUrl(d.putanja) : null,
+  })));
 }
 
 export async function addRadnikDokument(
@@ -257,10 +266,10 @@ export async function deleteRadnikDokument(d: RadnikDokument) {
 export async function fetchVoziloDokumenti(voziloId: string): Promise<VoziloDokument[]> {
   const { data, error } = await supabase.from('vozila_dokumenti').select('*').eq('vozilo_id', voziloId).order('datum_do', { ascending: false, nullsFirst: false });
   if (error) throw error;
-  return (data ?? []).map((d: any) => ({
+  return Promise.all((data ?? []).map(async (d: any) => ({
     ...d,
-    url: d.putanja ? supabase.storage.from('nalozi-foto').getPublicUrl(d.putanja).data.publicUrl : null,
-  }));
+    url: d.putanja ? await getPrivateFileUrl(d.putanja) : null,
+  })));
 }
 
 export async function fetchRadnikPovijest(radnikId: string): Promise<RadnikPovijest[]> {
@@ -371,6 +380,88 @@ export async function deleteVozilo(id: string) {
   if (error) throw error;
 }
 
+export async function fetchOprema(kategorija: OpremaKategorija): Promise<Oprema[]> {
+  const { data, error } = await supabase
+    .from('oprema')
+    .select('*, gradilista:gradiliste_id ( id, naziv )')
+    .eq('kategorija', kategorija)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as Oprema[];
+}
+
+export async function createOprema(item: Omit<Oprema, 'id' | 'created_at' | 'updated_at' | 'gradilista'>) {
+  const { data, error } = await supabase.from('oprema').insert(item).select('*, gradilista:gradiliste_id ( id, naziv )').single();
+  if (error) throw error;
+  return data as Oprema;
+}
+
+export async function updateOprema(id: string, item: Partial<Omit<Oprema, 'id' | 'created_at' | 'updated_at' | 'gradilista'>>) {
+  const { data, error } = await supabase
+    .from('oprema')
+    .update({ ...item, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('*, gradilista:gradiliste_id ( id, naziv )')
+    .single();
+  if (error) throw error;
+  return data as Oprema;
+}
+
+export async function deleteOprema(id: string) {
+  const { error } = await supabase.from('oprema').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function fetchOpremaDokumenti(opremaId: string): Promise<OpremaDokument[]> {
+  const { data, error } = await supabase.from('oprema_dokumenti').select('*').eq('oprema_id', opremaId).order('created_at', { ascending: false });
+  if (error) throw error;
+  return Promise.all((data ?? []).map(async (item) => ({
+    ...item,
+    url: item.putanja ? await getPrivateFileUrl(item.putanja) : null,
+  }))) as Promise<OpremaDokument[]>;
+}
+
+export async function fetchOpremaDokumentiZaResurse(opremaIds: string[]): Promise<OpremaDokument[]> {
+  if (opremaIds.length === 0) return [];
+  const { data, error } = await supabase.from('oprema_dokumenti').select('*').in('oprema_id', opremaIds).order('created_at', { ascending: false });
+  if (error) throw error;
+  return Promise.all((data ?? []).map(async (item) => ({
+    ...item,
+    url: item.putanja ? await getPrivateFileUrl(item.putanja) : null,
+  }))) as Promise<OpremaDokument[]>;
+}
+
+export async function addOpremaDokument(
+  opremaId: string,
+  item: Omit<OpremaDokument, 'id' | 'oprema_id' | 'created_at' | 'url' | 'putanja'>,
+  file: File | null,
+) {
+  let putanja: string | null = null;
+  if (file) {
+    const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
+    putanja = `oprema/${opremaId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
+    const { error: uploadError } = await supabase.storage.from('nalozi-foto').upload(putanja, file, { contentType: file.type || undefined });
+    if (uploadError) throw uploadError;
+  }
+  const { error } = await supabase.from('oprema_dokumenti').insert({ ...item, oprema_id: opremaId, putanja });
+  if (error) {
+    if (putanja) {
+      const { error: cleanupError } = await supabase.storage.from('nalozi-foto').remove([putanja]);
+      if (cleanupError) throw new Error(`${error.message}; nije moguće očistiti priloženu datoteku: ${cleanupError.message}`);
+    }
+    throw error;
+  }
+}
+
+export async function deleteOpremaDokument(item: OpremaDokument) {
+  const { error } = await supabase.from('oprema_dokumenti').delete().eq('id', item.id);
+  if (error) throw error;
+  if (item.putanja) {
+    const { error: storageError } = await supabase.storage.from('nalozi-foto').remove([item.putanja]);
+    if (storageError) throw storageError;
+  }
+}
+
 export async function fetchRasporedi(): Promise<Raspored[]> {
   const { data, error } = await supabase
     .from('raspored')
@@ -475,6 +566,93 @@ export async function fetchDnevniRaspored(datum: string) {
   };
 }
 
+export async function copyLatestDnevniRaspored(targetDate: string) {
+  const [latestSites, latestWorkers, latestOstalo] = await Promise.all([
+    supabase.from('dnevni_raspored_gradilista').select('datum, created_at').neq('datum', targetDate).order('created_at', { ascending: false }).limit(1),
+    supabase.from('dnevni_raspored_radnici').select('datum, created_at').neq('datum', targetDate).order('created_at', { ascending: false }).limit(1),
+    supabase.from('dnevni_raspored_ostalo').select('datum, created_at').neq('datum', targetDate).order('created_at', { ascending: false }).limit(1),
+  ]);
+  if (latestSites.error) throw dnevniRasporedError(latestSites.error);
+  if (latestWorkers.error) throw dnevniRasporedError(latestWorkers.error);
+  if (latestOstalo.error) throw ostaloError(latestOstalo.error);
+
+  const latestRows = [
+    ...(latestSites.data ?? []),
+    ...(latestWorkers.data ?? []),
+    ...(latestOstalo.data ?? []),
+  ];
+  const sourceDate = latestRows
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.datum;
+  if (!sourceDate) return null;
+
+  const [source, target, sourceOstaloResult, existingOstaloResult] = await Promise.all([
+    fetchDnevniRaspored(sourceDate),
+    fetchDnevniRaspored(targetDate),
+    supabase.from('dnevni_raspored_ostalo').select('*').eq('datum', sourceDate),
+    supabase.from('dnevni_raspored_ostalo').select('*'),
+  ]);
+  if (sourceOstaloResult.error) throw ostaloError(sourceOstaloResult.error);
+  if (existingOstaloResult.error) throw ostaloError(existingOstaloResult.error);
+
+  const targetSiteKeys = new Set(target.gradilista.map((row) =>
+    row.gradiliste_id ? `${row.vozilo_id}:site:${row.gradiliste_id}` : `${row.vozilo_id}:text:${row.tekst ?? ''}`));
+  const newSites = source.gradilista
+    .filter((row) => {
+      const key = row.gradiliste_id
+        ? `${row.vozilo_id}:site:${row.gradiliste_id}`
+        : `${row.vozilo_id}:text:${row.tekst ?? ''}`;
+      if (targetSiteKeys.has(key)) return false;
+      targetSiteKeys.add(key);
+      return true;
+    })
+    .map((row) => ({
+      datum: targetDate,
+      vozilo_id: row.vozilo_id,
+      gradiliste_id: row.gradiliste_id,
+      tekst: row.tekst ?? null,
+      vrijeme: row.vrijeme,
+      iz_ostalo: row.iz_ostalo ?? false,
+    }));
+  const targetWorkerKeys = new Set(target.radnici.map((row) => `${row.vozilo_id}:${row.radnik_id}`));
+  const newWorkers = source.radnici
+    .filter((row) => {
+      const key = `${row.vozilo_id}:${row.radnik_id}`;
+      if (targetWorkerKeys.has(key)) return false;
+      targetWorkerKeys.add(key);
+      return true;
+    })
+    .map((row) => ({ datum: targetDate, vozilo_id: row.vozilo_id, radnik_id: row.radnik_id }));
+
+  const existingOstalo = (existingOstaloResult.data ?? []) as DnevniRasporedOstalo[];
+  const existingOstaloKeys = new Set(existingOstalo.map((row) =>
+    row.radnik_id ? `worker:${row.radnik_id}` : `text:${row.tekst ?? ''}`));
+  const newOstalo = ((sourceOstaloResult.data ?? []) as DnevniRasporedOstalo[])
+    .filter((row) => {
+      const key = row.radnik_id ? `worker:${row.radnik_id}` : `text:${row.tekst ?? ''}`;
+      if (existingOstaloKeys.has(key)) return false;
+      existingOstaloKeys.add(key);
+      return true;
+    })
+    .map((row) => ({ datum: targetDate, tekst: row.tekst, radnik_id: row.radnik_id }));
+
+  const [siteInsert, workerInsert, ostaloInsert] = await Promise.all([
+    newSites.length > 0
+      ? supabase.from('dnevni_raspored_gradilista').upsert(newSites, { onConflict: 'datum,vozilo_id,gradiliste_id', ignoreDuplicates: true })
+      : Promise.resolve({ error: null }),
+    newWorkers.length > 0
+      ? supabase.from('dnevni_raspored_radnici').upsert(newWorkers, { onConflict: 'datum,vozilo_id,radnik_id', ignoreDuplicates: true })
+      : Promise.resolve({ error: null }),
+    newOstalo.length > 0
+      ? supabase.from('dnevni_raspored_ostalo').insert(newOstalo)
+      : Promise.resolve({ error: null }),
+  ]);
+  if (siteInsert.error) throw dnevniRasporedError(siteInsert.error);
+  if (workerInsert.error) throw dnevniRasporedError(workerInsert.error);
+  if (ostaloInsert.error) throw ostaloError(ostaloInsert.error);
+
+  return sourceDate;
+}
+
 function dnevniRasporedError(error: any) {
   if (String(error?.message ?? '').toLowerCase().includes('dnevni_raspored')) {
     return new Error('Tablice dnevnog rasporeda ne postoje. Pokreni najnoviju migraciju (dnevni raspored) u Supabase SQL editoru.');
@@ -489,8 +667,13 @@ export async function assignRasporedGradiliste(datum: string, voziloId: string, 
   if (error) throw dnevniRasporedError(error);
 }
 
-export async function addRasporedTekst(datum: string, voziloId: string, tekst: string) {
-  const { error } = await supabase.from('dnevni_raspored_gradilista').insert({ datum, vozilo_id: voziloId, tekst });
+export async function addRasporedTekst(datum: string, voziloId: string, tekst: string, izOstalo = false) {
+  const { error } = await supabase.from('dnevni_raspored_gradilista').insert({ datum, vozilo_id: voziloId, tekst, iz_ostalo: izOstalo });
+  if (error) throw dnevniRasporedError(error);
+}
+
+export async function setRasporedGradilistePotvrdeno(id: string, potvrdeno: boolean) {
+  const { error } = await supabase.from('dnevni_raspored_gradilista').update({ gradiliste_potvrdeno: potvrdeno }).eq('id', id);
   if (error) throw dnevniRasporedError(error);
 }
 
@@ -514,8 +697,8 @@ export async function removeRasporedGradiliste(id: string) {
   if (error) throw dnevniRasporedError(error);
 }
 
-export async function fetchRasporedOstalo(datum: string) {
-  const { data, error } = await supabase.from('dnevni_raspored_ostalo').select('*').eq('datum', datum).order('created_at');
+export async function fetchRasporedOstalo() {
+  const { data, error } = await supabase.from('dnevni_raspored_ostalo').select('*').order('created_at');
   if (error) throw ostaloError(error);
   return (data ?? []) as DnevniRasporedOstalo[];
 }
@@ -765,10 +948,40 @@ export async function updateRadniNalog(
     zakljucen?: boolean;
   },
 ) {
+  if (input.zakljucen === true) {
+    if (input.radnik_ids.length === 0) throw new Error('Dodijeli barem jednog djelatnika prije zaključivanja naloga.');
+    const { data: leader, error: leaderError } = await supabase
+      .from('radni_nalozi')
+      .select('poslovodja_id,mobile_status')
+      .eq('id', id)
+      .single();
+    if (leaderError) throw leaderError;
+    if (!leader.poslovodja_id || !input.radnik_ids.includes(leader.poslovodja_id)) {
+      throw new Error('Prije zaključivanja odaberi dodijeljenog poslovođu u detaljima naloga.');
+    }
+    if (leader.mobile_status === 'u_tijeku' || leader.mobile_status === 'predan' || leader.mobile_status === 'odobren') {
+      throw new Error('Nalog je već započet ili predan djelatnicima i ne može se ponovno zaključivati.');
+    }
+  }
+  if (input.zakljucen === false) {
+    const { data: current, error: currentError } = await supabase
+      .from('radni_nalozi')
+      .select('mobile_status')
+      .eq('id', id)
+      .single();
+    if (currentError) throw currentError;
+    if (current.mobile_status === 'u_tijeku' || current.mobile_status === 'predan' || current.mobile_status === 'odobren') {
+      throw new Error('Nalog se ne može vratiti u nacrt nakon što je djelatnik započeo rad.');
+    }
+  }
+
   const { error } = await supabase
     .from('radni_nalozi')
     .update({
-      ...(input.zakljucen === undefined ? {} : { zakljucen_at: input.zakljucen ? new Date().toISOString() : null }),
+      ...(input.zakljucen === undefined ? {} : {
+        zakljucen_at: input.zakljucen ? new Date().toISOString() : null,
+        mobile_status: input.zakljucen ? 'dodijeljen' : 'nije_poslan',
+      }),
       gradiliste_id: input.gradiliste_id,
       naslov: input.naslov,
       opis: input.opis,
@@ -796,7 +1009,35 @@ export async function updateRadniNalog(
     if (e2) throw e2;
   }
 
+  if (input.zakljucen === false) {
+    const { error: resetError } = await supabase
+      .from('radni_nalozi_radnici')
+      .update({
+        mobile_reviewed_sections: [],
+        mobile_started_at: null,
+        mobile_finished_at: null,
+        vrijeme_od: null,
+        vrijeme_do: null,
+      })
+      .eq('nalog_id', id);
+    if (resetError) throw resetError;
+  }
+
   await syncNalogTroskovi(id);
+}
+
+export async function notifyLockedNalogWorkers(nalogId: string) {
+  const { data, error } = await supabase.functions.invoke('notify-work-order', { body: { nalog_id: nalogId } });
+  if (error) {
+    throw new Error(`Nalog je zaključan i djelatnici ga vide, ali push obavijest nije poslana: ${error.message}`);
+  }
+  const receipt = data as { sent?: number; failed?: number; reason?: string } | null;
+  if (!receipt?.sent) {
+    throw new Error(`Nalog je zaključan i djelatnici ga vide, ali push obavijest nije poslana${receipt?.reason ? ` (${receipt.reason})` : ''}.`);
+  }
+  if (receipt.failed) {
+    throw new Error(`Nalog je zaključan; push je poslan na ${receipt.sent} uređaja, a ${receipt.failed} uređaja nije primilo obavijest.`);
+  }
 }
 
 const toMinutes = (t: string | null) => {
@@ -1040,9 +1281,93 @@ export async function setNalogTeren(nalogId: string, teren: boolean) {
 }
 
 export async function setNalogZavrsen(nalogId: string, zavrsen: boolean) {
-  const { error } = await supabase.from('radni_nalozi').update({ status: zavrsen ? 'zavrsen' : 'u_tijeku' }).eq('id', nalogId);
+  const { data: nalog, error: fetchError } = await supabase
+    .from('radni_nalozi')
+    .select('mobile_status')
+    .eq('id', nalogId)
+    .single();
+  if (fetchError) throw fetchError;
+  if (zavrsen && (nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku')) {
+    throw new Error('Djelatnici još rade na nalogu. Zaključivanje je moguće tek nakon što poslovođa preda završni izvještaj.');
+  }
+  const mobileStatus = nalog.mobile_status === 'predan' || nalog.mobile_status === 'odobren'
+    ? (zavrsen ? 'odobren' : 'predan')
+    : nalog.mobile_status;
+  const { error } = await supabase
+    .from('radni_nalozi')
+    .update({ status: zavrsen ? 'zavrsen' : 'u_tijeku', mobile_status: mobileStatus })
+    .eq('id', nalogId);
   if (error) throw error;
   await syncNalogTroskovi(nalogId);
+}
+
+export interface MobileRadniNalog {
+  id: string;
+  broj: string;
+  gradiliste_naziv: string | null;
+  naslov: string;
+  opis: string | null;
+  status: NalogStatus;
+  prioritet: NalogPrioritet;
+  rok: string | null;
+  mobile_status: 'nije_poslan' | 'dodijeljen' | 'u_tijeku' | 'predan' | 'odobren';
+  poslovodja_id: string | null;
+  mobile_reviewed_sections: string[];
+  mobile_started_at: string | null;
+  mobile_finished_at: string | null;
+  vrijeme_od: string | null;
+  vrijeme_do: string | null;
+}
+
+export async function fetchMobileRadniNalozi(): Promise<MobileRadniNalog[]> {
+  const { data, error } = await supabase.rpc('get_mobile_radni_nalozi');
+  if (error) throw error;
+  return (data ?? []) as MobileRadniNalog[];
+}
+
+export async function startMobileNalog(nalogId: string, reviewedSections: string[]) {
+  const { error } = await supabase.rpc('mobile_start_nalog', {
+    p_nalog_id: nalogId,
+    p_reviewed_sections: reviewedSections,
+  });
+  if (error) throw error;
+}
+
+export async function finishMobileShift(nalogId: string) {
+  const { error } = await supabase.rpc('mobile_finish_shift', { p_nalog_id: nalogId });
+  if (error) throw error;
+}
+
+export async function saveMobileNalogReport(input: {
+  nalogId: string;
+  kmPocetak: number | null;
+  kmKraj: number | null;
+  kmNa: boolean;
+  napomena: string;
+  napomenaNa: boolean;
+  tasksConfirmed: boolean;
+  fotoNa: boolean;
+  materijalNa: boolean;
+  alatNa: boolean;
+}) {
+  const { error } = await supabase.rpc('mobile_save_nalog_report', {
+    p_nalog_id: input.nalogId,
+    p_km_pocetak: input.kmPocetak,
+    p_km_kraj: input.kmKraj,
+    p_km_na: input.kmNa,
+    p_napomena: input.napomena,
+    p_napomena_na: input.napomenaNa,
+    p_tasks_confirmed: input.tasksConfirmed,
+    p_foto_na: input.fotoNa,
+    p_materijal_na: input.materijalNa,
+    p_alat_na: input.alatNa,
+  });
+  if (error) throw error;
+}
+
+export async function submitMobileNalog(nalogId: string) {
+  const { error } = await supabase.rpc('mobile_submit_nalog', { p_nalog_id: nalogId });
+  if (error) throw error;
 }
 
 export async function saveNalogIzvrsenje(
@@ -1103,10 +1428,10 @@ export interface NalogFoto {
 export async function fetchNalogFoto(nalogId: string): Promise<NalogFoto[]> {
   const { data, error } = await supabase.from('radni_nalozi_foto').select('*').eq('nalog_id', nalogId).order('created_at');
   if (error) throw error;
-  return (data ?? []).map((f: any) => ({
+  return Promise.all((data ?? []).map(async (f: any) => ({
     ...f,
-    url: supabase.storage.from('nalozi-foto').getPublicUrl(f.putanja).data.publicUrl,
-  }));
+    url: await getPrivateFileUrl(f.putanja),
+  })));
 }
 
 async function spremiNaGradiliste(nalogId: string, putanja: string, naziv: string, velicina: number | null, vrsta: 'dokument' | 'slika') {
@@ -1128,7 +1453,7 @@ async function datotekaJosKoristena(putanja: string) {
   return (g.count ?? 0) + (d.count ?? 0) + (f.count ?? 0) > 0;
 }
 
-export async function uploadNalogFoto(nalogId: string, file: File) {
+export async function uploadNalogFoto(nalogId: string, file: File, copyToGradiliste = true) {
   const ext = file.name.includes('.') ? file.name.split('.').pop() : 'jpg';
   const putanja = `${nalogId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const { error: upError } = await supabase.storage.from('nalozi-foto').upload(putanja, file, { contentType: file.type });
@@ -1138,7 +1463,7 @@ export async function uploadNalogFoto(nalogId: string, file: File) {
     await supabase.storage.from('nalozi-foto').remove([putanja]);
     throw error;
   }
-  await spremiNaGradiliste(nalogId, putanja, file.name, file.size, 'slika');
+  if (copyToGradiliste) await spremiNaGradiliste(nalogId, putanja, file.name, file.size, 'slika');
 }
 
 export async function deleteNalogFoto(foto: NalogFoto) {
@@ -1188,10 +1513,10 @@ export interface NalogDokument {
 export async function fetchNalogDokumenti(nalogId: string): Promise<NalogDokument[]> {
   const { data, error } = await supabase.from('radni_nalozi_dokumenti').select('*').eq('nalog_id', nalogId).order('created_at');
   if (error) throw error;
-  return (data ?? []).map((d: any) => ({
+  return Promise.all((data ?? []).map(async (d: any) => ({
     ...d,
-    url: supabase.storage.from('nalozi-foto').getPublicUrl(d.putanja).data.publicUrl,
-  }));
+    url: await getPrivateFileUrl(d.putanja),
+  })));
 }
 
 export async function uploadNalogDokument(nalogId: string, file: File) {
@@ -1261,10 +1586,10 @@ export interface GradilisteDokument {
 export async function fetchGradilisteDokumenti(gradilisteId: string): Promise<GradilisteDokument[]> {
   const { data, error } = await supabase.from('gradiliste_dokumenti').select('*').eq('gradiliste_id', gradilisteId).order('created_at');
   if (error) throw error;
-  return (data ?? []).map((d: any) => ({
+  return Promise.all((data ?? []).map(async (d: any) => ({
     ...d,
-    url: supabase.storage.from('nalozi-foto').getPublicUrl(d.putanja).data.publicUrl,
-  }));
+    url: await getPrivateFileUrl(d.putanja),
+  })));
 }
 
 export async function uploadGradilisteDokument(gradilisteId: string, file: File, vrsta: 'dokument' | 'slika') {
@@ -1535,6 +1860,10 @@ export async function createUgovoreniRad(u: {
   ugovoreni_iznos: number;
   ostvareni_iznos: number;
   status: UgovoreniRadStatus;
+  vrsta?: UgovoreniRad['vrsta'];
+  ponuda_id?: string | null;
+  dokument_putanja?: string | null;
+  dokument_naziv?: string | null;
 }) {
   const { data, error } = await supabase.from('ugovoreni_radovi').insert(u).select().single();
   if (error) throw error;
@@ -1549,6 +1878,19 @@ export async function updateUgovoreniRad(id: string, u: Partial<UgovoreniRad>) {
 
 export async function deleteUgovoreniRad(id: string) {
   const { error } = await supabase.from('ugovoreni_radovi').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function uploadUgovoreniRadDokument(gradilisteId: string, file: File) {
+  const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
+  const putanja = `gradiliste/${gradilisteId}/vtr/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
+  const { error } = await supabase.storage.from('nalozi-foto').upload(putanja, file, { contentType: file.type || undefined });
+  if (error) throw error;
+  return putanja;
+}
+
+export async function deleteUgovoreniRadDokument(putanja: string) {
+  const { error } = await supabase.storage.from('nalozi-foto').remove([putanja]);
   if (error) throw error;
 }
 

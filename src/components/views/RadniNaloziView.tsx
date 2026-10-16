@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ClipboardList, Plus, Pencil, Trash2, Users, Calendar, AlertCircle, Printer } from 'lucide-react';
+import { ClipboardList, Plus, Pencil, Trash2, Users, Calendar, AlertCircle, Printer, Bell } from 'lucide-react';
 import type { RadniNalog, Gradiliste, Radnik, NalogStatus, NalogPrioritet, Rok } from '@/types';
 import {
   fetchRokoviNaloga,
@@ -10,6 +10,7 @@ import {
   createRadniNalog,
   updateRadniNalog,
   deleteRadniNalog,
+  notifyLockedNalogWorkers,
   fetchGradilista,
   fetchRadnici,
 } from '@/lib/api';
@@ -90,6 +91,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
   const [rokovi, setRokovi] = useState<Rok[]>([]);
   const [rokForm, setRokForm] = useState({ naziv: '', datum: '', opis: '' });
   const [printingId, setPrintingId] = useState<string | null>(null);
+  const [notifyingId, setNotifyingId] = useState<string | null>(null);
 
   const printNalog = async (n: RadniNalog) => {
     setPrintingId(n.id);
@@ -99,6 +101,19 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
       setError(e instanceof Error ? e.message : 'Greška pri izradi PDF-a');
     } finally {
       setPrintingId(null);
+    }
+  };
+
+  const notifyWorkers = async (n: RadniNalog) => {
+    setNotifyingId(n.id);
+    setError(null);
+    try {
+      await notifyLockedNalogWorkers(n.id);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Push obavijest nije poslana.');
+    } finally {
+      setNotifyingId(null);
     }
   };
 
@@ -365,6 +380,11 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                     <span className="font-mono text-xs text-slate-400">{n.broj}</span>
                     <Badge variant={statusInfo[n.status].variant}>{statusInfo[n.status].label}</Badge>
                   </div>
+                  {n.mobile_status && n.mobile_status !== 'nije_poslan' && (
+                    <p className={`mt-1 text-xs font-semibold ${n.mobile_status === 'predan' ? 'text-amber-700' : n.mobile_status === 'odobren' ? 'text-emerald-700' : 'text-sky-700'}`}>
+                      Mobitel: {{ dodijeljen: 'Djelatniku dodijeljen', u_tijeku: 'Djelatnik radi', predan: 'Čeka tvoje odobrenje', odobren: 'Djelatniku odobreno', nije_poslan: '' }[n.mobile_status]}
+                    </p>
+                  )}
                   <p className="mt-1 text-sm font-semibold text-slate-900">{n.naslov}</p>
                   {n.gradilista?.naziv && <p className="text-xs text-slate-500">{n.gradilista.naziv}</p>}
                   <div className="mt-1.5 flex flex-wrap gap-3 text-[11px] text-slate-500">
@@ -412,6 +432,17 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                       <Printer className="h-4 w-4" />
                       {printingId === n.id ? 'Priprema…' : 'PDF za ispis'}
                     </button>
+                    {n.mobile_status === 'dodijeljen' && (
+                      <button
+                        onClick={() => void notifyWorkers(n)}
+                        disabled={notifyingId === n.id}
+                        title="Ponovno pošalji push obavijest dodijeljenim djelatnicima"
+                        className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+                      >
+                        <Bell className="h-4 w-4" />
+                        {notifyingId === n.id ? 'Šaljem…' : 'Pošalji push'}
+                      </button>
+                    )}
                     <button
                       onClick={() => openEdit(n)}
                       className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-600 transition-colors"
@@ -432,6 +463,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                 <div className="flex flex-wrap items-center gap-3">
                   <Badge variant={si.variant}>{si.label}</Badge>
                   <Badge variant={pi.variant}>{pi.label}</Badge>
+                  {n.mobile_status === 'predan' && <Badge variant="orange">Čeka odobrenje djelatnikova izvještaja</Badge>}
                   {(n.radnici ?? []).length > 0 && (
                     <span className="flex items-center gap-1.5 text-xs text-slate-500">
                       <Users className="h-3.5 w-3.5" />

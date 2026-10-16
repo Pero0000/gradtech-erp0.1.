@@ -5,19 +5,23 @@ import { usePushRegistration } from '@/components/mobile/usePushRegistration';
 import {
   addNalogStavka,
   fetchGradilisteDokumenti,
+  fetchMobileNalogTeam,
   fetchMobileRadniNalozi,
+  fetchMobileWorkerDisplayName,
   fetchNalogDokumenti,
   fetchNalogFoto,
   fetchNalogGradilisteDokumentIds,
   fetchNalogStavke,
   fetchNalogZadaci,
-  finishMobileShift,
+  finishMobileWorkerTime,
   saveMobileNalogReport,
-  startMobileNalog,
+  saveMobileWorkerTime,
+  startMobileWorkerTime,
   submitMobileNalog,
   uploadNalogFoto,
   type GradilisteDokument,
   type MobileRadniNalog,
+  type MobileWorkerTime,
   type NalogDokument,
   type NalogFoto,
   type NalogStavka,
@@ -60,6 +64,7 @@ type MobileDetails = {
   stavke: NalogStavka[];
   dokumenti: Array<NalogDokument | GradilisteDokument>;
   foto: NalogFoto[];
+  ekipa: MobileWorkerTime[];
 };
 
 const emptyReport: MobileReport = {
@@ -75,11 +80,11 @@ const emptyReport: MobileReport = {
 };
 
 function errorMessage(reason: unknown, fallback: string) {
-  return reason instanceof Error ? reason.message : fallback;
-}
-
-function time(value: string | null) {
-  return value?.slice(0, 5) ?? '—';
+  if (reason instanceof Error) return reason.message;
+  if (typeof reason === 'object' && reason !== null && 'message' in reason && typeof reason.message === 'string') {
+    return reason.message;
+  }
+  return fallback;
 }
 
 function Button({
@@ -112,21 +117,35 @@ function Button({
 export function MobileWorkOrdersView() {
   const { profile, signOut } = useAuth();
   const pushError = usePushRegistration(profile?.id ?? '');
+  const [workerName, setWorkerName] = useState<string | null>(null);
   const [orders, setOrders] = useState<MobileRadniNalog[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [details, setDetails] = useState<MobileDetails | null>(null);
   const [reviewed, setReviewed] = useState<string[]>([]);
   const [report, setReport] = useState<MobileReport>(emptyReport);
+  const [leaderConfirmed, setLeaderConfirmed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [newMaterial, setNewMaterial] = useState('');
   const [newTool, setNewTool] = useState('');
+  const [teamTimeDrafts, setTeamTimeDrafts] = useState<Record<string, { vrijemeOd: string; vrijemeDo: string }>>({});
 
   const selected = orders.find((order) => order.id === selectedId) ?? null;
   const isLeader = selected?.poslovodja_id === profile?.radnik_id;
   const isReviewed = reviewSections.every((section) => reviewed.includes(section.id));
+
+  useEffect(() => {
+    if (!profile?.radnik_id) return;
+    let active = true;
+    void fetchMobileWorkerDisplayName()
+      .then((name) => { if (active) setWorkerName(name); })
+      .catch((reason: unknown) => {
+        if (active) setError(errorMessage(reason, 'Ime djelatnika nije moguće učitati.'));
+      });
+    return () => { active = false; };
+  }, [profile?.radnik_id]);
 
   const refreshOrders = useCallback(async () => {
     const list = await fetchMobileRadniNalozi();
@@ -172,6 +191,7 @@ export function MobileWorkOrdersView() {
     setLoading(true);
     setError(null);
     setNotice(null);
+    setLeaderConfirmed(false);
     try {
       const { data: nalog, error: nalogError } = await supabase
         .from('radni_nalozi')
@@ -180,12 +200,13 @@ export function MobileWorkOrdersView() {
         .single();
       if (nalogError) throw nalogError;
 
-      const [zadaci, stavke, dokumenti, foto, linkedIds] = await Promise.all([
+      const [zadaci, stavke, dokumenti, foto, linkedIds, ekipa] = await Promise.all([
         fetchNalogZadaci(order.id),
         fetchNalogStavke(order.id),
         fetchNalogDokumenti(order.id),
         fetchNalogFoto(order.id),
         fetchNalogGradilisteDokumentIds(order.id),
+        fetchMobileNalogTeam(order.id),
       ]);
       const siteDocs = nalog.gradiliste_id ? await fetchGradilisteDokumenti(nalog.gradiliste_id) : [];
       const selectedSiteDocs = siteDocs.filter((document) => linkedIds.includes(document.id));
@@ -205,7 +226,12 @@ export function MobileWorkOrdersView() {
         stavke,
         dokumenti: [...dokumenti, ...selectedSiteDocs],
         foto,
+        ekipa,
       });
+      setTeamTimeDrafts(Object.fromEntries(ekipa.map((worker) => [
+        worker.radnik_id,
+        { vrijemeOd: worker.vrijeme_od?.slice(0, 5) ?? '', vrijemeDo: worker.vrijeme_do?.slice(0, 5) ?? '' },
+      ])));
       setReviewed(order.mobile_reviewed_sections ?? []);
       setReport({
         kmPocetak: nalog.km_pocetak?.toString() ?? '',
@@ -329,6 +355,21 @@ export function MobileWorkOrdersView() {
     });
   };
 
+  const saveWorkerTime = async (worker: MobileWorkerTime) => {
+    if (!selected) return;
+    const draft = teamTimeDrafts[worker.radnik_id];
+    if (!draft?.vrijemeOd) {
+      throw new Error('Unesi vrijeme početka rada.');
+    }
+    await saveMobileWorkerTime({
+      nalogId: selected.id,
+      radnikId: worker.radnik_id,
+      vrijemeOd: draft.vrijemeOd,
+      vrijemeDo: draft.vrijemeDo || null,
+      reviewedSections: reviewed,
+    });
+  };
+
   const reviewedSet = useMemo(() => new Set(reviewed), [reviewed]);
   const signOutUser = async () => {
     try {
@@ -342,7 +383,9 @@ export function MobileWorkOrdersView() {
     <main className="min-h-[100dvh] bg-slate-100 pb-[env(safe-area-inset-bottom)]">
       <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 pt-[max(env(safe-area-inset-top),0.75rem)]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">Tm-color</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">
+            Tm-color{workerName ? ` · ${workerName}` : ''}
+          </p>
           <h1 className="text-lg font-bold text-slate-900">Moji radni nalozi</h1>
         </div>
         <div className="flex gap-2">
@@ -384,7 +427,7 @@ export function MobileWorkOrdersView() {
             {!loading && details && !selected.mobile_started_at && selected.mobile_status !== 'predan' && selected.mobile_status !== 'odobren' && (
               <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
                 <h3 className="text-base font-bold text-slate-900">Pregled prije početka</h3>
-                <p className="text-sm text-slate-600">Otvori i pregledaj sve stavke. START će se otključati tek nakon potvrde svih dijelova.</p>
+                <p className="text-sm text-slate-600">Otvori i pregledaj sve stavke. Nakon potvrde možeš evidentirati vrijeme za bilo kojeg člana ekipe na ovom nalogu.</p>
                 <div className="space-y-2">
                   <ReviewBlock title="Radni zadaci">
                     {details.zadaci.length ? details.zadaci.map((task) => <p key={task.id} className="text-sm text-slate-700">• {task.naziv}</p>) : <p className="text-sm text-slate-500">Nema upisanih zadataka.</p>}
@@ -409,24 +452,84 @@ export function MobileWorkOrdersView() {
                     </label>
                   ))}
                 </div>
-                <Button onClick={() => selected && void runAction(() => startMobileNalog(selected.id, reviewed), 'Rad je započet.')} disabled={!isReviewed || working}>
-                  <Clock3 className="h-5 w-5" /> START
-                </Button>
               </section>
             )}
 
-            {!loading && details && selected.mobile_started_at && (
+            {!loading && details && selected.mobile_status !== 'nije_poslan' && (
               <>
-                <section className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <h3 className="font-bold text-slate-900">Moje radno vrijeme</h3>
-                  <p className="mt-2 text-sm text-slate-700">Početak: <strong>{time(selected.vrijeme_od)}</strong></p>
-                  <p className="mt-1 text-sm text-slate-700">Završetak: <strong>{time(selected.vrijeme_do)}</strong></p>
-                  {!selected.mobile_started_at && <p className="mt-2 text-sm text-red-700">Za ovaj nalog još nije zabilježen START.</p>}
-                  {selected.mobile_started_at && !selected.mobile_finished_at && (
-                    <div className="mt-3"><Button variant="secondary" onClick={() => void runAction(() => finishMobileShift(selected.id), 'Završetak radnog vremena spremljen.')} disabled={working}><Check className="h-5 w-5" /> Završi moje vrijeme</Button></div>
-                  )}
-                  {selected.mobile_finished_at && <p className="mt-3 rounded-lg bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">Moje radno vrijeme je završeno.</p>}
-                </section>
+                {(selected.mobile_status === 'dodijeljen' || selected.mobile_status === 'u_tijeku') && (
+                  <section className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <h3 className="font-bold text-slate-900">Radno vrijeme ekipe</h3>
+                      <p className="mt-1 text-sm text-slate-600">Svi unosi ostaju na ovom radnom nalogu. Svaki dodijeljeni radnik može evidentirati vrijeme bilo kojeg člana ekipe.</p>
+                      <div className="mt-3 space-y-3">
+                        {details.ekipa.map((worker) => {
+                          const timeDraft = teamTimeDrafts[worker.radnik_id] ?? {
+                            vrijemeOd: worker.vrijeme_od?.slice(0, 5) ?? '',
+                            vrijemeDo: worker.vrijeme_do?.slice(0, 5) ?? '',
+                          };
+                          return (
+                          <div key={worker.radnik_id} className="rounded-xl border border-slate-200 p-3">
+                            <p className="font-semibold text-slate-900">{worker.ime} {worker.prezime}</p>
+                            <label className="mt-2 block text-sm text-slate-700">Početak
+                              <input
+                                type="time"
+                                value={timeDraft.vrijemeOd}
+                                onChange={(event) => setTeamTimeDrafts((current) => ({
+                                  ...current,
+                                  [worker.radnik_id]: { ...timeDraft, vrijemeOd: event.target.value },
+                                }))}
+                                className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-base"
+                              />
+                            </label>
+                            <label className="mt-2 block text-sm text-slate-700">Završetak
+                              <input
+                                type="time"
+                                value={timeDraft.vrijemeDo}
+                                onChange={(event) => setTeamTimeDrafts((current) => ({
+                                  ...current,
+                                  [worker.radnik_id]: { ...timeDraft, vrijemeDo: event.target.value },
+                                }))}
+                                className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-base"
+                              />
+                            </label>
+                            <div className="mt-3">
+                              <Button
+                                variant="secondary"
+                                onClick={() => void runAction(() => saveWorkerTime(worker), `Radno vrijeme za ${worker.ime} ${worker.prezime} spremljeno.`)}
+                                disabled={working || !isReviewed}
+                              >
+                                <Check className="h-5 w-5" /> Spremi radno vrijeme
+                              </Button>
+                            </div>
+                            {!worker.mobile_started_at ? (
+                              <div className="mt-3">
+                                <Button
+                                  variant="secondary"
+                                  onClick={() => void runAction(() => startMobileWorkerTime(selected.id, worker.radnik_id, reviewed), `Početak vremena za ${worker.ime} ${worker.prezime} spremljen.`)}
+                                  disabled={working || !isReviewed}
+                                >
+                                  <Clock3 className="h-5 w-5" /> Započni vrijeme
+                                </Button>
+                              </div>
+                            ) : !worker.mobile_finished_at ? (
+                              <div className="mt-3">
+                                <Button
+                                  variant="secondary"
+                                  onClick={() => void runAction(() => finishMobileWorkerTime(selected.id, worker.radnik_id), `Završetak vremena za ${worker.ime} ${worker.prezime} spremljen.`)}
+                                  disabled={working}
+                                >
+                                  <Check className="h-5 w-5" /> Završi vrijeme
+                                </Button>
+                              </div>
+                            ) : (
+                              <p className="mt-3 rounded-lg bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">Vrijeme je završeno.</p>
+                            )}
+                          </div>
+                          );
+                        })}
+                      </div>
+                  </section>
+                )}
 
                 {isLeader && selected.mobile_status === 'u_tijeku' && (
                   <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4">
@@ -500,18 +603,23 @@ export function MobileWorkOrdersView() {
                       placeholder="Npr. skela, brusilica"
                     />
 
+                    <CheckField
+                      checked={leaderConfirmed}
+                      onChange={setLeaderConfirmed}
+                      label="Kao poslovođa potvrđujem radna vremena ekipe i pregledao sam završni izvještaj."
+                    />
                     <Button variant="secondary" onClick={() => void runAction(saveReport, 'Izvještaj je spremljen.')} disabled={working}>
                       <Upload className="h-5 w-5" /> Spremi izvještaj
                     </Button>
-                    <Button onClick={() => void runAction(async () => { await saveReport(); await submitMobileNalog(selected.id); }, 'Nalog je predan na odobrenje.')} disabled={working || !selected.mobile_finished_at}>
+                    <Button onClick={() => void runAction(async () => { await saveReport(); await submitMobileNalog(selected.id, leaderConfirmed); }, 'Nalog je predan na odobrenje.')} disabled={working || !leaderConfirmed}>
                       <Check className="h-5 w-5" /> FINISH — predaj nalog
                     </Button>
-                    <p className="text-xs leading-5 text-slate-500">Prije predaje svi dodijeljeni djelatnici moraju završiti svoje vrijeme. Za svaki podatak unesi vrijednost ili potvrdi da nije primjenjiv.</p>
+                    <p className="text-xs leading-5 text-slate-500">Prije predaje svi dodijeljeni djelatnici moraju imati završeno vrijeme. Samo poslovođa može potvrditi i predati nalog.</p>
                   </section>
                 )}
 
                 {!isLeader && selected.mobile_status === 'u_tijeku' && (
-                  <p className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm leading-6 text-sky-900">Poslovođa unosi zajednički završni izvještaj. Kad završiš svoje vrijeme, nalog ostaje dostupan u ovom popisu do završne provjere.</p>
+                  <p className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm leading-6 text-sky-900">Svi radnici evidentiraju vrijeme na ovom istom nalogu. Poslovođa pregledava i potvrđuje završni izvještaj.</p>
                 )}
 
                 {selected.mobile_status === 'predan' && <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-900">Nalog je predan poslovođi i čeka završno odobrenje u uredu.</p>}

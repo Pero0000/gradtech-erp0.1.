@@ -17,6 +17,7 @@ import {
   fetchNalogZadaci,
   fetchGradilisteDokumenti,
   fetchNalogGradilisteDokumentIds,
+  fetchMobileWorkOrderAudit,
   setNalogGradilisteDokument,
   saveNalogIzvrsenje,
   saveNalogRadnikVrijeme,
@@ -32,6 +33,7 @@ import {
   type NalogFoto,
   type NalogRadnikVrijeme,
   type NalogStavka,
+  type MobileWorkOrderAuditEntry,
 } from '@/lib/api';
 
 function errText(reason: unknown, fallback: string) {
@@ -41,6 +43,89 @@ function errText(reason: unknown, fallback: string) {
 
 const hint = ' Pokreni migraciju 20261015230000_nalog_izvrsenje.sql u Supabase SQL editoru.';
 const hint2 = ' Pokreni migraciju 20261015240000_nalog_stavke_dokumenti.sql u Supabase SQL editoru.';
+const auditActions: Record<string, string> = {
+  worker_assigned: 'Djelatnik je dodijeljen nalogu',
+  worker_unassigned: 'Djelatnik je uklonjen s naloga',
+  worker_time_updated: 'Radno vrijeme je uneseno ili izmijenjeno',
+  worker_started: 'Početak rada je evidentiran',
+  worker_finished: 'Završetak rada je evidentiran',
+  order_reviewed: 'Potvrđen je pregled naloga',
+  order_started: 'Rad na nalogu je započet',
+  order_submitted: 'Poslovođa je predao nalog na odobrenje',
+  order_approved: 'Nalog je odobren',
+  order_status_changed: 'Status naloga je promijenjen',
+  report_updated: 'Završni izvještaj je izmijenjen',
+  item_added: 'Dodana je stavka materijala/alata',
+  item_removed: 'Uklonjena je stavka materijala/alata',
+  item_checked: 'Stavka materijala/alata je označena',
+  item_updated: 'Stavka materijala/alata je izmijenjena',
+  photo_added: 'Dodana je fotografija',
+  photo_removed: 'Uklonjena je fotografija',
+  document_added: 'Dodana je datoteka',
+  document_removed: 'Uklonjena je datoteka',
+  task_added: 'Dodan je radni zadatak',
+  task_removed: 'Uklonjen je radni zadatak',
+  task_checked: 'Status radnog zadatka je promijenjen',
+};
+const auditDetailLabels: Record<string, string> = {
+  radnik: 'Djelatnik',
+  old_start: 'Početak prije izmjene',
+  new_start: 'Novi početak',
+  old_finish: 'Završetak prije izmjene',
+  new_finish: 'Novi završetak',
+  km_pocetak: 'Početni kilometri',
+  km_kraj: 'Završni kilometri',
+  napomena: 'Napomena',
+  mobile_km_na: 'Kilometri nisu primjenjivi',
+  mobile_napomena_na: 'Napomena nije primjenjiva',
+  mobile_tasks_confirmed: 'Zadaci potvrđeni',
+  mobile_foto_na: 'Fotografija nije primjenjiva',
+  mobile_materijal_na: 'Materijal nije potreban',
+  mobile_alat_na: 'Alat nije potreban',
+  old_status: 'Prethodni status',
+  new_status: 'Novi status',
+  tip: 'Vrsta',
+  naziv: 'Naziv',
+  gotovo: 'Završeno',
+};
+
+function auditValue(value: unknown) {
+  if (typeof value === 'boolean') return value ? 'Da' : 'Ne';
+  if (value === null) return '—';
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  return JSON.stringify(value);
+}
+
+function AuditLog({ entries }: { entries: MobileWorkOrderAuditEntry[] }) {
+  return (
+    <section className="mt-5 border-t border-slate-100 pt-4">
+      <h4 className="mb-3 text-sm font-semibold text-slate-800">Povijest promjena</h4>
+      {entries.length === 0 ? (
+        <p className="text-xs text-slate-500">Još nema zabilježenih promjena.</p>
+      ) : (
+        <ol className="space-y-2">
+          {entries.map((entry) => (
+            <li key={entry.id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+              <p className="text-sm font-medium text-slate-800">
+                {auditActions[entry.action] ?? entry.action.replace(/_/g, ' ')}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                {entry.actor_name} · {new Date(entry.created_at).toLocaleString('hr-HR')}
+              </p>
+              {Object.entries(entry.details)
+                .filter(([, value]) => value !== undefined)
+                .map(([key, value]) => (
+                  <p key={key} className="mt-1 break-words text-xs text-slate-600">
+                    {auditDetailLabels[key] ?? key}: {auditValue(value)}
+                  </p>
+                ))}
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
 
 function formatSize(bytes: number | null) {
   if (!bytes) return '';
@@ -147,18 +232,20 @@ export function NalogIzvrsenje({
   const [zadaci, setZadaci] = useState<GradilisteZadatak[]>([]);
   const [newZadatak, setNewZadatak] = useState('');
   const [foto, setFoto] = useState<NalogFoto[]>([]);
+  const [audit, setAudit] = useState<MobileWorkOrderAuditEntry[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setError(null);
-    const [izv, vr, zad, fo, st, dok] = await Promise.allSettled([
+    const [izv, vr, zad, fo, st, dok, history] = await Promise.allSettled([
       fetchNalogIzvrsenje(nalog.id),
       fetchNalogRadnikVrijeme(nalog.id),
       fetchNalogZadaci(nalog.id),
       fetchNalogFoto(nalog.id),
       fetchNalogStavke(nalog.id),
       fetchNalogDokumenti(nalog.id),
+      fetchMobileWorkOrderAudit(nalog.id),
     ]);
     if (izv.status === 'fulfilled') {
       setKm({ pocetak: izv.value.km_pocetak?.toString() ?? '', kraj: izv.value.km_kraj?.toString() ?? '' });
@@ -183,9 +270,26 @@ export function NalogIzvrsenje({
     else setError((e) => e ?? errText(zad.reason, 'Greška pri učitavanju zadataka.') + ' Pokreni migraciju 20261015220000_zadaci_nalog_veza.sql.');
     if (fo.status === 'fulfilled') setFoto(fo.value);
     else setError((e) => e ?? errText(fo.reason, 'Greška pri učitavanju fotografija.') + hint);
+    if (history.status === 'fulfilled') setAudit(history.value);
+    else setError((e) => e ?? errText(history.reason, 'Greška pri učitavanju povijesti promjena.') + ' Pokreni migraciju 20261016200000_mobile_work_order_audit.sql.');
     if (nalog.gradiliste_id) setGradDokumenti(await fetchGradilisteDokumenti(nalog.gradiliste_id).catch(() => []));
     setGradLinked(await fetchNalogGradilisteDokumentIds(nalog.id).catch(() => []));
   }, [nalog.id, nalog.gradiliste_id]);
+
+  useEffect(() => {
+    const refreshAudit = () => {
+      if (document.visibilityState !== 'visible') return;
+      void fetchMobileWorkOrderAudit(nalog.id)
+        .then(setAudit)
+        .catch((reason: unknown) => setError(errText(reason, 'Greška pri osvježavanju povijesti promjena.')));
+    };
+    const timer = window.setInterval(refreshAudit, 30_000);
+    document.addEventListener('visibilitychange', refreshAudit);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refreshAudit);
+    };
+  }, [nalog.id]);
 
   const ownPaths = new Set([...dokumenti.map((d) => d.putanja), ...foto.map((f) => f.putanja)]);
   const pickerDocs = gradDokumenti.filter((d) => !ownPaths.has(d.putanja));
@@ -580,6 +684,9 @@ export function NalogIzvrsenje({
             ))}
           </div>
         )}
+      </div>
+      <div className="md:col-span-2">
+        <AuditLog entries={audit} />
       </div>
     </div>
   );

@@ -1031,12 +1031,13 @@ export async function notifyLockedNalogWorkers(nalogId: string) {
   if (error) {
     throw new Error(`Nalog je zaključan i djelatnici ga vide, ali push obavijest nije poslana: ${error.message}`);
   }
-  const receipt = data as { sent?: number; failed?: number; reason?: string } | null;
+  const receipt = data as { sent?: number; failed?: number; reason?: string; errors?: string[] } | null;
+  const details = receipt?.errors?.length ? ` Detalji: ${receipt.errors.join('; ')}` : '';
   if (!receipt?.sent) {
-    throw new Error(`Nalog je zaključan i djelatnici ga vide, ali push obavijest nije poslana${receipt?.reason ? ` (${receipt.reason})` : ''}.`);
+    throw new Error(`Nalog je zaključan i djelatnici ga vide, ali push obavijest nije poslana${receipt?.reason ? ` (${receipt.reason})` : ''}.${details}`);
   }
   if (receipt.failed) {
-    throw new Error(`Nalog je zaključan; push je poslan na ${receipt.sent} uređaja, a ${receipt.failed} uređaja nije primilo obavijest.`);
+    throw new Error(`Nalog je zaključan; push je poslan na ${receipt.sent} uređaja, a ${receipt.failed} uređaja nije primilo obavijest.${details}`);
   }
 }
 
@@ -1338,6 +1339,62 @@ export async function finishMobileShift(nalogId: string) {
   if (error) throw error;
 }
 
+export interface MobileWorkerTime {
+  radnik_id: string;
+  ime: string;
+  prezime: string;
+  mobile_started_at: string | null;
+  mobile_finished_at: string | null;
+  vrijeme_od: string | null;
+  vrijeme_do: string | null;
+}
+
+export async function fetchMobileNalogTeam(nalogId: string): Promise<MobileWorkerTime[]> {
+  const { data, error } = await supabase.rpc('get_mobile_nalog_team', { p_nalog_id: nalogId });
+  if (error) throw error;
+  return (data ?? []) as MobileWorkerTime[];
+}
+
+export async function fetchMobileWorkerDisplayName(): Promise<string | null> {
+  const { data, error } = await supabase.rpc('get_mobile_worker_display_name');
+  if (error) throw error;
+  return data;
+}
+
+export async function startMobileWorkerTime(nalogId: string, radnikId: string, reviewedSections: string[]) {
+  const { error } = await supabase.rpc('mobile_start_worker_time', {
+    p_nalog_id: nalogId,
+    p_radnik_id: radnikId,
+    p_reviewed_sections: reviewedSections,
+  });
+  if (error) throw error;
+}
+
+export async function finishMobileWorkerTime(nalogId: string, radnikId: string) {
+  const { error } = await supabase.rpc('mobile_finish_worker_time', {
+    p_nalog_id: nalogId,
+    p_radnik_id: radnikId,
+  });
+  if (error) throw error;
+}
+
+export async function saveMobileWorkerTime(input: {
+  nalogId: string;
+  radnikId: string;
+  vrijemeOd: string | null;
+  vrijemeDo: string | null;
+  reviewedSections: string[];
+}) {
+  const { error } = await supabase.rpc('mobile_save_worker_time', {
+    p_nalog_id: input.nalogId,
+    p_radnik_id: input.radnikId,
+    p_vrijeme_od: input.vrijemeOd,
+    p_vrijeme_do: input.vrijemeDo,
+    p_reviewed_sections: input.reviewedSections,
+  });
+  if (error) throw error;
+}
+
 export async function saveMobileNalogReport(input: {
   nalogId: string;
   kmPocetak: number | null;
@@ -1365,9 +1422,26 @@ export async function saveMobileNalogReport(input: {
   if (error) throw error;
 }
 
-export async function submitMobileNalog(nalogId: string) {
-  const { error } = await supabase.rpc('mobile_submit_nalog', { p_nalog_id: nalogId });
+export async function submitMobileNalog(nalogId: string, leaderConfirmed: boolean) {
+  const { error } = await supabase.rpc('mobile_submit_nalog', {
+    p_nalog_id: nalogId,
+    p_leader_confirmed: leaderConfirmed,
+  });
   if (error) throw error;
+}
+
+export interface MobileWorkOrderAuditEntry {
+  id: number;
+  actor_name: string;
+  action: string;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
+export async function fetchMobileWorkOrderAudit(nalogId: string): Promise<MobileWorkOrderAuditEntry[]> {
+  const { data, error } = await supabase.rpc('get_mobile_work_order_audit', { p_nalog_id: nalogId });
+  if (error) throw error;
+  return (data ?? []) as MobileWorkOrderAuditEntry[];
 }
 
 export async function saveNalogIzvrsenje(

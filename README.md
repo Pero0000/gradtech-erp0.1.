@@ -26,17 +26,17 @@ Prvi admin se namjerno ne bira automatski: javna registracija ne može sama sebi
 
 Mobilna aplikacija za Android i iOS koristi postojeći Supabase Auth. Prije puštanja u rad:
 
-1. Primijenite sve migracije redom, uključujući `supabase/migrations/20261016180000_mobile_work_orders.sql`.
+1. Primijenite sve migracije redom, uključujući `supabase/migrations/20261016180000_mobile_work_orders.sql`, `supabase/migrations/20261016190000_mobile_shared_team_time.sql` i `supabase/migrations/20261016200000_mobile_work_order_audit.sql`.
 2. U **Korisnici i prava** odobrite račun djelatnika i povežite ga s njegovim zapisom u **Radnici**.
 3. U detaljima izvršenja radnog naloga odaberite poslovođu, koji mora biti među dodijeljenim djelatnicima. Zaključajte nalog iz rasporeda tek kad su dodani zadaci i ostali potrebni podaci.
 4. Izradite Android/iOS pakete nakon konfiguracije push obavijesti:
-   - Za Android dodajte `google-services.json` za Firebase projekt u `android/app/`.
-   - U Xcodeu otvorite iOS projekt, postavite Team/signing za `com.tmcolor.erp` i uključite Push Notifications capability.
-   - Deployajte Edge Function `notify-work-order` (`supabase functions deploy notify-work-order`) i postavite Supabase secrets: `FCM_PROJECT_ID`, `FCM_SERVICE_ACCOUNT_EMAIL`, `FCM_SERVICE_ACCOUNT_PRIVATE_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`, `APNS_BUNDLE_ID`. Za APNs sandbox možete dodatno postaviti `APNS_USE_SANDBOX=true`.
+   - Android push je trenutačno isključen. APK se može izgraditi bez Firebase konfiguracije; postojeće Android push tokene aplikacija uklanja pri pokretanju. Za ponovno uključivanje push obavijesti dodajte `google-services.json` za Firebase projekt u `android/app/` (Firebase Android app ID `com.tmcolor.erp`) i ponovno omogućite Android registraciju u `src/components/mobile/usePushRegistration.ts`.
+   - U Xcodeu otvorite iOS projekt, postavite Team/signing za `com.tmcolor.erp` i provjerite da Apple Developer App ID ima uključene Push Notifications. Projekt koristi `development` APNs entitlement u Debug i `production` u Release konfiguraciji.
+   - Deployajte Edge Function `notify-work-order` (`supabase functions deploy notify-work-order`) i postavite Supabase secrets potrebne za odgovarajuće platforme: `FCM_PROJECT_ID`, `FCM_SERVICE_ACCOUNT_EMAIL`, `FCM_SERVICE_ACCOUNT_PRIVATE_KEY` za Android te `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`, `APNS_BUNDLE_ID` za iOS. Za slanje u APNs sandboxu postavite `APNS_USE_SANDBOX=true`; Release aplikacija koristi produkcijski APNs.
    - Servisni ključevi pripadaju samo u Supabase Secrets, nikad u aplikaciju, `.env` ili repozitorij.
 5. Pokrenite `npm run cap:sync` nakon promjena web-aplikacije, zatim `npm run cap:android` ili `npm run cap:ios` na računalu s odgovarajućim Android SDK/JDK-om ili macOS/Xcodeom.
 
-Pri prvom pokretanju djelatnik se prijavi, odobri push obavijesti i tako registrira uređaj. Zaključani nalog tada stiže kao push; dodirom se otvara taj nalog. Svaki dodijeljeni djelatnik potvrđuje pregled uputa, zadataka, materijala, alata i dokumenata, pa zasebno pokreće i završava svoje vrijeme. Poslovođa ispunjava zajednički izvještaj i predaje nalog; trošak se obračunava tek nakon završnog odobrenja u ERP-u. Ako push konfiguracija nije spremna, nalog se svejedno zaključava i dostupan je u aplikaciji, a ERP prikazuje da obavijest nije poslana.
+Pri prvom pokretanju djelatnik se prijavi, odobri push obavijesti i tako registrira uređaj. Zaključani nalog tada stiže kao push; dodirom se otvara taj nalog. Svi dodijeljeni djelatnici evidentiraju početak i završetak vremena za cijelu ekipu na istom nalogu. Samo poslovođa ispunjava zajednički izvještaj, potvrđuje pregled vremena ekipe i predaje nalog; trošak se obračunava tek nakon završnog odobrenja u ERP-u. Promjene vremena, izvještaja, zadataka, materijala/alata, fotografija i statusa bilježe se uz nalog, a povijest je vidljiva u web aplikaciji u detaljima naloga i osvježava se svakih 30 sekundi. Ako push konfiguracija nije spremna, nalog se svejedno zaključava i dostupan je u aplikaciji, a ERP prikazuje razlog zbog kojeg obavijest nije poslana.
 
 ## Otvaranje lokalne mape gradilišta
 

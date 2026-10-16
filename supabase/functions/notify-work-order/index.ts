@@ -128,13 +128,14 @@ Deno.serve(async (request) => {
     const apnsHost = Deno.env.get('APNS_USE_SANDBOX') === 'true'
       ? 'https://api.sandbox.push.apple.com'
       : 'https://api.push.apple.com';
-    let fcmToken: string | null = null;
-    let appleToken: string | null = null;
+    let fcmTokenPromise: Promise<string> | null = null;
+    let appleTokenPromise: Promise<string> | null = null;
     const outcomes = await Promise.all(devices.map(async (device) => {
       try {
         if (device.platform === 'android') {
           if (!projectId) throw new Error('FCM_PROJECT_ID nije konfiguriran.');
-          fcmToken ??= await googleAccessToken();
+          fcmTokenPromise ??= googleAccessToken();
+          const fcmToken = await fcmTokenPromise;
           const response = await fetch(`https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${fcmToken}`, 'Content-Type': 'application/json' },
@@ -150,7 +151,8 @@ Deno.serve(async (request) => {
           if (!response.ok) throw new Error(`FCM greška (${response.status}): ${await response.text()}`);
         } else {
           if (!bundleId) throw new Error('APNS_BUNDLE_ID nije konfiguriran.');
-          appleToken ??= await apnsProviderToken();
+          appleTokenPromise ??= apnsProviderToken();
+          const appleToken = await appleTokenPromise;
           const response = await fetch(`${apnsHost}/3/device/${device.token}`, {
             method: 'POST',
             headers: {

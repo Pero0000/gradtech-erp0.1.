@@ -78,7 +78,12 @@ function StavkeList({
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              submit();
+            }
+          }}
           placeholder={placeholder}
           className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs"
         />

@@ -7,6 +7,7 @@ import {
   fetchRokovi,
   fetchTroskovi,
   fetchVozila,
+  iznosFakture,
 } from '@/lib/api';
 import { loadObavijesti } from '@/lib/obavijesti';
 import { loadPostavke } from '@/lib/postavke';
@@ -59,12 +60,11 @@ export async function buildSnapshot() {
         zavrsetak: g.datum_zavrsetka,
         ugovorena_vrijednost: g.ugovorena_vrijednost,
         predvidena_marza: g.predvidena_marza,
-        proracun: g.proracun,
         troskovi_ukupno: sum(t, (x) => x.iznos),
         troskovi_po_kategoriji: byKat,
         radni_sati: sum(sati.filter((x) => x.gradiliste_id === g.id), (x) => x.sati),
-        fakturirano: sum(f, (x) => x.iznos),
-        placeno: sum(f.filter((x) => x.status === 'placena'), (x) => x.iznos),
+        fakturirano: sum(f, iznosFakture),
+        placeno: sum(f.filter((x) => x.status === 'placena'), iznosFakture),
         rokovi: rokovi.filter((r) => r.gradiliste_id === g.id).map((r) => ({ naziv: r.naziv, datum: r.datum, status: r.status })),
       };
     }),

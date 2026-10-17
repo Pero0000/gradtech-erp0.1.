@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
+import { Menu, X } from 'lucide-react';
 import { Sidebar, type View } from '@/components/Sidebar';
 import { Dashboard } from '@/components/views/Dashboard';
 import { GradilistaView } from '@/components/views/GradilistaView';
@@ -37,6 +38,7 @@ import { MobileWorkOrdersView } from '@/components/mobile/MobileWorkOrdersView';
 function App() {
   const { canAccess, isAdmin, profile, signOut } = useAuth();
   const [view, setView] = useState<View>('dashboard');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [focusNalogId, setFocusNalogId] = useState<string | null>(null);
   const [counts, setCounts] = useState({
     gradilista: 0,
@@ -99,6 +101,7 @@ function App() {
     })()) {
       setFocusNalogId(null);
       setView(nextView);
+      setMobileNavOpen(false);
     }
   };
 
@@ -118,10 +121,19 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-50">
-      <Sidebar current={view} onNavigate={navigate} counts={counts} />
-      <main className="flex-1 overflow-y-auto">
-        <div className={`mx-auto px-6 py-8 ${view === 'raspored' || view === 'radni_nalozi' || view === 'gradilista' ? 'max-w-none' : 'max-w-7xl'}`}>
+    <div className="flex h-dvh min-w-0 bg-slate-50">
+      <Sidebar current={view} onNavigate={navigate} mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} counts={counts} />
+      <main className="min-h-0 min-w-0 flex-1 overflow-auto">
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4 lg:hidden">
+          <div>
+            <p className="text-sm font-bold text-slate-900">GradTech</p>
+            <p className="text-xs text-slate-500">{MODULES.find((module) => module.id === view)?.label ?? 'Aplikacija'}</p>
+          </div>
+          <button type="button" onClick={() => setMobileNavOpen((open) => !open)} aria-label={mobileNavOpen ? 'Zatvori navigaciju' : 'Otvori navigaciju'} aria-expanded={mobileNavOpen} className="rounded-lg p-2 text-slate-700 hover:bg-slate-100">
+            {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
+        </header>
+        <div className="mx-auto w-full px-3 py-4 sm:px-4 sm:py-6 lg:px-8 xl:px-10 2xl:px-12 lg:py-8">
           {!viewAuthorized && <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">Provjera prava pristupa…</p>}
           {viewAuthorized && module && !canAccess(module, 'edit') && (
             <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

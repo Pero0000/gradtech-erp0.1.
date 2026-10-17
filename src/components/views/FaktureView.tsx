@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, FileText, Plus, Pencil, Trash2, Euro } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, FileText, Plus, Pencil, Trash2, Euro, Search, X } from 'lucide-react';
 import type { Faktura, FakturaStatus, Gradiliste, Investitor } from '@/types';
 import {
   fetchInvestitori,
@@ -9,6 +9,7 @@ import {
   updateFaktura,
   deleteFaktura,
   fetchGradilista,
+  iznosFakture,
 } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
@@ -23,7 +24,7 @@ const statusInfo: Record<FakturaStatus, { variant: 'blue' | 'green' | 'red'; lab
   'nep placena': { variant: 'red', label: 'Neplaćena' },
 };
 
-type FakturaSortKey = 'broj' | 'gradiliste' | 'kupac' | 'datum_izdavanja' | 'datum_dospjecja' | 'iznos' | 'status';
+type FakturaSortKey = 'broj' | 'gradiliste' | 'investitor' | 'kupac' | 'datum_izdavanja' | 'datum_dospjecja' | 'iznos' | 'status';
 type SortDirection = 'asc' | 'desc';
 
 function compareSortValues(first: string | number | null, second: string | number | null, direction: SortDirection) {
@@ -40,9 +41,11 @@ function compareSortValues(first: string | number | null, second: string | numbe
 
 const emptyForm = {
   gradiliste_id: '',
+  investitor_id: '',
   broj: '',
   kupac: '',
   iznos: '',
+  rabat: '0',
   datum_izdavanja: new Date().toISOString().split('T')[0],
   datum_dospjecja: '',
   status: 'izdana' as FakturaStatus,
@@ -70,6 +73,11 @@ export function FaktureView() {
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [filterGradiliste, setFilterGradiliste] = useState('');
+  const [filterInvestitor, setFilterInvestitor] = useState('');
+  const [filterStatus, setFilterStatus] = useState<'' | FakturaStatus>('');
+  const [query, setQuery] = useState('');
+  const [od, setOd] = useState('');
+  const [doDatuma, setDoDatuma] = useState('');
   const [sortKey, setSortKey] = useState<FakturaSortKey>('datum_izdavanja');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
@@ -95,7 +103,13 @@ export function FaktureView() {
   const openCreate = () => {
     setNewInv(null);
     setEditing(null);
-    setForm({ ...emptyForm, gradiliste_id: filterGradiliste });
+    const selectedSite = gradilista.find((site) => site.id === filterGradiliste);
+    setForm({
+      ...emptyForm,
+      gradiliste_id: filterGradiliste,
+      investitor_id: filterInvestitor || selectedSite?.objekti?.investitori?.id || '',
+      kupac: investitori.find((investor) => investor.id === filterInvestitor)?.naziv ?? selectedSite?.objekti?.investitori?.naziv ?? '',
+    });
     setModalOpen(true);
   };
 
@@ -104,9 +118,11 @@ export function FaktureView() {
     setEditing(f);
     setForm({
       gradiliste_id: f.gradiliste_id ?? '',
+      investitor_id: f.investitor_id ?? investitori.find((investor) => investor.naziv.toLocaleLowerCase() === (f.kupac ?? '').toLocaleLowerCase())?.id ?? '',
       broj: f.broj,
       kupac: f.kupac ?? '',
       iznos: f.iznos.toString(),
+      rabat: String(f.rabat ?? 0),
       datum_izdavanja: f.datum_izdavanja,
       datum_dospjecja: f.datum_dospjecja ?? '',
       status: f.status,
@@ -121,7 +137,7 @@ export function FaktureView() {
     try {
       const created = await createInvestitor({ naziv });
       setInvestitori((prev) => [...prev, created].sort((a, b) => a.naziv.localeCompare(b.naziv, 'hr')));
-      setForm((prev) => ({ ...prev, kupac: created.naziv }));
+      setForm((prev) => ({ ...prev, investitor_id: created.id, kupac: created.naziv }));
       setNewInv(null);
     } catch (e) {
       setError(getErrorMessage(e, 'Greška pri dodavanju investitora'));
@@ -130,20 +146,34 @@ export function FaktureView() {
 
   const handleGradilisteChange = (gradilisteId: string) => {
     const selectedGradiliste = gradilista.find((gradiliste) => gradiliste.id === gradilisteId);
-    const investitor = selectedGradiliste?.objekti?.investitori?.naziv ?? '';
-    setForm((prev) => ({ ...prev, gradiliste_id: gradilisteId, kupac: investitor }));
+    const investor = selectedGradiliste?.objekti?.investitori;
+    setForm((prev) => ({
+      ...prev,
+      gradiliste_id: gradilisteId,
+      investitor_id: investor?.id ?? '',
+      kupac: investor?.naziv ?? '',
+    }));
+  };
+
+  const handleInvestitorChange = (investitorId: string) => {
+    const investor = investitori.find((item) => item.id === investitorId);
+    setForm((prev) => ({ ...prev, investitor_id: investitorId, kupac: investor?.naziv ?? '' }));
   };
 
   const save = async () => {
-    if (!form.broj.trim() || !form.iznos) return;
+    const iznos = Number(form.iznos || 0);
+    const rabat = Number(form.rabat || 0);
+    if (!form.broj.trim() || !Number.isFinite(iznos) || !Number.isFinite(rabat) || iznos < 0 || rabat < 0 || iznos + rabat <= 0) return;
     setSaving(true);
     setError(null);
     try {
       const payload = {
         gradiliste_id: form.gradiliste_id || null,
+        investitor_id: form.investitor_id || null,
         broj: form.broj.trim(),
         kupac: form.kupac.trim() || null,
-        iznos: parseFloat(form.iznos),
+        iznos,
+        rabat,
         datum_izdavanja: form.datum_izdavanja,
         datum_dospjecja: form.datum_dospjecja || null,
         status: form.status,
@@ -173,25 +203,52 @@ export function FaktureView() {
     }
   };
 
-  const filtered = filterGradiliste
-    ? items.filter((f) => f.gradiliste_id === filterGradiliste)
-    : items;
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filtered = items.filter((faktura) =>
+    (!filterGradiliste || faktura.gradiliste_id === filterGradiliste)
+    && (!filterInvestitor || faktura.investitor_id === filterInvestitor)
+    && (!filterStatus || faktura.status === filterStatus)
+    && (!od || faktura.datum_izdavanja >= od)
+    && (!doDatuma || faktura.datum_izdavanja <= doDatuma)
+    && (!normalizedQuery || [faktura.broj, faktura.kupac, faktura.gradilista?.naziv, faktura.investitori?.naziv]
+      .some((value) => (value ?? '').toLocaleLowerCase().includes(normalizedQuery))),
+  );
   const sortedItems = [...filtered].sort((first, second) => {
     const getValue = (faktura: Faktura): string | number | null => {
       switch (sortKey) {
         case 'broj': return faktura.broj;
         case 'gradiliste': return faktura.gradilista?.naziv ?? null;
+        case 'investitor': return faktura.investitori?.naziv ?? faktura.kupac;
         case 'kupac': return faktura.kupac;
         case 'datum_izdavanja': return faktura.datum_izdavanja;
         case 'datum_dospjecja': return faktura.datum_dospjecja;
-        case 'iznos': return faktura.iznos;
+        case 'iznos': return iznosFakture(faktura);
         case 'status': return statusInfo[faktura.status].label;
       }
     };
     return compareSortValues(getValue(first), getValue(second), sortDirection);
   });
-  const ukupno = filtered.reduce((sum, f) => sum + f.iznos, 0);
-  const placeno = filtered.filter((f) => f.status === 'placena').reduce((sum, f) => sum + f.iznos, 0);
+  const ukupno = filtered.reduce((sum, f) => sum + iznosFakture(f), 0);
+  const ukupnoOsnovno = filtered.reduce((sum, f) => sum + f.iznos, 0);
+  const ukupnoRabata = filtered.reduce((sum, f) => sum + (f.rabat ?? 0), 0);
+  const placeno = filtered.filter((f) => f.status === 'placena').reduce((sum, f) => sum + iznosFakture(f), 0);
+  const iznosZaSpremanje = Number(form.iznos || 0);
+  const rabatZaSpremanje = Number(form.rabat || 0);
+  const mozeSpremitiFakturu = Boolean(form.broj.trim())
+    && Number.isFinite(iznosZaSpremanje)
+    && Number.isFinite(rabatZaSpremanje)
+    && iznosZaSpremanje >= 0
+    && rabatZaSpremanje >= 0
+    && iznosZaSpremanje + rabatZaSpremanje > 0;
+  const hasFilters = Boolean(query || filterGradiliste || filterInvestitor || filterStatus || od || doDatuma);
+  const resetFilters = () => {
+    setQuery('');
+    setFilterGradiliste('');
+    setFilterInvestitor('');
+    setFilterStatus('');
+    setOd('');
+    setDoDatuma('');
+  };
 
   const handleSort = (key: FakturaSortKey) => {
     if (sortKey === key) {
@@ -239,13 +296,16 @@ export function FaktureView() {
               columns: [
                 { header: 'Broj', get: (f: Faktura) => f.broj },
                 { header: 'Gradilište', get: (f: Faktura) => f.gradilista?.naziv ?? '' },
+                { header: 'Investitor', get: (f: Faktura) => f.investitori?.naziv ?? '' },
                 { header: 'Kupac', get: (f: Faktura) => f.kupac ?? '' },
                 { header: 'Izdana', kind: 'date', get: (f: Faktura) => f.datum_izdavanja },
                 { header: 'Dospijeće', kind: 'date', get: (f: Faktura) => f.datum_dospjecja },
                 { header: 'Status', get: (f: Faktura) => statusInfo[f.status].label },
                 { header: 'Iznos', kind: 'eur', get: (f: Faktura) => f.iznos },
+                { header: 'Rabat', kind: 'eur', get: (f: Faktura) => f.rabat ?? 0 },
+                { header: 'Ukupno', kind: 'eur', get: (f: Faktura) => iznosFakture(f) },
               ],
-              totals: { Iznos: ukupno },
+              totals: { Iznos: filtered.reduce((sum, f) => sum + f.iznos, 0), Rabat: filtered.reduce((sum, f) => sum + (f.rabat ?? 0), 0), Ukupno: ukupno },
             })}
           />
           <button
@@ -264,20 +324,32 @@ export function FaktureView() {
         </div>
       )}
 
-      <div className="mb-6 flex flex-wrap items-center gap-4">
-        <div className="w-64">
-          <Select value={filterGradiliste} onChange={(e) => setFilterGradiliste(e.target.value)}>
-            <option value="">Sva gradilišta</option>
-            {gradilista.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.naziv}
-              </option>
-            ))}
-          </Select>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative min-w-56 flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Traži broj, kupca ili gradilište…" className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm" />
         </div>
+        <select value={filterInvestitor} onChange={(event) => setFilterInvestitor(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Svi investitori</option>
+          {investitori.map((investitor) => <option key={investitor.id} value={investitor.id}>{investitor.naziv}</option>)}
+        </select>
+        <select value={filterGradiliste} onChange={(event) => setFilterGradiliste(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Sva gradilišta</option>
+          {gradilista.map((g) => <option key={g.id} value={g.id}>{g.naziv}</option>)}
+        </select>
+        <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value as '' | FakturaStatus)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Svi statusi</option>
+          {Object.entries(statusInfo).map(([value, info]) => <option key={value} value={value}>{info.label}</option>)}
+        </select>
+        <input type="date" value={od} onChange={(event) => setOd(event.target.value)} title="Datum izdavanja od" aria-label="Datum izdavanja od" className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm" />
+        <input type="date" value={doDatuma} onChange={(event) => setDoDatuma(event.target.value)} title="Datum izdavanja do" aria-label="Datum izdavanja do" className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm" />
+        {hasFilters && <button type="button" onClick={resetFilters} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-2 text-sm text-slate-500 hover:bg-slate-100"><X className="h-4 w-4" /> Očisti</button>}
+      </div>
+
+      <div className="mb-6 flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-white">
           <Euro className="h-5 w-5" />
-          <span className="text-sm text-slate-300">Ukupno:</span>
+          <span className="text-sm text-slate-300">Ukupno{hasFilters ? ' (filtrirano)' : ''}:</span>
           <span className="font-bold">
             {ukupno.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
           </span>
@@ -288,6 +360,7 @@ export function FaktureView() {
             {placeno.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
           </span>
         </div>
+        <span className="text-sm text-slate-500">{filtered.length} faktura</span>
       </div>
 
       {filtered.length === 0 ? (
@@ -306,17 +379,20 @@ export function FaktureView() {
           }
         />
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full">
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <table className="w-full min-w-[1200px]">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
                 <th aria-sort={sortKey === 'broj' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="px-5 py-3 text-left text-xs">
                   {sortHeader('broj', 'Broj')}
                 </th>
-                <th aria-sort={sortKey === 'gradiliste' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="px-5 py-3 text-left text-xs">
+                <th aria-sort={sortKey === 'gradiliste' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="min-w-48 px-5 py-3 text-left text-xs whitespace-nowrap">
                   {sortHeader('gradiliste', 'Gradilište')}
                 </th>
-                <th aria-sort={sortKey === 'kupac' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="px-5 py-3 text-left text-xs">
+                <th aria-sort={sortKey === 'investitor' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="min-w-56 px-5 py-3 text-left text-xs whitespace-nowrap">
+                  {sortHeader('investitor', 'Investitor')}
+                </th>
+                <th aria-sort={sortKey === 'kupac' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="min-w-56 px-5 py-3 text-left text-xs whitespace-nowrap">
                   {sortHeader('kupac', 'Kupac')}
                 </th>
                 <th aria-sort={sortKey === 'datum_izdavanja' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="px-5 py-3 text-left text-xs">
@@ -325,8 +401,10 @@ export function FaktureView() {
                 <th aria-sort={sortKey === 'datum_dospjecja' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="px-5 py-3 text-left text-xs">
                   {sortHeader('datum_dospjecja', 'Dospjeće')}
                 </th>
+                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Iznos</th>
+                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Rabat</th>
                 <th aria-sort={sortKey === 'iznos' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="px-5 py-3 text-right text-xs">
-                  {sortHeader('iznos', 'Iznos')}
+                  {sortHeader('iznos', 'Ukupno')}
                 </th>
                 <th aria-sort={sortKey === 'status' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="px-5 py-3 text-left text-xs">
                   {sortHeader('status', 'Status')}
@@ -340,16 +418,23 @@ export function FaktureView() {
                 return (
                   <tr key={f.id} className="group hover:bg-slate-50 transition-colors">
                     <td className="px-5 py-3.5 text-sm font-mono font-medium text-slate-700">{f.broj}</td>
-                    <td className="px-5 py-3.5 text-sm text-slate-600">{f.gradilista?.naziv ?? '—'}</td>
-                    <td className="px-5 py-3.5 text-sm text-slate-600">{f.kupac ?? '—'}</td>
+                    <td className="max-w-64 truncate whitespace-nowrap px-5 py-3.5 text-sm text-slate-600" title={f.gradilista?.naziv ?? '—'}>{f.gradilista?.naziv ?? '—'}</td>
+                    <td className="max-w-72 truncate whitespace-nowrap px-5 py-3.5 text-sm text-slate-600" title={f.investitori?.naziv ?? '—'}>{f.investitori?.naziv ?? '—'}</td>
+                    <td className="max-w-72 truncate whitespace-nowrap px-5 py-3.5 text-sm text-slate-600" title={f.kupac ?? '—'}>{f.kupac ?? '—'}</td>
                     <td className="px-5 py-3.5 text-sm text-slate-500">
                       {new Date(f.datum_izdavanja + 'T00:00:00').toLocaleDateString('hr-HR')}
                     </td>
                     <td className="px-5 py-3.5 text-sm text-slate-500">
                       {f.datum_dospjecja ? new Date(f.datum_dospjecja + 'T00:00:00').toLocaleDateString('hr-HR') : '—'}
                     </td>
-                    <td className="px-5 py-3.5 text-right text-sm font-semibold text-slate-900">
+                    <td className="px-5 py-3.5 text-right text-sm text-slate-600">
                       {f.iznos.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
+                    </td>
+                    <td className="px-5 py-3.5 text-right text-sm text-slate-600">
+                      {(f.rabat ?? 0).toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
+                    </td>
+                    <td className="px-5 py-3.5 text-right text-sm font-semibold text-slate-900">
+                      {iznosFakture(f).toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
                     </td>
                     <td className="px-5 py-3.5">
                       <Badge variant={si.variant}>{si.label}</Badge>
@@ -374,6 +459,15 @@ export function FaktureView() {
                 );
               })}
             </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold text-slate-800">
+                <td colSpan={6} className="px-5 py-3 text-sm">Ukupno ({filtered.length} faktura)</td>
+                <td className="px-5 py-3 text-right text-sm">{ukupnoOsnovno.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}</td>
+                <td className="px-5 py-3 text-right text-sm">{ukupnoRabata.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}</td>
+                <td className="px-5 py-3 text-right text-sm font-bold">{ukupno.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}</td>
+                <td colSpan={2} />
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}
@@ -392,7 +486,7 @@ export function FaktureView() {
             </button>
             <button
               onClick={save}
-              disabled={saving || !form.broj.trim() || !form.iznos}
+              disabled={saving || !mozeSpremitiFakturu}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50 transition-colors"
             >
               {saving ? 'Spremanje…' : 'Spremi'}
@@ -428,17 +522,12 @@ export function FaktureView() {
               </Select>
             </Field>
           </div>
-          <Field label="Kupac (investitor)">
+          <Field label="Investitor">
             {newInv === null ? (
               <div className="flex gap-2">
-                <Select value={form.kupac} onChange={(e) => setForm({ ...form, kupac: e.target.value })}>
+                <Select value={form.investitor_id} onChange={(e) => handleInvestitorChange(e.target.value)}>
                   <option value="">— Odaberi investitora —</option>
-                  {form.kupac && !investitori.some((i) => i.naziv === form.kupac) && (
-                    <option value={form.kupac}>{form.kupac}</option>
-                  )}
-                  {investitori.map((i) => (
-                    <option key={i.id} value={i.naziv}>{i.naziv}</option>
-                  ))}
+                  {investitori.map((investitor) => <option key={investitor.id} value={investitor.id}>{investitor.naziv}</option>)}
                 </Select>
                 <button
                   type="button"
@@ -474,14 +563,32 @@ export function FaktureView() {
               </div>
             )}
           </Field>
-          <Field label="Iznos (EUR) *">
+          <Field label="Kupac na fakturi">
+            <TextInput value={form.kupac} onChange={(event) => setForm({ ...form, kupac: event.target.value })} />
+          </Field>
+          <Field label="Osnovni iznos (EUR)">
             <TextInput
               type="number"
+              min="0"
+              step="0.01"
               value={form.iznos}
               onChange={(e) => setForm({ ...form, iznos: e.target.value })}
               placeholder="0.00"
             />
           </Field>
+          <Field label="Rabat (EUR, pribraja se)">
+            <TextInput
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.rabat}
+              onChange={(e) => setForm({ ...form, rabat: e.target.value })}
+              placeholder="0.00"
+            />
+          </Field>
+          <p className="-mt-2 rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900">
+            Ukupna izlazna faktura: <strong>{((Number(form.iznos) || 0) + (Number(form.rabat) || 0)).toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}</strong>
+          </p>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Datum izdavanja">
               <TextInput

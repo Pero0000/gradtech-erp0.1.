@@ -49,6 +49,8 @@ export type View =
 interface SidebarProps {
   current: View;
   onNavigate: (view: View) => void;
+  mobileOpen: boolean;
+  onMobileClose: () => void;
   counts: {
     gradilista: number;
     radnici: number;
@@ -123,11 +125,13 @@ const countMap: Partial<Record<View, keyof SidebarProps['counts']>> = {
   obavijesti: 'obavijesti',
 };
 
-export function Sidebar({ current, onNavigate, counts }: SidebarProps) {
+export function Sidebar({ current, onNavigate, mobileOpen, onMobileClose, counts }: SidebarProps) {
   const { canAccess, isAdmin, profile, signOut } = useAuth();
   const [signOutError, setSignOutError] = useState<string | null>(null);
   return (
-    <aside className="flex h-screen w-64 flex-shrink-0 flex-col border-r border-slate-200 bg-white">
+    <>
+    {mobileOpen && <button type="button" aria-label="Zatvori navigaciju" onClick={onMobileClose} className="fixed inset-0 z-40 bg-slate-950/40 lg:hidden" />}
+    <aside className={`h-dvh flex-shrink-0 flex-col border-r border-slate-200 bg-white ${mobileOpen ? 'fixed inset-y-0 left-0 z-50 flex w-72 shadow-xl' : 'hidden'} lg:sticky lg:top-0 lg:flex lg:w-64 lg:shadow-none`}>
       <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-200">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-600 text-white">
           <Building2 className="h-6 w-6" />
@@ -202,5 +206,6 @@ export function Sidebar({ current, onNavigate, counts }: SidebarProps) {
         <p className="text-xs text-slate-400">© 2026 GradTech</p>
       </div>
     </aside>
+    </>
   );
 }

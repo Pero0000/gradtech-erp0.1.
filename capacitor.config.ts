@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.tmcolor.erp',
-  appName: 'Tm-color',
+  appName: 'GradTech',
   webDir: 'dist',
   plugins: {
     PushNotifications: {

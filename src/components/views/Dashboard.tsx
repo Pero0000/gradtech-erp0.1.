@@ -9,6 +9,7 @@ import {
   fetchRadniNalozi,
   fetchTroskovi,
   fetchVozila,
+  iznosFakture,
 } from '@/lib/api';
 import { loadObavijesti, relativeLabel, type Obavijest, type ObavijestLevel } from '@/lib/obavijesti';
 import { loadPostavke } from '@/lib/postavke';
@@ -119,8 +120,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
 
   const neplacene = fakture.filter((f) => f.status !== 'placena');
   const dospjele = neplacene.filter((f) => f.datum_dospjecja && f.datum_dospjecja < danas);
-  const dospjeloIznos = dospjele.reduce((s, f) => s + f.iznos, 0);
-  const neplacenoIznos = neplacene.reduce((s, f) => s + f.iznos, 0);
+  const dospjeloIznos = dospjele.reduce((s, f) => s + iznosFakture(f), 0);
+  const neplacenoIznos = neplacene.reduce((s, f) => s + iznosFakture(f), 0);
 
   const rokGradilista = obavijesti.filter((o) => o.tip === 'projekt_rok').slice(0, 7);
   const ostaliRokovi = obavijesti.filter((o) => o.tip !== 'projekt_rok' && o.tip !== 'faktura_naplata').slice(0, 7);
@@ -229,7 +230,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                     <span className="block truncate text-slate-800">{f.broj} · {f.kupac ?? f.gradilista?.naziv ?? '—'}</span>
                     <span className="block text-xs text-red-600">dospjelo {f.datum_dospjecja ? dm(f.datum_dospjecja) : ''}</span>
                   </span>
-                  <span className="text-sm font-semibold text-slate-900">{eur(f.iznos)}</span>
+                  <span className="text-sm font-semibold text-slate-900">{eur(iznosFakture(f))}</span>
                 </li>
               ))}
             </ul>

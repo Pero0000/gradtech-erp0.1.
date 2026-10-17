@@ -7,6 +7,7 @@ import {
   fetchSviRadnikDokumenti,
   fetchSviVoziloDokumenti,
   fetchVozila,
+  iznosFakture,
 } from '@/lib/api';
 import { servisAlert } from '@/lib/servis';
 import { todayISO } from '@/lib/rokovi';
@@ -162,7 +163,7 @@ export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
   });
 
   src.fakture.filter((f) => f.status !== 'placena' && f.datum_dospjecja).forEach((f) => {
-    push('faktura_naplata', `fk-${f.id}`, `Faktura ${f.broj}`, `${f.kupac ?? ''} · ${f.iznos.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}`.replace(/^ · /, ''), f.datum_dospjecja as string, 'fakture');
+    push('faktura_naplata', `fk-${f.id}`, `Faktura ${f.broj}`, `${f.kupac ?? ''} · ${iznosFakture(f).toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}`.replace(/^ · /, ''), f.datum_dospjecja as string, 'fakture');
   });
 
   const order: Record<ObavijestLevel, number> = { overdue: 0, today: 1, soon: 2, upcoming: 3 };

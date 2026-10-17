@@ -179,8 +179,8 @@ export function RadnoVrijemeView() {
           }
         />
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full">
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <table className="w-full min-w-[720px]">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
                 <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Datum</th>

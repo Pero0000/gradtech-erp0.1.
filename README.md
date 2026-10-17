@@ -1,7 +1,5 @@
 # Tm-color
 
-[![Open in Bolt](https://bolt.new/static/open-in-bolt.svg)](https://bolt.new/~/sb1-yj1cq7ps)
-
 ## Prijava i korisnička prava
 
 Prijava koristi Supabase Auth s e-mailom i lozinkom. Samostalne registracije ostaju na čekanju dok ih administrator ne odobri i dodijeli prava pregleda/uređivanja po modulu. RLS štiti tablice i privatni bucket `nalozi-foto`; migracija `supabase/migrations/20261016150000_auth_permissions.sql` mora biti primijenjena prije uključivanja aplikacije za korisnike.

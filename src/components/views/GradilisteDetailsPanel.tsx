@@ -18,6 +18,7 @@ import type {
   FakturaStatus,
   Gradiliste,
   GradilisteZadatak,
+  Investitor,
   Kooperant,
   RadniNalog,
   RadnoVrijeme,
@@ -38,6 +39,7 @@ import {
   createTrosak,
   createKooperant,
   fetchKooperanti,
+  fetchInvestitori,
   deleteTrosak,
   fetchFullRekapitulacija,
   createUgovoreniRad,
@@ -48,6 +50,7 @@ import {
   updateGradiliste,
   updateTrosak,
   getPrivateFileUrl,
+  iznosFakture,
 } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { GradilisteMaterijalDokumenti } from '@/components/views/GradilisteMaterijalDokumenti';
@@ -142,12 +145,12 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const [savingFinancials, setSavingFinancials] = useState(false);
   const [financialForm, setFinancialForm] = useState({
     ugovorena_vrijednost: String(gradiliste.ugovorena_vrijednost ?? 0),
-    proracun: String(gradiliste.proracun ?? 0),
     predvidena_marza: '30',
   });
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Faktura | null>(null);
   const [savingInvoice, setSavingInvoice] = useState(false);
+  const [invoiceInvestitori, setInvoiceInvestitori] = useState<Investitor[]>([]);
   const [vtrModalOpen, setVtrModalOpen] = useState(false);
   const [savingVtr, setSavingVtr] = useState(false);
   const [loadingVtrOffers, setLoadingVtrOffers] = useState(false);
@@ -160,8 +163,10 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const [vtrForm, setVtrForm] = useState({ naziv: '', opis: '', ugovoreni_iznos: '', ostvareni_iznos: '0' });
   const [invoiceForm, setInvoiceForm] = useState({
     broj: '',
+    investitor_id: gradiliste.objekti?.investitori?.id ?? '',
     kupac: gradiliste.objekti?.investitori?.naziv ?? '',
     iznos: '',
+    rabat: '0',
     datum_izdavanja: new Date().toISOString().slice(0, 10),
     datum_dospjecja: '',
     status: 'izdana' as FakturaStatus,
@@ -182,6 +187,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
 
   useEffect(() => {
     fetchKooperanti().then(setKooperanti).catch(() => setKooperanti([]));
+    fetchInvestitori().then(setInvoiceInvestitori).catch(() => setInvoiceInvestitori([]));
   }, []);
 
   useEffect(() => {
@@ -229,12 +235,11 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   useEffect(() => {
     setFinancialForm({
       ugovorena_vrijednost: String(gradiliste.ugovorena_vrijednost ?? 0),
-      proracun: String(gradiliste.proracun ?? 0),
       predvidena_marza: gradiliste.predvidena_marza && gradiliste.ugovorena_vrijednost
         ? String((gradiliste.predvidena_marza / gradiliste.ugovorena_vrijednost) * 100)
         : '30',
     });
-  }, [gradiliste.id, gradiliste.ugovorena_vrijednost, gradiliste.proracun, gradiliste.predvidena_marza]);
+  }, [gradiliste.id, gradiliste.ugovorena_vrijednost, gradiliste.predvidena_marza]);
 
   const [zadaci, setZadaci] = useState<GradilisteZadatak[]>([]);
   const [newZadatak, setNewZadatak] = useState('');
@@ -378,7 +383,6 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     const currentOffer = (gradiliste.ugovorena_vrijednost ?? 0) + vtrValue;
     setFinancialForm({
       ugovorena_vrijednost: String(gradiliste.ugovorena_vrijednost ?? 0),
-      proracun: String(gradiliste.proracun ?? 0),
       predvidena_marza: gradiliste.predvidena_marza && currentOffer > 0
         ? String((gradiliste.predvidena_marza / currentOffer) * 100)
         : '30',
@@ -395,7 +399,6 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     const marginPercent = Number(financialForm.predvidena_marza);
     const updates = {
       ugovorena_vrijednost: Number(financialForm.ugovorena_vrijednost) || 0,
-      proracun: Number(financialForm.proracun) || 0,
       predvidena_marza: currentOffer * (Number.isFinite(marginPercent) ? marginPercent : 30) / 100,
     };
     setSavingFinancials(true);
@@ -415,8 +418,10 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     setEditingInvoice(invoice ?? null);
     setInvoiceForm({
       broj: invoice?.broj ?? '',
+      investitor_id: invoice?.investitor_id ?? gradiliste.objekti?.investitori?.id ?? '',
       kupac: invoice?.kupac ?? gradiliste.objekti?.investitori?.naziv ?? '',
       iznos: invoice ? String(invoice.iznos) : '',
+      rabat: String(invoice?.rabat ?? 0),
       datum_izdavanja: invoice?.datum_izdavanja ?? new Date().toISOString().slice(0, 10),
       datum_dospjecja: invoice?.datum_dospjecja ?? '',
       status: invoice?.status ?? 'izdana',
@@ -427,14 +432,18 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   };
 
   const saveInvoice = async () => {
-    if (!invoiceForm.broj.trim() || !invoiceForm.iznos) return;
+    const iznos = Number(invoiceForm.iznos || 0);
+    const rabat = Number(invoiceForm.rabat || 0);
+    if (!invoiceForm.broj.trim() || !Number.isFinite(iznos) || !Number.isFinite(rabat) || iznos < 0 || rabat < 0 || iznos + rabat <= 0) return;
     setSavingInvoice(true);
     setError(null);
     const payload = {
       gradiliste_id: gradiliste.id,
+      investitor_id: invoiceForm.investitor_id || null,
       broj: invoiceForm.broj.trim(),
       kupac: invoiceForm.kupac.trim() || null,
-      iznos: Number(invoiceForm.iznos),
+      iznos,
+      rabat,
       datum_izdavanja: invoiceForm.datum_izdavanja,
       datum_dospjecja: invoiceForm.datum_dospjecja || null,
       status: invoiceForm.status,
@@ -451,6 +460,15 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
       setSavingInvoice(false);
     }
   };
+
+  const invoiceAmount = Number(invoiceForm.iznos || 0);
+  const invoiceRabat = Number(invoiceForm.rabat || 0);
+  const canSaveInvoice = Boolean(invoiceForm.broj.trim())
+    && Number.isFinite(invoiceAmount)
+    && Number.isFinite(invoiceRabat)
+    && invoiceAmount >= 0
+    && invoiceRabat >= 0
+    && invoiceAmount + invoiceRabat > 0;
 
   const openVtrEditor = async () => {
     setError(null);
@@ -649,8 +667,8 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     ? Object.values(workerTotals).reduce((sum, worker) => sum + worker.cost, 0)
     : totalHours * satnica;
   const totalCosts = directCosts + laborCosts;
-  const invoiced = invoices.reduce((sum, item) => sum + item.iznos, 0);
-  const paid = invoices.filter((item) => item.status === 'placena').reduce((sum, item) => sum + item.iznos, 0);
+  const invoiced = invoices.reduce((sum, item) => sum + iznosFakture(item), 0);
+  const paid = invoices.filter((item) => item.status === 'placena').reduce((sum, item) => sum + iznosFakture(item), 0);
   const collectionDebt = invoiced - paid;
   const baseOffer = gradiliste.ugovorena_vrijednost ?? 0;
   const vtrOffer = contractedWorks
@@ -795,9 +813,6 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               <Field label="Osnovna ugovorena ponuda">
                 <TextInput type="number" min="0" step="0.01" value={financialForm.ugovorena_vrijednost} onChange={(event) => setFinancialForm((previous) => ({ ...previous, ugovorena_vrijednost: event.target.value }))} />
               </Field>
-              <Field label="Proračun">
-                <TextInput type="number" min="0" step="0.01" value={financialForm.proracun} onChange={(event) => setFinancialForm((previous) => ({ ...previous, proracun: event.target.value }))} />
-              </Field>
               <Field label="Planirana marža (%)">
                 <TextInput type="number" min="0" step="0.1" value={financialForm.predvidena_marza} onChange={(event) => setFinancialForm((previous) => ({ ...previous, predvidena_marza: event.target.value }))} />
               </Field>
@@ -819,7 +834,6 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                       <span>{currency(vtrOffer)}</span>
                     </p>
                   </div>
-                  {(gradiliste.proracun ?? 0) > 0 && <p className="mt-0.5 text-[10px] text-sky-800">Proračun {currency(gradiliste.proracun ?? 0)}</p>}
                 </div>
                 <div className="min-w-0 rounded-lg border border-red-100 bg-red-50 p-2 sm:p-3">
                   <p className="text-[10px] font-bold uppercase text-red-800">Trošak</p>
@@ -1029,8 +1043,6 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               </div>
             </Section>
 
-            <GradilisteTroskovnik gradilisteId={gradiliste.id} naziv={gradiliste.naziv} />
-
             <GradilisteMaterijalDokumenti gradilisteId={gradiliste.id} />
 
             <Section title={`Radni nalozi (${tasks.length})`} icon={<ClipboardList className="h-4 w-4" />}>
@@ -1196,6 +1208,8 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               )}
             </Section>
 
+            <GradilisteTroskovnik gradilisteId={gradiliste.id} naziv={gradiliste.naziv} />
+
             <Section
               title={`Fakture (${invoices.length})`}
               icon={<Receipt className="h-4 w-4" />}
@@ -1211,7 +1225,10 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                   {invoices.map((item) => (
                     <div key={item.id} className="flex items-center justify-between gap-2 text-xs">
                       <span className="text-slate-700">{item.broj} · {item.status === 'placena' ? 'Plaćena' : item.status === 'izdana' ? 'Izdana' : 'Neplaćena'}</span>
-                      <span className="font-medium text-slate-600">{currency(item.iznos)}</span>
+                      <span className="text-right">
+                        <span className="block font-medium text-slate-600">{currency(iznosFakture(item))}</span>
+                        {item.rabat > 0 && <span className="block text-[10px] text-slate-400">{currency(item.iznos)} + rabat {currency(item.rabat)}</span>}
+                      </span>
                       <button type="button" onClick={() => openInvoiceEditor(item)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-700" aria-label={`Uredi fakturu ${item.broj}`}>
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
@@ -1233,7 +1250,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
             <button type="button" onClick={() => setInvoiceModalOpen(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
               Odustani
             </button>
-            <button type="button" onClick={saveInvoice} disabled={savingInvoice || !invoiceForm.broj.trim() || !invoiceForm.iznos} className="rounded-lg bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:opacity-50">
+            <button type="button" onClick={saveInvoice} disabled={savingInvoice || !canSaveInvoice} className="rounded-lg bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:opacity-50">
               {savingInvoice ? 'Spremanje…' : 'Spremi fakturu'}
             </button>
           </>
@@ -1245,12 +1262,30 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
           <Field label="Broj fakture *">
             <TextInput value={invoiceForm.broj} onChange={(event) => setInvoiceForm((previous) => ({ ...previous, broj: event.target.value }))} placeholder="F-2026-001" />
           </Field>
+          <Field label="Investitor">
+            <Select
+              value={invoiceForm.investitor_id}
+              onChange={(event) => {
+                const investor = invoiceInvestitori.find((item) => item.id === event.target.value);
+                setInvoiceForm((previous) => ({ ...previous, investitor_id: event.target.value, kupac: investor?.naziv ?? previous.kupac }));
+              }}
+            >
+              <option value="">— Odaberi investitora —</option>
+              {invoiceInvestitori.map((investor) => <option key={investor.id} value={investor.id}>{investor.naziv}</option>)}
+            </Select>
+          </Field>
           <Field label="Kupac">
             <TextInput value={invoiceForm.kupac} onChange={(event) => setInvoiceForm((previous) => ({ ...previous, kupac: event.target.value }))} />
           </Field>
-          <Field label="Iznos (EUR) *">
+          <Field label="Osnovni iznos (EUR)">
             <TextInput type="number" min="0" step="0.01" value={invoiceForm.iznos} onChange={(event) => setInvoiceForm((previous) => ({ ...previous, iznos: event.target.value }))} />
           </Field>
+          <Field label="Rabat (EUR, pribraja se)">
+            <TextInput type="number" min="0" step="0.01" value={invoiceForm.rabat} onChange={(event) => setInvoiceForm((previous) => ({ ...previous, rabat: event.target.value }))} />
+          </Field>
+          <p className="-mt-2 rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-900">
+            Ukupna izlazna faktura: <strong>{((Number(invoiceForm.iznos) || 0) + (Number(invoiceForm.rabat) || 0)).toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}</strong>
+          </p>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Datum izdavanja">
               <TextInput type="date" value={invoiceForm.datum_izdavanja} onChange={(event) => setInvoiceForm((previous) => ({ ...previous, datum_izdavanja: event.target.value }))} />

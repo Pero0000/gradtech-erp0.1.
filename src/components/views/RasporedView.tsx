@@ -1,14 +1,18 @@
 ﻿import { useCallback, useEffect, useState } from 'react';
-import { CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, GripVertical, Truck, X } from 'lucide-react';
+import { CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, GripVertical, Hammer, Package, Plus, Trash2, Truck, X } from 'lucide-react';
 import type { DnevniRasporedGradiliste, DnevniRasporedOstalo, DnevniRasporedRadnik, Gradiliste, GradilisteRegija, GradilisteZadatak, NalogPrioritet, NalogStatus, Radnik, Rok, Vozilo } from '@/types';
 import { nextDeadline } from '@/lib/rokovi';
 import { Modal } from '@/components/ui/Modal';
 import { NalogIzvrsenje } from './NalogIzvrsenje';
 import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
+import type { GradilisteStavka } from '@/lib/api';
 import {
   setNalogZadaci,
+  setNalogStavke,
+  addNalogStavke,
   setRasporedGradilistePotvrdeno,
   fetchGradilisteZadaci,
+  fetchGradilisteStavke,
   generateNalogBroj,
   discardRasporedNalog,
   fetchZakljuceniNalozi,
@@ -59,6 +63,8 @@ interface NalogForm {
   radnik_ids: string[];
   radnik_options: string[];
   zadatak_ids: string[];
+  stavka_ids: string[];
+  nove_stavke: { tip: 'materijal' | 'alat'; naziv: string }[];
 }
 type Category = 'arhiva' | 'aktivna' | 'planirana' | 'ponude';
 
@@ -188,6 +194,10 @@ export function RasporedView() {
   const [ostalo, setOstalo] = useState<DnevniRasporedOstalo[]>([]);
   const [nalogForm, setNalogForm] = useState<NalogForm | null>(null);
   const [nalogSaving, setNalogSaving] = useState(false);
+  const [nalogStavke, setNalogStavke] = useState<GradilisteStavka[]>([]);
+  const [nalogStavkeLoading, setNalogStavkeLoading] = useState(false);
+  const [noviMaterijal, setNoviMaterijal] = useState('');
+  const [noviAlat, setNoviAlat] = useState('');
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [lockedNalozi, setLockedNalozi] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useState<Category>('aktivna');
@@ -199,6 +209,7 @@ export function RasporedView() {
   const visibleZadaci = nalogZadaci.filter(
     (z) => (!z.gotovo || z.nalog_id === formNalogId) && (!z.nalog_id || z.nalog_id === formNalogId),
   );
+  const visibleStavke = nalogStavke.filter((item) => !item.gotovo || item.nalog_id === formNalogId);
 
   useEffect(() => {
     if (!formGradilisteId) {
@@ -217,6 +228,33 @@ export function RasporedView() {
       cancelled = true;
     };
   }, [formGradilisteId]);
+
+  useEffect(() => {
+    if (!formGradilisteId) {
+      setNalogStavke([]);
+      setNalogStavkeLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setNalogStavkeLoading(true);
+    fetchGradilisteStavke(formGradilisteId)
+      .then((list) => {
+        if (cancelled) return;
+        setNalogStavke(list);
+        setNalogForm((current) => current && current.gradiliste_id === formGradilisteId
+          ? { ...current, stavka_ids: list.filter((item) => item.nalog_id === current.nalogId).map((item) => item.id) }
+          : current);
+      })
+      .catch(() => {
+        if (!cancelled) setNalogStavke([]);
+      })
+      .finally(() => {
+        if (!cancelled) setNalogStavkeLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [formGradilisteId, formNalogId]);
   const changeSortMode = (columnIndex: number, mode: SortMode) => {
     const next = [...sortModes];
     next[columnIndex] = mode;
@@ -407,7 +445,11 @@ export function RasporedView() {
         radnik_ids: isDraft ? [...new Set([...savedIds, ...carIds])] : savedIds,
         radnik_options: [...new Set([...savedIds, ...carIds])],
         zadatak_ids: linkedZadaci.map((z) => z.id),
+        stavka_ids: [],
+        nove_stavke: [],
       });
+      setNoviMaterijal('');
+      setNoviAlat('');
     } catch (e) {
       setError(errMsg(e, 'Greška pri učitavanju naloga'));
     }
@@ -416,6 +458,16 @@ export function RasporedView() {
   const closeNalog = () => {
     setNalogForm(null);
     setConfirmDiscard(false);
+    setNoviMaterijal('');
+    setNoviAlat('');
+  };
+
+  const addDraftStavka = (tip: 'materijal' | 'alat') => {
+    const naziv = (tip === 'materijal' ? noviMaterijal : noviAlat).trim();
+    if (!naziv) return;
+    setNalogForm((current) => current ? { ...current, nove_stavke: [...current.nove_stavke, { tip, naziv }] } : current);
+    if (tip === 'materijal') setNoviMaterijal('');
+    else setNoviAlat('');
   };
 
   const discardNalog = async () => {
@@ -459,6 +511,13 @@ export function RasporedView() {
         setError(`${message} Pokreni migraciju 20261015220000_zadaci_nalog_veza.sql.`);
         if (lock === 'lock') throw new Error(message);
       }
+      await setNalogStavke(
+        nalogId,
+        nalogForm.gradiliste_id || null,
+        nalogForm.stavka_ids,
+      );
+      await addNalogStavke(nalogId, nalogForm.nove_stavke);
+      setNalogForm((current) => current ? { ...current, nove_stavke: [] } : current);
       if (lock === 'lock') {
         await updateRadniNalog(nalogId, { ...payload, zakljucen: true });
         await notifyLockedNalogWorkers(nalogId);
@@ -1190,7 +1249,7 @@ export function RasporedView() {
             </button>
             <button
               onClick={() => void saveNalog()}
-              disabled={nalogSaving || !nalogForm?.naslov.trim()}
+              disabled={nalogSaving || nalogStavkeLoading || !nalogForm?.naslov.trim()}
               className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors"
             >
               {nalogSaving ? 'Spremanje…' : nalogForm?.zakljucen_at ? 'Spremi izmjene' : 'Spremi nacrt'}
@@ -1198,7 +1257,7 @@ export function RasporedView() {
             {!nalogForm?.zakljucen_at && (
               <button
                 onClick={() => void saveNalog('lock')}
-                disabled={nalogSaving || !nalogForm?.naslov.trim()}
+                disabled={nalogSaving || nalogStavkeLoading || !nalogForm?.naslov.trim()}
                 className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
               >
                 Zaključi nalog
@@ -1294,6 +1353,92 @@ export function RasporedView() {
                   ))}
                 </div>
               )}
+            </div>
+            <div>
+              <p className="mb-2 text-sm font-medium text-slate-700">Materijal i alat za ovaj nalog</p>
+              {nalogStavkeLoading ? (
+                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Učitavanje materijala i alata…</p>
+              ) : visibleStavke.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Nema otvorenog materijala ni alata za ovo gradilište.</p>
+              ) : (
+                <div className="max-h-48 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
+                  {visibleStavke.map((item) => (
+                    <label key={item.id} className={`flex items-center gap-3 px-3 py-2 ${item.gotovo ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-slate-50'}`}>
+                      <input
+                        type="checkbox"
+                        checked={nalogForm.stavka_ids.includes(item.id)}
+                        disabled={item.gotovo}
+                        onChange={() =>
+                          setNalogForm({
+                            ...nalogForm,
+                            stavka_ids: nalogForm.stavka_ids.includes(item.id)
+                              ? nalogForm.stavka_ids.filter((id) => id !== item.id)
+                              : [...nalogForm.stavka_ids, item.id],
+                          })
+                        }
+                        className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                      />
+                      <span className="flex-1 text-sm text-slate-700">{item.naziv}</span>
+                      <span className="text-xs text-slate-400">{item.tip === 'materijal' ? 'Materijal' : 'Alat'}</span>
+                      {item.nalog_id && item.nalog_id !== formNalogId && <span className="text-xs text-sky-700">Prethodni nalog</span>}
+                      {!item.nalog_id && <span className="text-xs text-slate-400">Gradilište</span>}
+                    </label>
+                  ))}
+                </div>
+              )}
+              <div className="mt-3 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
+                {(['materijal', 'alat'] as const).map((tip) => {
+                  const isMaterial = tip === 'materijal';
+                  const Icon = isMaterial ? Package : Hammer;
+                  const draftValue = isMaterial ? noviMaterijal : noviAlat;
+                  const setDraftValue = isMaterial ? setNoviMaterijal : setNoviAlat;
+                  return (
+                    <div key={tip} className="min-w-0 space-y-2">
+                      <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                        <Icon className="h-3.5 w-3.5 text-slate-500" /> Novi {tip} za nalog
+                      </p>
+                      <div className="space-y-1.5">
+                        {nalogForm.nove_stavke.map((stavka, index) => stavka.tip === tip && (
+                          <div key={`${tip}-${index}`} className="flex min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs">
+                            <span className="min-w-0 flex-1 break-words text-slate-700">{stavka.naziv}</span>
+                            <button
+                              type="button"
+                              onClick={() => setNalogForm((current) => current ? { ...current, nove_stavke: current.nove_stavke.filter((_, itemIndex) => itemIndex !== index) } : current)}
+                              className="flex-shrink-0 text-slate-400 hover:text-red-600"
+                              aria-label={`Ukloni ${stavka.naziv}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex min-w-0 gap-2">
+                        <input
+                          value={draftValue}
+                          onChange={(event) => setDraftValue(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault();
+                              addDraftStavka(tip);
+                            }
+                          }}
+                          placeholder={isMaterial ? 'Npr. boja bijela 15 l' : 'Npr. skela, brusilica'}
+                          className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => addDraftStavka(tip)}
+                          disabled={!draftValue.trim()}
+                          className="inline-flex flex-shrink-0 items-center justify-center rounded-lg bg-sky-600 px-2.5 text-white hover:bg-sky-700 disabled:opacity-40"
+                          aria-label={`Dodaj ${isMaterial ? 'materijal' : 'alat'}`}
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
             <div>
               <p className="mb-2 text-sm font-medium text-slate-700">Dodijeljeni radnici</p>

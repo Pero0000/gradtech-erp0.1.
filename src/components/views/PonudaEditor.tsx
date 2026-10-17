@@ -446,7 +446,6 @@ export async function convertToGradiliste(p: Ponuda, stavke: PonudaStavka[], obj
     status: 'planirano',
     datum_pocetka: null,
     datum_zavrsetka: null,
-    proracun: 0,
     opis: `Iz ponude ${ponudaBroj(p)}`,
   });
   await updatePonuda(p.id, { gradiliste_id: g.id });

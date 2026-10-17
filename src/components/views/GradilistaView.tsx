@@ -1,5 +1,5 @@
-import { useState, useEffect, type DragEvent } from 'react';
-import { Building2, Plus, Pencil, Trash2, Calendar, Euro, GripVertical, AlertTriangle } from 'lucide-react';
+import { useState, useEffect, useRef, type DragEvent } from 'react';
+import { Building2, Plus, Pencil, Trash2, Calendar, GripVertical, AlertTriangle } from 'lucide-react';
 import type { Gradiliste, GradilisteRegija, GradilisteStatus, Investitor, Objekt, Rok } from '@/types';
 import {
   fetchRokovi,
@@ -12,6 +12,9 @@ import {
   fetchObjekti,
   createObjekt,
   createGradilisteZadatak,
+  fetchGradilisteBoardLayout,
+  saveGradilisteBoardLayout,
+  type GradilisteBoardSortMode,
 } from '@/lib/api';
 import { Modal } from '@/components/ui/Modal';
 import { ExportMenu } from '@/components/ui/ExportMenu';
@@ -20,6 +23,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { GradilisteDetailsPanel } from '@/components/views/GradilisteDetailsPanel';
 import { nextDeadline, deadlineAlert } from '@/lib/rokovi';
+import { useAuth } from '@/auth/useAuth';
 
 const statusBadge: Record<GradilisteStatus, { variant: 'green' | 'yellow' | 'red' | 'blue' | 'gray'; label: string }> = {
   ponuda: { variant: 'yellow', label: 'Ponuda' },
@@ -56,13 +60,10 @@ const emptyForm = {
   status: 'planirano' as GradilisteStatus,
   datum_pocetka: '',
   datum_zavrsetka: '',
-  proracun: '',
   opis: '',
 };
 
-const gradilisteColumnsStorageKey = 'gradilista-board-columns-v1';
-const gradilisteSortModesStorageKey = 'gradilista-board-sort-modes-v1';
-type GradilisteSortMode = 'manual' | 'datum_pocetka' | 'datum_zavrsetka';
+type GradilisteSortMode = GradilisteBoardSortMode;
 type GradilisteCategory = 'arhiva' | 'aktivna' | 'planirana' | 'ponude';
 const gradilisteColumnLabels = ['dm gradilišta', 'dm intervencije', 'ostala gradilišta'];
 const gradilisteCategories: { key: GradilisteCategory; label: string; statuses: GradilisteStatus[] }[] = [
@@ -82,46 +83,8 @@ function emptyGradilisteColumns(): string[][] {
   return [[], [], []];
 }
 
-function readGradilisteColumns(): string[][] {
-  try {
-    const value = window.localStorage.getItem(gradilisteColumnsStorageKey);
-    if (!value) return emptyGradilisteColumns();
-    const parsed: unknown = JSON.parse(value);
-    if (!Array.isArray(parsed) || parsed.length !== 3) return emptyGradilisteColumns();
-    return parsed.map((column) => Array.isArray(column) ? column.filter((id): id is string => typeof id === 'string') : []);
-  } catch {
-    return emptyGradilisteColumns();
-  }
-}
-
-function saveGradilisteColumns(columns: string[][]) {
-  try {
-    window.localStorage.setItem(gradilisteColumnsStorageKey, JSON.stringify(columns));
-  } catch {
-    // The board remains usable if browser storage is unavailable.
-  }
-}
-
-function readGradilisteSortModes(): GradilisteSortMode[] {
-  try {
-    const value = window.localStorage.getItem(gradilisteSortModesStorageKey);
-    if (!value) return ['manual', 'manual', 'manual'];
-    const parsed: unknown = JSON.parse(value);
-    if (!Array.isArray(parsed) || parsed.length !== 3) return ['manual', 'manual', 'manual'];
-    return parsed.map((mode): GradilisteSortMode =>
-      mode === 'datum_pocetka' || mode === 'datum_zavrsetka' ? mode : 'manual',
-    );
-  } catch {
-    return ['manual', 'manual', 'manual'];
-  }
-}
-
-function saveGradilisteSortModes(modes: GradilisteSortMode[]) {
-  try {
-    window.localStorage.setItem(gradilisteSortModesStorageKey, JSON.stringify(modes));
-  } catch {
-    // The board remains usable if browser storage is unavailable.
-  }
+function emptyGradilisteSortModes(): GradilisteSortMode[] {
+  return ['manual', 'manual', 'manual'];
 }
 
 function reconcileGradilisteColumns(items: Gradiliste[], savedColumns: string[][]): string[][] {
@@ -158,10 +121,13 @@ function getErrorMessage(error: unknown, fallback: string) {
 }
 
 export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string) => void } = {}) {
+  const { canAccess } = useAuth();
+  const canEditBoard = canAccess('gradilista', 'edit');
+  const layoutSaveQueue = useRef<Promise<void>>(Promise.resolve());
   const [items, setItems] = useState<Gradiliste[]>([]);
   const [rokovi, setRokovi] = useState<Rok[]>([]);
-  const [columnIds, setColumnIds] = useState<string[][]>(() => readGradilisteColumns());
-  const [columnSortModes, setColumnSortModes] = useState<GradilisteSortMode[]>(() => readGradilisteSortModes());
+  const [columnIds, setColumnIds] = useState<string[][]>(emptyGradilisteColumns);
+  const [columnSortModes, setColumnSortModes] = useState<GradilisteSortMode[]>(emptyGradilisteSortModes);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTargetColumn, setDropTargetColumn] = useState<number | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
@@ -185,6 +151,14 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
   const [zadatakNaziv, setZadatakNaziv] = useState('');
   const [zadatakRok, setZadatakRok] = useState('');
 
+  const persistBoardLayout = (columns: string[][], sortModes: GradilisteSortMode[]) => {
+    const save = layoutSaveQueue.current
+      .catch(() => undefined)
+      .then(() => saveGradilisteBoardLayout({ columns, sortModes }));
+    layoutSaveQueue.current = save;
+    return save;
+  };
+
   const loadRokovi = async () => {
     try {
       setRokovi(await fetchRokovi());
@@ -198,12 +172,20 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
     setError(null);
     void loadRokovi();
     try {
-      const [nextItems, nextInvestitori] = await Promise.all([fetchGradilista(), fetchInvestitori()]);
+      const [nextItems, nextInvestitori, savedLayout] = await Promise.all([
+        fetchGradilista(),
+        fetchInvestitori(),
+        fetchGradilisteBoardLayout(),
+      ]);
       setItems(nextItems);
       setInvestitori(nextInvestitori);
-      const nextColumns = reconcileGradilisteColumns(nextItems, readGradilisteColumns());
+      const nextColumns = reconcileGradilisteColumns(nextItems, savedLayout?.columns ?? emptyGradilisteColumns());
+      const nextSortModes = savedLayout?.sortModes ?? emptyGradilisteSortModes();
       setColumnIds(nextColumns);
-      saveGradilisteColumns(nextColumns);
+      setColumnSortModes(nextSortModes);
+      if (canEditBoard && (!savedLayout || JSON.stringify(savedLayout.columns) !== JSON.stringify(nextColumns))) {
+        await persistBoardLayout(nextColumns, nextSortModes);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
     } finally {
@@ -214,6 +196,22 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    const refreshBoardLayout = async () => {
+      try {
+        const layout = await fetchGradilisteBoardLayout();
+        if (!layout) return;
+        const nextColumns = reconcileGradilisteColumns(items, layout.columns);
+        setColumnIds((current) => JSON.stringify(current) === JSON.stringify(nextColumns) ? current : nextColumns);
+        setColumnSortModes((current) => JSON.stringify(current) === JSON.stringify(layout.sortModes) ? current : layout.sortModes);
+      } catch {
+        // Keep the current board visible if a background refresh fails.
+      }
+    };
+    const timer = window.setInterval(() => void refreshBoardLayout(), 30_000);
+    return () => window.clearInterval(timer);
+  }, [items]);
 
   useEffect(() => {
     let cancelled = false;
@@ -236,6 +234,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
   }, [form.investitorId]);
 
   const handleDragStart = (event: DragEvent<HTMLDivElement>, gradilisteId: string) => {
+    if (!canEditBoard) return;
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', gradilisteId);
     setDraggedId(gradilisteId);
@@ -244,6 +243,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
   const handleDrop = (event: DragEvent<HTMLElement>, targetColumn: number, targetId?: string) => {
     event.preventDefault();
     event.stopPropagation();
+    if (!canEditBoard) return;
     const gradilisteId = event.dataTransfer.getData('text/plain') || draggedId;
     const sourceColumn = columnIds.findIndex((column) => column.includes(gradilisteId ?? ''));
     if (!gradilisteId || sourceColumn < 0 || gradilisteId === targetId) return;
@@ -256,24 +256,25 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
     if (targetIndex < 0) targetIndex = destination.length;
     destination.splice(targetIndex, 0, gradilisteId);
 
+    let nextSortModes = columnSortModes;
     if (sourceColumn === targetColumn && columnSortModes[targetColumn] !== 'manual') {
-      const nextSortModes = [...columnSortModes];
+      nextSortModes = [...columnSortModes];
       nextSortModes[targetColumn] = 'manual';
       setColumnSortModes(nextSortModes);
-      saveGradilisteSortModes(nextSortModes);
     }
     setColumnIds(nextColumns);
-    saveGradilisteColumns(nextColumns);
+    void persistBoardLayout(nextColumns, nextSortModes).catch((e) => setError(getErrorMessage(e, 'Greška pri spremanju rasporeda')));
     setDraggedId(null);
     setDropTargetColumn(null);
     setDropTargetId(null);
   };
 
   const handleColumnSortChange = (columnIndex: number, mode: GradilisteSortMode) => {
+    if (!canEditBoard) return;
     const nextSortModes = [...columnSortModes];
     nextSortModes[columnIndex] = mode;
     setColumnSortModes(nextSortModes);
-    saveGradilisteSortModes(nextSortModes);
+    void persistBoardLayout(columnIds, nextSortModes).catch((e) => setError(getErrorMessage(e, 'Greška pri spremanju sortiranja')));
   };
 
   const visibleItems = items.filter((item) =>
@@ -319,7 +320,6 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
       status: g.status,
       datum_pocetka: g.datum_pocetka ?? '',
       datum_zavrsetka: g.datum_zavrsetka ?? '',
-      proracun: g.proracun?.toString() ?? '',
       opis: g.opis ?? '',
     });
     setNewInvestorName('');
@@ -372,7 +372,6 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
         status: form.status,
         datum_pocetka: form.datum_pocetka || null,
         datum_zavrsetka: form.datum_zavrsetka || null,
-        proracun: form.proracun ? parseFloat(form.proracun) : 0,
         opis: form.opis.trim() || null,
       };
       const savedGradiliste = editing
@@ -385,7 +384,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
       const nextColumns = columnIds.map((column) => column.filter((id) => id !== savedGradiliste.id));
       nextColumns[Number(targetColumn)].push(savedGradiliste.id);
       setColumnIds(nextColumns);
-      saveGradilisteColumns(nextColumns);
+      await persistBoardLayout(nextColumns, columnSortModes);
       setModalOpen(false);
       await load();
     } catch (e) {
@@ -465,10 +464,8 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                 { header: 'Voditelj', get: (g: Gradiliste) => g.voditelj_gradilista ?? '' },
                 { header: 'Početak', kind: 'date', get: (g: Gradiliste) => g.datum_pocetka },
                 { header: 'Završetak', kind: 'date', get: (g: Gradiliste) => g.datum_zavrsetka },
-                { header: 'Proračun', kind: 'eur', get: (g: Gradiliste) => g.proracun },
                 { header: 'Ugovoreno', kind: 'eur', get: (g: Gradiliste) => g.ugovorena_vrijednost ?? 0 },
               ],
-              totals: { Proračun: items.reduce((s, g) => s + g.proracun, 0) },
             })}
           />
           <button
@@ -579,6 +576,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                     aria-label={`Sortiranje: ${gradilisteColumnLabels[columnIndex]}`}
                     value={sortMode}
                     onChange={(event) => handleColumnSortChange(columnIndex, event.target.value as GradilisteSortMode)}
+                    disabled={!canEditBoard}
                     className="px-2.5 py-2 text-xs"
                   >
                     <option value="manual">Vlastiti redoslijed</option>
@@ -595,7 +593,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                   return (
                     <div
                       key={g.id}
-                      draggable
+                      draggable={canEditBoard}
                       onDragStart={(event) => handleDragStart(event, g.id)}
                       onDragEnd={() => {
                         setDraggedId(null);
@@ -701,15 +699,6 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                     </div>
                   ) : null;
                 })()}
-
-                {g.proracun > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-4 text-xs text-slate-500">
-                    <span className="flex items-center gap-1.5">
-                      <Euro className="h-3.5 w-3.5" />
-                      {g.proracun.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
-                    </span>
-                  </div>
-                )}
 
                 {g.opis && (
                   <div className="mt-2 rounded-md border-l-2 border-red-500 bg-red-50 px-2.5 py-1.5">
@@ -979,14 +968,6 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
               />
             </Field>
           </div>
-          <Field label="Proračun (EUR)">
-            <TextInput
-              type="number"
-              value={form.proracun}
-              onChange={(e) => setForm({ ...form, proracun: e.target.value })}
-              placeholder="0"
-            />
-          </Field>
           <Field label="Napomena">
             <Textarea
               rows={3}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, Euro, FileText, TrendingDown, TrendingUp, Building2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, FileText, TrendingDown, Building2 } from 'lucide-react';
 import type { Gradiliste, Trosak, RadnoVrijeme, Faktura, UgovoreniRad, TrosakKategorija } from '@/types';
-import { fetchFullRekapitulacija } from '@/lib/api';
+import { fetchFullRekapitulacija, iznosFakture } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { ExportMenu } from '@/components/ui/ExportMenu';
 
@@ -27,11 +27,9 @@ const statusBadge: Record<string, { variant: 'blue' | 'green' | 'red' | 'yellow'
 
 interface Red {
   g: Gradiliste;
-  proracun: number;
   direktni: number;
   rad: number;
   troskovi: number;
-  razlika: number;
   fakture: number;
   placeno: number;
   ugovoreno: number;
@@ -40,7 +38,7 @@ interface Red {
   kategorije: Partial<Record<TrosakKategorija, number>>;
 }
 
-type SortKey = 'naziv' | 'proracun' | 'troskovi' | 'razlika' | 'fakture' | 'ugovoreno';
+type SortKey = 'naziv' | 'troskovi' | 'fakture' | 'ugovoreno';
 
 export function RekapitulacijaSva({
   gradilista,
@@ -74,11 +72,10 @@ export function RekapitulacijaSva({
           const direktni = troskovi.reduce((s, t) => s + t.iznos, 0);
           const kategorije: Partial<Record<TrosakKategorija, number>> = {};
           troskovi.forEach((t) => { kategorije[t.kategorija] = (kategorije[t.kategorija] ?? 0) + t.iznos; });
-          const proracun = g.proracun ?? 0;
           return {
-            g, proracun, direktni, rad: 0, troskovi: direktni, razlika: proracun - direktni,
-            fakture: fakture.reduce((s, f) => s + f.iznos, 0),
-            placeno: fakture.filter((f) => f.status === 'placena').reduce((s, f) => s + f.iznos, 0),
+            g, direktni, rad: 0, troskovi: direktni,
+            fakture: fakture.reduce((s, f) => s + iznosFakture(f), 0),
+            placeno: fakture.filter((f) => f.status === 'placena').reduce((s, f) => s + iznosFakture(f), 0),
             ugovoreno: ugovoreni.reduce((s, u) => s + u.ugovoreni_iznos, 0),
             sati: rv.reduce((s, r) => s + r.sati, 0),
             radnoVrijeme: rv,
@@ -103,7 +100,7 @@ export function RekapitulacijaSva({
         const rate = nettoPoRadnicima ? item.radnici?.cijena_sata ?? satnica : satnica;
         return sum + item.sati * rate;
       }, 0);
-      return { ...row, rad, troskovi: row.direktni + rad, razlika: row.proracun - row.direktni - rad };
+      return { ...row, rad, troskovi: row.direktni + rad };
     }).sort((a, b) => {
       if (sortKey === 'naziv') return a.g.naziv.localeCompare(b.g.naziv, 'hr') * dir;
       return (a[sortKey] - b[sortKey]) * dir;
@@ -111,9 +108,9 @@ export function RekapitulacijaSva({
   }, [rows, status, sortKey, sortDir, satnica, nettoPoRadnicima]);
 
   const tot = useMemo(() => visible.reduce((a, r) => ({
-    proracun: a.proracun + r.proracun, troskovi: a.troskovi + r.troskovi, rad: a.rad + r.rad, direktni: a.direktni + r.direktni,
+    troskovi: a.troskovi + r.troskovi, rad: a.rad + r.rad, direktni: a.direktni + r.direktni,
     fakture: a.fakture + r.fakture, placeno: a.placeno + r.placeno, ugovoreno: a.ugovoreno + r.ugovoreno, sati: a.sati + r.sati,
-  }), { proracun: 0, troskovi: 0, rad: 0, direktni: 0, fakture: 0, placeno: 0, ugovoreno: 0, sati: 0 }), [visible]);
+  }), { troskovi: 0, rad: 0, direktni: 0, fakture: 0, placeno: 0, ugovoreno: 0, sati: 0 }), [visible]);
 
   const katTot = useMemo(() => {
     const m: Partial<Record<TrosakKategorija, number>> = {};
@@ -133,8 +130,7 @@ export function RekapitulacijaSva({
     return parts.length ? `conic-gradient(${parts.join(',')})` : '#e2e8f0';
   })();
 
-  const maxBar = Math.max(1, ...visible.map((r) => Math.max(r.proracun, r.troskovi)));
-  const razlika = tot.proracun - tot.troskovi;
+  const maxBar = Math.max(1, ...visible.map((r) => r.troskovi));
 
   const toggle = (k: SortKey) => {
     if (sortKey === k) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -168,18 +164,16 @@ export function RekapitulacijaSva({
             columns: [
               { header: 'Gradilište', get: (r: Red) => r.g.naziv },
               { header: 'Status', get: (r: Red) => statusBadge[r.g.status]?.label ?? r.g.status },
-              { header: 'Proračun', kind: 'eur', get: (r: Red) => r.proracun },
               { header: 'Direktni troškovi', kind: 'eur', get: (r: Red) => r.direktni },
               { header: 'Rad', kind: 'eur', get: (r: Red) => r.rad },
               { header: 'Troškovi', kind: 'eur', get: (r: Red) => r.troskovi },
-              { header: 'Razlika', kind: 'eur', get: (r: Red) => r.razlika },
               { header: 'Ugovoreno', kind: 'eur', get: (r: Red) => r.ugovoreno },
               { header: 'Fakturirano', kind: 'eur', get: (r: Red) => r.fakture },
               { header: 'Plaćeno', kind: 'eur', get: (r: Red) => r.placeno },
             ],
             totals: {
-              Proračun: tot.proracun, 'Direktni troškovi': tot.direktni, Rad: tot.rad, Troškovi: tot.troskovi,
-              Razlika: razlika, Ugovoreno: tot.ugovoreno, Fakturirano: tot.fakture, Plaćeno: tot.placeno,
+              'Direktni troškovi': tot.direktni, Rad: tot.rad, Troškovi: tot.troskovi,
+              Ugovoreno: tot.ugovoreno, Fakturirano: tot.fakture, Plaćeno: tot.placeno,
             },
           })}
         />
@@ -198,23 +192,15 @@ export function RekapitulacijaSva({
         ))}
       </div>
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-1 flex items-center gap-2 text-sm text-slate-500"><Euro className="h-4 w-4 text-sky-600" /> Proračun</div>
-          <p className="text-2xl font-bold text-slate-900">{eur(tot.proracun)}</p>
-          <p className="mt-1 text-xs text-slate-400">{visible.length} gradilišta · ugovoreno {eur(tot.ugovoreno)}</p>
-        </div>
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-1 flex items-center gap-2 text-sm text-slate-500"><TrendingDown className="h-4 w-4 text-red-500" /> Ukupni troškovi</div>
           <p className="text-2xl font-bold text-slate-900">{eur(tot.troskovi)}</p>
           <p className="mt-1 text-xs text-slate-400">Direktni {eur(tot.direktni)} · rad {eur(tot.rad)} ({tot.sati.toFixed(0)}h)</p>
         </div>
-        <div className={`rounded-2xl border p-5 shadow-sm ${razlika >= 0 ? 'border-slate-200 bg-white' : 'border-red-200 bg-red-50'}`}>
-          <div className="mb-1 flex items-center gap-2 text-sm text-slate-500">
-            {razlika >= 0 ? <TrendingUp className="h-4 w-4 text-emerald-600" /> : <TrendingDown className="h-4 w-4 text-red-600" />} Razlika
-          </div>
-          <p className={`text-2xl font-bold ${razlika >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{eur(razlika)}</p>
-          <p className="mt-1 text-xs text-slate-400">proračun − troškovi</p>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-1 flex items-center gap-2 text-sm text-slate-500"><Building2 className="h-4 w-4 text-sky-600" /> Ugovoreno</div>
+          <p className="text-2xl font-bold text-slate-900">{eur(tot.ugovoreno)}</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-1 flex items-center gap-2 text-sm text-slate-500"><FileText className="h-4 w-4 text-indigo-600" /> Fakture</div>
@@ -229,11 +215,9 @@ export function RekapitulacijaSva({
       <div className="mb-6 grid gap-6 lg:grid-cols-[1fr_20rem]">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-4 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-900">Proračun i troškovi po gradilištu</h3>
+            <h3 className="font-semibold text-slate-900">Troškovi po gradilištu</h3>
             <div className="flex items-center gap-3 text-xs text-slate-500">
-              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-300" /> Proračun</span>
               <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-sky-500" /> Troškovi</span>
-              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" /> Preko</span>
             </div>
           </div>
           {visible.length === 0 ? <p className="text-sm text-slate-400">Nema gradilišta.</p> : (
@@ -242,11 +226,10 @@ export function RekapitulacijaSva({
                 <button key={r.g.id} type="button" onClick={() => onOpen(r.g.id)} className="block w-full text-left">
                   <div className="mb-1 flex justify-between gap-2 text-xs">
                     <span className="truncate font-medium text-slate-700">{r.g.naziv}</span>
-                    <span className="shrink-0 text-slate-500">{eur(r.troskovi)} / {eur(r.proracun)}</span>
+                    <span className="shrink-0 text-slate-500">{eur(r.troskovi)}</span>
                   </div>
                   <div className="relative h-4 rounded bg-slate-100">
-                    <div className="absolute inset-y-0 left-0 rounded bg-slate-300" style={{ width: `${(r.proracun / maxBar) * 100}%` }} />
-                    <div className={`absolute inset-y-1 left-0 rounded ${r.proracun > 0 && r.troskovi > r.proracun ? 'bg-red-500' : 'bg-sky-500'}`} style={{ width: `${(r.troskovi / maxBar) * 100}%` }} />
+                    <div className="absolute inset-y-1 left-0 rounded bg-sky-500" style={{ width: `${(r.troskovi / maxBar) * 100}%` }} />
                   </div>
                 </button>
               ))}
@@ -285,9 +268,7 @@ export function RekapitulacijaSva({
             <tr className="border-b border-slate-200 bg-slate-50">
               <Th k="naziv" label="Gradilište" />
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Status</th>
-              <Th k="proracun" label="Proračun" right />
               <Th k="troskovi" label="Troškovi" right />
-              <Th k="razlika" label="Razlika" right />
               <Th k="ugovoreno" label="Ugovoreno" right />
               <Th k="fakture" label="Fakture" right />
             </tr>
@@ -301,9 +282,7 @@ export function RekapitulacijaSva({
                     <span className="inline-flex items-center gap-2"><Building2 className="h-4 w-4 text-slate-400" />{r.g.naziv}</span>
                   </td>
                   <td className="px-4 py-3"><Badge variant={sb.variant}>{sb.label}</Badge></td>
-                  <td className="px-4 py-3 text-right text-sm text-slate-700">{eur(r.proracun)}</td>
                   <td className="px-4 py-3 text-right text-sm text-slate-700">{eur(r.troskovi)}</td>
-                  <td className={`px-4 py-3 text-right text-sm font-semibold ${r.razlika >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{eur(r.razlika)}</td>
                   <td className="px-4 py-3 text-right text-sm text-slate-700">{eur(r.ugovoreno)}</td>
                   <td className="px-4 py-3 text-right text-sm text-slate-700">{eur(r.fakture)}</td>
                 </tr>
@@ -311,9 +290,7 @@ export function RekapitulacijaSva({
             })}
             <tr className="bg-slate-50 font-bold">
               <td className="px-4 py-3 text-sm" colSpan={2}>Ukupno</td>
-              <td className="px-4 py-3 text-right text-sm">{eur(tot.proracun)}</td>
               <td className="px-4 py-3 text-right text-sm">{eur(tot.troskovi)}</td>
-              <td className={`px-4 py-3 text-right text-sm ${razlika >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{eur(razlika)}</td>
               <td className="px-4 py-3 text-right text-sm">{eur(tot.ugovoreno)}</td>
               <td className="px-4 py-3 text-right text-sm">{eur(tot.fakture)}</td>
             </tr>

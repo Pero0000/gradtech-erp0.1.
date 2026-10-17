@@ -5,7 +5,6 @@ import {
   Euro,
   Clock,
   ClipboardList,
-  TrendingUp,
   TrendingDown,
   Calendar,
   FileText,
@@ -13,7 +12,7 @@ import {
   Users,
 } from 'lucide-react';
 import type { Gradiliste, Trosak, RadnoVrijeme, TrosakKategorija, Rok, Faktura, UgovoreniRad } from '@/types';
-import { fetchGradilista, fetchFullRekapitulacija } from '@/lib/api';
+import { fetchGradilista, fetchFullRekapitulacija, iznosFakture } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Select } from '@/components/ui/Field';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -121,8 +120,6 @@ export function RekapitulacijaView() {
   }, 0);
   const ukupniTroskovi = direktniTroskovi + trosakRada;
   const ukupnoSati = radnoVrijeme.reduce((sum, rv) => sum + rv.sati, 0);
-  const proracun = selectedGradiliste?.proracun ?? 0;
-  const razlika = proracun - ukupniTroskovi;
 
   const troskoviPoKategoriji = troskovi.reduce<Record<string, number>>((acc, t) => {
     acc[t.kategorija] = (acc[t.kategorija] ?? 0) + t.iznos;
@@ -148,8 +145,8 @@ export function RekapitulacijaView() {
     localStorage.setItem('tm_netto_po_radnicima', value ? '1' : '0');
   };
 
-  const ukupnoFakture = fakture.reduce((sum, f) => sum + f.iznos, 0);
-  const placenoFakture = fakture.filter((f) => f.status === 'placena').reduce((sum, f) => sum + f.iznos, 0);
+  const ukupnoFakture = fakture.reduce((sum, f) => sum + iznosFakture(f), 0);
+  const placenoFakture = fakture.filter((f) => f.status === 'placena').reduce((sum, f) => sum + iznosFakture(f), 0);
   const ugovorenoUkupno = ugovoreniRadovi.reduce((sum, u) => sum + u.ugovoreni_iznos, 0);
   const ostvarenoUkupno = ugovoreniRadovi.reduce((sum, u) => sum + (u.ostvareni_iznos ?? 0), 0);
 
@@ -243,37 +240,7 @@ export function RekapitulacijaView() {
 
           {selectedId !== 'all' && (<>
           {/* Summary cards */}
-          {proracun > 0 && (
-            <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="mb-2 flex justify-between text-sm">
-                <span className="font-semibold text-slate-900">Iskorištenost proračuna</span>
-                <span className={ukupniTroskovi > proracun ? 'font-bold text-red-600' : 'font-bold text-slate-700'}>
-                  {Math.round((ukupniTroskovi / proracun) * 100)}%
-                </span>
-              </div>
-              <div className="flex h-4 overflow-hidden rounded-full bg-slate-100">
-                <div className="bg-sky-500" style={{ width: `${Math.min(100, (direktniTroskovi / proracun) * 100)}%` }} title="Direktni troškovi" />
-                <div className={ukupniTroskovi > proracun ? 'bg-red-500' : 'bg-amber-400'} style={{ width: `${Math.max(0, Math.min(100 - (direktniTroskovi / proracun) * 100, (trosakRada / proracun) * 100))}%` }} title="Trošak rada" />
-              </div>
-              <p className="mt-1 flex gap-4 text-xs text-slate-500">
-                <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-sky-500" />Direktni</span>
-                <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-amber-400" />Rad</span>
-              </p>
-            </div>
-          )}
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 mb-8">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
-                  <Euro className="h-5 w-5" />
-                </div>
-                <span className="text-sm text-slate-500">Proračun</span>
-              </div>
-              <p className="text-2xl font-bold text-slate-900">
-                {proracun.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
-              </p>
-            </div>
-
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-2 mb-8">
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center gap-3 mb-2">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 text-red-600">
@@ -287,26 +254,6 @@ export function RekapitulacijaView() {
               <p className="text-xs text-slate-400 mt-1">
                 Direktni: {direktniTroskovi.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })} ·
                 Rad: {trosakRada.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
-              </p>
-            </div>
-
-            <div
-              className={`rounded-2xl border p-5 shadow-sm ${
-                razlika >= 0 ? 'border-slate-200 bg-white' : 'border-red-200 bg-red-50'
-              }`}
-            >
-              <div className="flex items-center gap-3 mb-2">
-                <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                    razlika >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'
-                  }`}
-                >
-                  {razlika >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
-                </div>
-                <span className="text-sm text-slate-500">Razlika</span>
-              </div>
-              <p className={`text-2xl font-bold ${razlika >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                {razlika.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
               </p>
             </div>
 
@@ -523,7 +470,7 @@ export function RekapitulacijaView() {
                         </div>
                         <div className="flex items-center gap-3 flex-shrink-0">
                           <span className="text-sm font-semibold text-slate-900">
-                            {f.iznos.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
+                            {iznosFakture(f).toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
                           </span>
                           <Badge variant={fb.variant}>{fb.label}</Badge>
                         </div>

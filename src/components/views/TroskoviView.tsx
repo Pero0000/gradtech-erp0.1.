@@ -341,8 +341,8 @@ export function TroskoviView() {
           }
         />
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full">
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <table className="w-full min-w-[720px]">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
                 <SortTh k="datum" label="Datum" />

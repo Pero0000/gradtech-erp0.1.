@@ -13,6 +13,7 @@ import {
   fetchTroskovi,
   saveObjekt,
   updateInvestitor,
+  iznosFakture,
 } from '@/lib/api';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -182,10 +183,10 @@ export function InvestitoriView() {
       .filter((entry) => entry.gradiliste_id && siteIds.has(entry.gradiliste_id))
       .reduce((sum, entry) => sum + entry.sati * (entry.radnici?.cijena_sata ?? 0), 0);
     const invoices = fakture.filter((faktura) => faktura.gradiliste_id && siteIds.has(faktura.gradiliste_id));
-    const invoiced = invoices.reduce((sum, faktura) => sum + faktura.iznos, 0);
+    const invoiced = invoices.reduce((sum, faktura) => sum + iznosFakture(faktura), 0);
     const paid = invoices
       .filter((faktura) => faktura.status === 'placena')
-      .reduce((sum, faktura) => sum + faktura.iznos, 0);
+      .reduce((sum, faktura) => sum + iznosFakture(faktura), 0);
     const totalCosts = directCosts + laborCosts;
 
     return [investitor.id, {
@@ -646,7 +647,7 @@ export function ObjektiView() {
 
   const naplacenoPoGradilistu = fakture.reduce<Record<string, number>>((totals, faktura) => {
     if (faktura.status === 'placena' && faktura.gradiliste_id) {
-      totals[faktura.gradiliste_id] = (totals[faktura.gradiliste_id] ?? 0) + faktura.iznos;
+      totals[faktura.gradiliste_id] = (totals[faktura.gradiliste_id] ?? 0) + iznosFakture(faktura);
     }
     return totals;
   }, {});

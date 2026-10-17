@@ -170,7 +170,6 @@ export interface DnevniRasporedRadnik {
                                     status: GradilisteStatus;
                                       datum_pocetka: string | null;
                                         datum_zavrsetka: string | null;
-                                          proracun: number;
                                             opis: string | null;
                                               created_at: string;
                                                 updated_at: string;
@@ -342,15 +341,18 @@ export type FakturaStatus = 'izdana' | 'placena' | 'nep placena';
                                                                                                                                                                                                 export interface Faktura {
                                                                                                                                                                                                   id: string;
                                                                                                                                                                                                     gradiliste_id: string | null;
+                                                                                                                                                                                                        investitor_id: string | null;
                                                                                                                                                                                                       broj: string;
                                                                                                                                                                                                         kupac: string | null;
                                                                                                                                                                                                           iznos: number;
+                                                                                                                                                                                                              rabat: number;
                                                                                                                                                                                                             datum_izdavanja: string;
                                                                                                                                                                                                               datum_dospjecja: string | null;
                                                                                                                                                                                                                 status: FakturaStatus;
                                                                                                                                                                                                                   opis: string | null;
                                                                                                                                                                                                                     created_at: string;
                                                                                                                                                                                                                       gradilista?: Pick<Gradiliste, 'id' | 'naziv'> | null;
+                                                                                                                                                                                                                         investitori?: Pick<Investitor, 'id' | 'naziv'> | null;
                                                                                                                                                                                                                       }
 
                                                                                                                                                                                                                       export type UgovoreniRadStatus = 'planirano' | 'u_tijeku' | 'zavrseno';

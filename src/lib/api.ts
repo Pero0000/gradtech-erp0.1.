@@ -166,9 +166,62 @@ export async function fetchGradilista(): Promise<Gradiliste[]> {
   const { data, error } = await supabase
     .from('gradilista')
     .select('*, objekti(*, investitori(id, naziv))')
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: true });
   if (error) throw error;
   return data ?? [];
+}
+
+export type GradilisteBoardSortMode = 'manual' | 'datum_pocetka' | 'datum_zavrsetka';
+
+export interface GradilisteBoardLayout {
+  columns: string[][];
+  sortModes: GradilisteBoardSortMode[];
+}
+
+const defaultGradilisteBoardLayout: GradilisteBoardLayout = {
+  columns: [[], [], []],
+  sortModes: ['manual', 'manual', 'manual'],
+};
+
+function normalizeGradilisteBoardLayout(columns: unknown, sortModes: unknown): GradilisteBoardLayout {
+  const normalizedColumns = Array.isArray(columns) && columns.length === 3
+    ? columns.map((column) => Array.isArray(column) ? column.filter((id): id is string => typeof id === 'string') : [])
+    : defaultGradilisteBoardLayout.columns.map(() => []);
+  const normalizedSortModes = Array.isArray(sortModes) && sortModes.length === 3
+    ? sortModes.map((mode): GradilisteBoardSortMode =>
+      mode === 'datum_pocetka' || mode === 'datum_zavrsetka' ? mode : 'manual',
+    )
+    : [...defaultGradilisteBoardLayout.sortModes];
+  return { columns: normalizedColumns, sortModes: normalizedSortModes };
+}
+
+function throwGradilisteBoardMigrationError(error: { code?: string }) {
+  if (error.code === '42P01' || error.code === 'PGRST205') {
+    throw new Error('Nedostaje migracija za zajednički raspored gradilišta. Primijenite novu migraciju u Supabaseu.');
+  }
+  throw error;
+}
+
+export async function fetchGradilisteBoardLayout(): Promise<GradilisteBoardLayout | null> {
+  const { data, error } = await supabase
+    .from('gradiliste_board_layout')
+    .select('columns, sort_modes')
+    .eq('id', true)
+    .maybeSingle();
+  if (error) throwGradilisteBoardMigrationError(error);
+  if (!data) return null;
+  return normalizeGradilisteBoardLayout(data.columns, data.sort_modes);
+}
+
+export async function saveGradilisteBoardLayout(layout: GradilisteBoardLayout) {
+  const { error } = await supabase.from('gradiliste_board_layout').upsert({
+    id: true,
+    columns: layout.columns,
+    sort_modes: layout.sortModes,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'id' });
+  if (error) throwGradilisteBoardMigrationError(error);
 }
 
 export async function createGradiliste(g: Omit<Gradiliste, 'id' | 'created_at' | 'updated_at'>) {
@@ -1565,6 +1618,14 @@ export async function addNalogStavka(nalogId: string, tip: 'materijal' | 'alat',
   if (error) throw error;
 }
 
+export async function addNalogStavke(nalogId: string, stavke: { tip: 'materijal' | 'alat'; naziv: string }[]) {
+  if (stavke.length === 0) return;
+  const { error } = await supabase.from('radni_nalozi_stavke').insert(
+    stavke.map((stavka) => ({ nalog_id: nalogId, tip: stavka.tip, naziv: stavka.naziv })),
+  );
+  if (error) throw error;
+}
+
 export async function updateNalogStavka(id: string, u: { gotovo?: boolean; naziv?: string }) {
   const { error } = await supabase.from('radni_nalozi_stavke').update(u).eq('id', id);
   if (error) throw error;
@@ -1634,12 +1695,62 @@ export interface GradilisteStavka {
   tip: 'materijal' | 'alat';
   naziv: string;
   gotovo: boolean;
+  izvor_id?: string | null;
 }
 
 export async function fetchGradilisteStavke(gradilisteId: string): Promise<GradilisteStavka[]> {
   const { data, error } = await supabase.from('radni_nalozi_stavke').select('*').eq('gradiliste_id', gradilisteId).eq('preneseno', false).order('created_at');
   if (error) throw error;
   return (data ?? []) as GradilisteStavka[];
+}
+
+export async function setNalogStavke(nalogId: string, gradilisteId: string | null, stavkaIds: string[]) {
+  const { data: currentRows, error: currentError } = await supabase
+    .from('radni_nalozi_stavke')
+    .select('id, izvor_id, gotovo')
+    .eq('nalog_id', nalogId)
+    .eq('preneseno', false);
+  if (currentError) throw currentError;
+
+  const siteRows = gradilisteId ? await fetchGradilisteStavke(gradilisteId) : [];
+  const availableRows = siteRows.filter((item) => !item.gotovo || item.nalog_id === nalogId);
+  const availableById = new Map(availableRows.map((item) => [item.id, item]));
+  const selectedIds = new Set(stavkaIds.filter((id) => availableById.has(id)));
+
+  for (const item of (currentRows ?? []) as { id: string; izvor_id: string | null; gotovo: boolean }[]) {
+    if (selectedIds.has(item.id) || item.gotovo) continue;
+    if (item.izvor_id) {
+      const { error: deleteError } = await supabase.from('radni_nalozi_stavke').delete().eq('id', item.id);
+      if (deleteError) throw deleteError;
+      const { error: restoreError } = await supabase.from('radni_nalozi_stavke').update({ preneseno: false }).eq('id', item.izvor_id);
+      if (restoreError) throw restoreError;
+    } else {
+      const { error: releaseError } = await supabase.from('radni_nalozi_stavke').update({ nalog_id: null }).eq('id', item.id);
+      if (releaseError) throw releaseError;
+    }
+  }
+
+  for (const item of availableRows) {
+    if (!selectedIds.has(item.id) || item.nalog_id === nalogId) continue;
+    if (item.nalog_id) {
+      const { error: copyError } = await supabase.from('radni_nalozi_stavke').insert({
+        nalog_id: nalogId,
+        tip: item.tip,
+        naziv: item.naziv,
+        izvor_id: item.id,
+      });
+      if (copyError) throw copyError;
+      const { error: transferError } = await supabase.from('radni_nalozi_stavke').update({ preneseno: true }).eq('id', item.id);
+      if (transferError) throw transferError;
+    } else {
+      const { error: assignError } = await supabase
+        .from('radni_nalozi_stavke')
+        .update({ nalog_id: nalogId })
+        .eq('id', item.id)
+        .is('nalog_id', null);
+      if (assignError) throw assignError;
+    }
+  }
 }
 
 export async function addGradilisteStavka(gradilisteId: string, tip: 'materijal' | 'alat', naziv: string) {
@@ -1877,10 +1988,14 @@ export async function deleteRok(id: string) {
 
 // ===== FAKTURE =====
 
+export function iznosFakture(faktura: Pick<Faktura, 'iznos' | 'rabat'>) {
+  return faktura.iznos + (faktura.rabat ?? 0);
+}
+
 export async function fetchFakture(gradilisteId?: string): Promise<Faktura[]> {
   let q = supabase
     .from('fakture')
-    .select('*, gradilista:gradiliste_id ( id, naziv )')
+    .select('*, gradilista:gradiliste_id ( id, naziv ), investitori:investitor_id ( id, naziv )')
     .order('datum_izdavanja', { ascending: false });
   if (gradilisteId) q = q.eq('gradiliste_id', gradilisteId);
   const { data, error } = await q;
@@ -1890,9 +2005,11 @@ export async function fetchFakture(gradilisteId?: string): Promise<Faktura[]> {
 
 export async function createFaktura(f: {
   gradiliste_id: string | null;
+  investitor_id: string | null;
   broj: string;
   kupac: string | null;
   iznos: number;
+  rabat: number;
   datum_izdavanja: string;
   datum_dospjecja: string | null;
   status: FakturaStatus;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, Check, Clock, FileText, Gauge, Hammer, Package, Plus, Trash2, ListChecks } from 'lucide-react';
+import { Camera, Check, ChevronDown, Clock, FileText, Gauge, Hammer, History, Package, Plus, Trash2, ListChecks } from 'lucide-react';
 import type { GradilisteZadatak, RadniNalog } from '@/types';
 import {
   addNalogStavka,
@@ -98,8 +98,7 @@ function auditValue(value: unknown) {
 
 function AuditLog({ entries }: { entries: MobileWorkOrderAuditEntry[] }) {
   return (
-    <section className="mt-5 border-t border-slate-100 pt-4">
-      <h4 className="mb-3 text-sm font-semibold text-slate-800">Povijest promjena</h4>
+    <div className="pt-3">
       {entries.length === 0 ? (
         <p className="text-xs text-slate-500">Još nema zabilježenih promjena.</p>
       ) : (
@@ -123,7 +122,7 @@ function AuditLog({ entries }: { entries: MobileWorkOrderAuditEntry[] }) {
           ))}
         </ol>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -169,7 +168,12 @@ function Checklist({
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              submit();
+            }
+          }}
           placeholder={placeholder}
           className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
         />
@@ -540,7 +544,15 @@ export function NalogIzvrsenje({
                   </label>
                   <label className="flex items-center gap-1.5 text-xs text-slate-500">
                     Do
-                    <input type="time" value={v.vrijeme_do?.slice(0, 5) ?? ''} onChange={(e) => changeVrijeme(v.radnik_id, 'vrijeme_do', e.target.value)} className={inputCls} />
+                    <input
+                      type="time"
+                      value={v.vrijeme_do?.slice(0, 5) ?? ''}
+                      onFocus={() => {
+                        if (!v.vrijeme_do) changeVrijeme(v.radnik_id, 'vrijeme_do', '16:00');
+                      }}
+                      onChange={(e) => changeVrijeme(v.radnik_id, 'vrijeme_do', e.target.value)}
+                      className={inputCls}
+                    />
                   </label>
                   <span className="min-w-[70px] text-right text-xs font-medium text-slate-600">
                     {mins !== null && mins > 0 ? `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m` : '—'}
@@ -686,7 +698,17 @@ export function NalogIzvrsenje({
         )}
       </div>
       <div className="md:col-span-2">
-        <AuditLog entries={audit} />
+        <details className="group rounded-lg border border-slate-200 bg-slate-50">
+          <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 [&::-webkit-details-marker]:hidden">
+            <History className="h-4 w-4 flex-shrink-0 text-slate-400" />
+            <span className="font-medium text-slate-700">Povijest aktivnosti</span>
+            <span className="text-xs text-slate-400">{audit.length}</span>
+            <ChevronDown className="ml-auto h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="border-t border-slate-200 px-3 pb-3">
+            <AuditLog entries={audit} />
+          </div>
+        </details>
       </div>
     </div>
   );

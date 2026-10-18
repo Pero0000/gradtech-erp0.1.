@@ -71,6 +71,7 @@ export interface Oprema {
   kolicina: number;
   datum_nabave: string | null;
   nabavna_vrijednost: number;
+  cijena_sata: number;
   radni_sati: number;
   servisni_interval_sati: number | null;
   servis_upozorenje_sati: number;
@@ -305,6 +306,7 @@ export interface DnevniRasporedRadnik {
   mobile_status?: MobileNalogStatus;
   teren?: boolean;
   poslovodja_id?: string | null;
+  vozac_id?: string | null;
                                                                                                                                                                             rok: string | null;
                                                                                                                                                                               created_at: string;
                                                                                                                                                                                 gradilista?: Pick<Gradiliste, 'id' | 'naziv'> | null;

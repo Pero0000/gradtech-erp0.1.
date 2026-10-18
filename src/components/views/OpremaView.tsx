@@ -59,6 +59,7 @@ const emptyForm = {
   kolicina: '1',
   datum_nabave: '',
   nabavna_vrijednost: '',
+  cijena_sata: '',
   radni_sati: '',
   servisni_interval_sati: '',
   servis_upozorenje_sati: '20',
@@ -184,6 +185,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
       kolicina: String(item.kolicina ?? 1),
       datum_nabave: item.datum_nabave ?? '',
       nabavna_vrijednost: String(item.nabavna_vrijednost ?? ''),
+      cijena_sata: String(item.cijena_sata ?? ''),
       radni_sati: String(item.radni_sati ?? ''),
       servisni_interval_sati: String(item.servisni_interval_sati ?? ''),
       servis_upozorenje_sati: String(item.servis_upozorenje_sati ?? 20),
@@ -210,6 +212,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
       kolicina: Math.max(0.01, Number(form.kolicina) || 1),
       datum_nabave: form.datum_nabave || null,
       nabavna_vrijednost: Math.max(0, Number(form.nabavna_vrijednost) || 0),
+      cijena_sata: kategorija === 'stroj' ? Math.max(0, Number(form.cijena_sata) || 0) : 0,
       radni_sati: Math.max(0, Number(form.radni_sati) || 0),
       servisni_interval_sati: form.servisni_interval_sati ? Math.max(0, Number(form.servisni_interval_sati)) : null,
       servis_upozorenje_sati: Math.max(0, Number(form.servis_upozorenje_sati) || 20),
@@ -395,6 +398,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
                 { header: 'Količina', kind: 'num', get: (item: Oprema) => item.kolicina },
                 { header: 'Nabavna vrijednost', kind: 'eur', get: (item: Oprema) => item.nabavna_vrijednost },
                 { header: 'Radni sati', kind: 'num', get: (item: Oprema) => item.radni_sati },
+                ...(kategorija === 'stroj' ? [{ header: 'Cijena radnog sata', kind: 'eur' as const, get: (item: Oprema) => item.cijena_sata }] : []),
               ],
             })}
           />
@@ -438,7 +442,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
                   <td className="px-4 py-3"><Badge variant={statusVariants[item.status]}>{statusLabels[item.status]}</Badge><p className="mt-1 text-xs text-slate-500">Stanje: {conditionLabels[item.stanje]}</p></td>
                   <td className="px-4 py-3 text-slate-600">{item.gradilista?.naziv ?? 'Skladište'}</td>
                   <td className="px-4 py-3 text-right text-slate-600">{item.kolicina.toLocaleString('hr-HR')}</td>
-                  {kategorija === 'stroj' && <td className="px-4 py-3 text-right text-slate-600">{item.radni_sati.toLocaleString('hr-HR')} h</td>}
+                  {kategorija === 'stroj' && <td className="px-4 py-3 text-right text-slate-600">{item.radni_sati.toLocaleString('hr-HR')} h · {currency(item.cijena_sata ?? 0)}/h</td>}
                   <td className="px-4 py-3 text-right text-slate-600">{currency(item.nabavna_vrijednost)}</td>
                   <td className="px-4 py-3"><div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100">
                     <button type="button" onClick={() => openEdit(item)} className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-700" aria-label={`Uredi ${item.naziv}`}><Pencil className="h-4 w-4" /></button>
@@ -474,6 +478,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
                   <span>Količina: {item.kolicina.toLocaleString('hr-HR')}</span>
                   <span>Nabava: {currency(item.nabavna_vrijednost)}{item.datum_nabave ? ` · ${dateLabel(item.datum_nabave)}` : ''}</span>
                   {kategorija === 'stroj' && <span className="flex items-center gap-1"><Wrench className="h-3.5 w-3.5" />{item.radni_sati.toLocaleString('hr-HR')} radnih sati</span>}
+                  {kategorija === 'stroj' && <span>Cijena sata: {currency(item.cijena_sata ?? 0)}/h</span>}
                   {kategorija === 'stroj' && item.servisni_interval_sati && <span>Servis svakih {item.servisni_interval_sati.toLocaleString('hr-HR')} h</span>}
                 </div>
                 {alert && <p className="mt-3 flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-800"><AlertTriangle className="h-3.5 w-3.5" />{alert}</p>}
@@ -520,6 +525,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
             <Field label="Datum nabave"><TextInput type="date" value={form.datum_nabave} onChange={(event) => setForm((previous) => ({ ...previous, datum_nabave: event.target.value }))} /></Field>
             <Field label="Nabavna vrijednost (€)"><TextInput type="number" min="0" step="0.01" value={form.nabavna_vrijednost} onChange={(event) => setForm((previous) => ({ ...previous, nabavna_vrijednost: event.target.value }))} /></Field>
             {kategorija === 'stroj' && <>
+              <Field label="Cijena radnog sata (€/h)"><TextInput type="number" min="0" step="0.01" value={form.cijena_sata} onChange={(event) => setForm((previous) => ({ ...previous, cijena_sata: event.target.value }))} placeholder="npr. 45" /></Field>
               <Field label="Trenutni radni sati"><TextInput type="number" min="0" step="0.1" value={form.radni_sati} onChange={(event) => setForm((previous) => ({ ...previous, radni_sati: event.target.value }))} /></Field>
               <Field label="Servisni interval (sati)"><TextInput type="number" min="0" step="1" value={form.servisni_interval_sati} onChange={(event) => setForm((previous) => ({ ...previous, servisni_interval_sati: event.target.value }))} placeholder="npr. 500" /></Field>
               <Field label="Upozori prije servisa (sati)"><TextInput type="number" min="0" step="1" value={form.servis_upozorenje_sati} onChange={(event) => setForm((previous) => ({ ...previous, servis_upozorenje_sati: event.target.value }))} /></Field>

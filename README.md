@@ -1,5 +1,11 @@
 # Tm-color
 
+## Stvarni troškovi i prihodi gradilišta
+
+U modulu **Rekapitulacija** tab **Stvarni troškovi i prihodi** prikazuje popis gradilišta, evidentirane troškove uvećane za rad prema odabranoj univerzalnoj satnici ili netto satnici radnika, izdane fakture svih statusa, plaćeni i nenaplaćeni dio, razliku, maržu i radne sate. Prihod koristi postojeći obračun fakture (`iznos + rabat`), nije isto što i naplata i ne uključuje nefakturirane ugovorene radove.
+
+Filtri obuhvaćaju pretragu, višestruki odabir gradilišta, status, regiju, investitora prema objektu, objekt, voditelja, razdoblje, kategoriju troška, status fakture, financijski rezultat, prisutnost evidencije i raspone troška, prihoda i razlike. Razdoblje je uključivo i primjenjuje se na datum troška, rada i izdavanja fakture. Kategorija filtrira samo troškove (kategorija plaća uključuje i radne sate), a status fakture samo prihode; razlika i marža tada prikazuju odabrani dio evidencije. Marža bez prihoda nije definirana. Zbrojevi i PDF/Excel izvoz prate iste filtre; ukupna marža računa se iz ukupne razlike i prihoda, ne kao prosjek marži gradilišta. Klik na naziv otvara postojeći detaljni pregled gradilišta. Nova migracija nije potrebna.
+
 ## Prijava i korisnička prava
 
 Prijava koristi Supabase Auth s e-mailom i lozinkom. Samostalne registracije ostaju na čekanju dok ih administrator ne odobri i dodijeli prava pregleda/uređivanja po modulu. RLS štiti tablice i privatni bucket `nalozi-foto`; migracija `supabase/migrations/20261016150000_auth_permissions.sql` mora biti primijenjena prije uključivanja aplikacije za korisnike.

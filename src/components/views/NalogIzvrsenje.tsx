@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, Check, ChevronDown, Clock, FileText, Gauge, Hammer, History, Package, Plus, Trash2, ListChecks } from 'lucide-react';
-import type { GradilisteZadatak, RadniNalog } from '@/types';
+import { Camera, Check, ChevronDown, Clock, FileText, Gauge, Hammer, History, Package, Plus, Trash2, ListChecks, Wrench } from 'lucide-react';
+import type { GradilisteZadatak, Oprema, RadniNalog } from '@/types';
 import {
   addNalogStavka,
+  addNalogAlatFromInventory,
+  addNalogStrojFromInventory,
   addNalogZadatak,
   deleteGradilisteZadatak,
   deleteNalogDokument,
@@ -12,6 +14,7 @@ import {
   fetchNalogDokumenti,
   fetchNalogFoto,
   fetchNalogIzvrsenje,
+  fetchOprema,
   fetchNalogRadnikVrijeme,
   fetchNalogStavke,
   fetchNalogZadaci,
@@ -23,6 +26,7 @@ import {
   saveNalogRadnikVrijeme,
   setNalogTeren,
   setNalogPoslovodja,
+  setNalogVozac,
   setNalogZavrsen,
   updateGradilisteZadatak,
   updateNalogStavka,
@@ -135,18 +139,29 @@ function Checklist({
   items,
   placeholder,
   onAdd,
+  equipment,
+  equipmentLabel = 'alat',
+  onAddEquipment,
+  onHoursChange,
+  onHoursSave,
   onToggle,
   onRemove,
 }: {
   items: NalogStavka[];
   placeholder: string;
-  onAdd: (naziv: string) => void;
+  onAdd?: (naziv: string) => void;
+  equipment?: Oprema[];
+  equipmentLabel?: 'alat' | 'stroj';
+  onAddEquipment?: (opremaId: string) => void;
+  onHoursChange?: (s: NalogStavka, value: string) => void;
+  onHoursSave?: (s: NalogStavka) => void;
   onToggle: (s: NalogStavka) => void;
   onRemove: (id: string) => void;
 }) {
   const [text, setText] = useState('');
+  const [selectedEquipmentId, setSelectedEquipmentId] = useState('');
   const submit = () => {
-    if (!text.trim()) return;
+    if (!text.trim() || !onAdd) return;
     onAdd(text.trim());
     setText('');
   };
@@ -157,6 +172,21 @@ function Checklist({
           <div key={s.id} className={`flex items-center gap-3 rounded-lg border px-3 py-1.5 text-sm ${s.gotovo ? 'border-emerald-200 bg-emerald-50' : 'border-slate-100'}`}>
             <input type="checkbox" checked={s.gotovo} onChange={() => onToggle(s)} className="h-4 w-4 rounded border-slate-300" />
             <span className={`flex-1 ${s.gotovo ? 'text-emerald-800 line-through' : 'text-slate-800'}`}>{s.naziv}</span>
+            {onHoursChange && (
+              <label className="flex items-center gap-1 text-xs text-slate-500">
+                <input
+                  type="number"
+                  min={0}
+                  step="0.5"
+                  value={s.sati ?? ''}
+                  onChange={(e) => onHoursChange(s, e.target.value)}
+                  onBlur={() => onHoursSave?.(s)}
+                  className="w-20 rounded-md border border-slate-300 px-2 py-1 text-right text-sm"
+                  aria-label={`Radni sati stroja ${s.naziv}`}
+                />
+                h
+              </label>
+            )}
             <button onClick={() => onRemove(s.id)} className="text-slate-300 hover:text-red-600" aria-label="Obriši stavku">
               <Trash2 className="h-3.5 w-3.5" />
             </button>
@@ -164,24 +194,55 @@ function Checklist({
         ))}
         {items.length === 0 && <p className="text-xs text-slate-400">Nema stavki.</p>}
       </div>
-      <div className="mt-2 flex gap-2">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder={placeholder}
-          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-        />
-        <button onClick={submit} disabled={!text.trim()} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">
-          <Plus className="h-4 w-4" />
-          Dodaj
-        </button>
-      </div>
+      {onAdd && (
+        <div className="mt-2 flex gap-2">
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            placeholder={placeholder}
+            className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+          />
+          <button onClick={submit} disabled={!text.trim()} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">
+            <Plus className="h-4 w-4" />
+            Dodaj
+          </button>
+        </div>
+      )}
+      {equipment && onAddEquipment && (
+        <div className="mt-2 flex gap-2">
+          <select
+            value={selectedEquipmentId}
+            onChange={(event) => setSelectedEquipmentId(event.target.value)}
+            className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+          >
+            <option value="">{equipmentLabel === 'stroj' ? 'Odaberi stroj iz popisa strojeva…' : 'Odaberi alat iz popisa opreme…'}</option>
+            {equipment.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.naziv}{item.inventarski_broj ? ` · ${item.inventarski_broj}` : ''}
+                {item.gradilista?.naziv ? ` — ${item.gradilista.naziv}` : ''}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => {
+              if (!selectedEquipmentId) return;
+              onAddEquipment(selectedEquipmentId);
+              setSelectedEquipmentId('');
+            }}
+            disabled={!selectedEquipmentId}
+            className="rounded-lg bg-sky-700 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+          >
+            {equipmentLabel === 'stroj' ? 'Dodaj stroj' : 'Dodaj alat'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -199,12 +260,14 @@ export function NalogIzvrsenje({
   nalog,
   radnikIds,
   hideZadaci,
+  hideStavke,
   onChange,
   slotId,
 }: {
   nalog: Pick<RadniNalog, 'id' | 'gradiliste_id'> & Partial<Pick<RadniNalog, 'mobile_status'>>;
   radnikIds?: string[];
   hideZadaci?: boolean;
+  hideStavke?: boolean;
   slotId?: string;
   onChange?: (zavrsen: boolean) => void;
 }) {
@@ -215,6 +278,7 @@ export function NalogIzvrsenje({
   const [zavrsen, setZavrsen] = useState(false);
   const [teren, setTeren] = useState(false);
   const [poslovodja, setPoslovodja] = useState<string | null>(null);
+  const [vozac, setVozac] = useState<string | null>(null);
 
   const changePoslovodja = (radnikId: string | null) => {
     setPoslovodja(radnikId);
@@ -223,10 +287,19 @@ export function NalogIzvrsenje({
       onChange?.(zavrsen);
     }, 'Greška pri spremanju poslovođe.');
   };
+  const changeVozac = (radnikId: string | null) => {
+    setVozac(radnikId);
+    void guard(async () => {
+      await setNalogVozac(nalog.id, radnikId);
+      onChange?.(zavrsen);
+    }, 'Greška pri spremanju vozača.');
+  };
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [km, setKm] = useState({ pocetak: '', kraj: '' });
   const [stavke, setStavke] = useState<NalogStavka[]>([]);
+  const [alati, setAlati] = useState<Oprema[]>([]);
+  const [strojevi, setStrojevi] = useState<Oprema[]>([]);
   const [napomena, setNapomena] = useState('');
   const [dokumenti, setDokumenti] = useState<NalogDokument[]>([]);
   const [gradDokumenti, setGradDokumenti] = useState<GradilisteDokument[]>([]);
@@ -242,7 +315,7 @@ export function NalogIzvrsenje({
 
   const load = useCallback(async () => {
     setError(null);
-    const [izv, vr, zad, fo, st, dok, history] = await Promise.allSettled([
+    const [izv, vr, zad, fo, st, dok, history, inventory, machines] = await Promise.allSettled([
       fetchNalogIzvrsenje(nalog.id),
       fetchNalogRadnikVrijeme(nalog.id),
       fetchNalogZadaci(nalog.id),
@@ -250,6 +323,8 @@ export function NalogIzvrsenje({
       fetchNalogStavke(nalog.id),
       fetchNalogDokumenti(nalog.id),
       fetchMobileWorkOrderAudit(nalog.id),
+      fetchOprema('alat'),
+      fetchOprema('stroj'),
     ]);
     if (izv.status === 'fulfilled') {
       setKm({ pocetak: izv.value.km_pocetak?.toString() ?? '', kraj: izv.value.km_kraj?.toString() ?? '' });
@@ -257,9 +332,13 @@ export function NalogIzvrsenje({
       setZavrsen(izv.value.status === 'zavrsen');
       setTeren(Boolean(izv.value.teren));
       setPoslovodja(izv.value.poslovodja_id ?? null);
+      setVozac(izv.value.vozac_id ?? null);
     } else setError(errText(izv.reason, 'Greška pri učitavanju.') + hint + ' Za napomene pokreni i 20261015250000_nalog_napomena.sql.');
     if (st.status === 'fulfilled') setStavke(st.value);
     else setError((e) => e ?? errText(st.reason, 'Greška pri učitavanju materijala i alata.') + hint2);
+    if (inventory.status === 'fulfilled') setAlati(inventory.value.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'));
+    else setError((e) => e ?? errText(inventory.reason, 'Greška pri učitavanju popisa alata.'));
+    if (machines.status === 'fulfilled') setStrojevi(machines.value.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'));
     if (dok.status === 'fulfilled') setDokumenti(dok.value);
     else setError((e) => e ?? errText(dok.reason, 'Greška pri učitavanju dokumenata.') + hint2);
     if (vr.status === 'fulfilled') {
@@ -422,6 +501,28 @@ export function NalogIzvrsenje({
       await addNalogStavka(nalog.id, tip, naziv);
       await reloadStavke();
     }, 'Greška pri dodavanju stavke.');
+  const addAlatIzPopisa = (opremaId: string) =>
+    void guard(async () => {
+      await addNalogAlatFromInventory(nalog.id, opremaId);
+      await Promise.all([
+        reloadStavke(),
+        fetchOprema('alat').then((items) => setAlati(items.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'))),
+      ]);
+    }, 'Greška pri dodavanju alata s popisa opreme.');
+  const addStrojIzPopisa = (opremaId: string) =>
+    void guard(async () => {
+      await addNalogStrojFromInventory(nalog.id, opremaId);
+      await Promise.all([
+        reloadStavke(),
+        fetchOprema('stroj').then((items) => setStrojevi(items.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'))),
+      ]);
+    }, 'Greška pri dodavanju stroja s popisa.');
+  const changeSati = (s: NalogStavka, value: string) =>
+    setStavke((prev) => prev.map((x) => (x.id === s.id ? { ...x, sati: value === '' ? null : Math.max(0, Number(value)) } : x)));
+  const saveSati = (s: NalogStavka) => {
+    const current = stavke.find((x) => x.id === s.id);
+    void guard(() => updateNalogStavka(s.id, { sati: current?.sati ?? null }), 'Greška pri spremanju radnih sati stroja.');
+  };
   const toggleStavka = (s: NalogStavka) => {
     setStavke((prev) => prev.map((x) => (x.id === s.id ? { ...x, gotovo: !s.gotovo } : x)));
     void guard(() => updateNalogStavka(s.id, { gotovo: !s.gotovo }), 'Greška pri spremanju stavke.');
@@ -472,6 +573,18 @@ export function NalogIzvrsenje({
         ),
         slot,
       )}
+      <div className="rounded-xl border-2 border-amber-400 bg-amber-50 p-4 shadow-md ring-2 ring-amber-200/70">
+        <SectionTitle icon={<FileText className="h-5 w-5 text-amber-700" />}>Napomena uz radni nalog</SectionTitle>
+        <textarea
+          rows={4}
+          value={napomena}
+          onChange={(event) => setNapomena(event.target.value)}
+          onBlur={() => void saveDetails()}
+          placeholder="Dodatne napomene i važne upute uz nalog…"
+          className={`${inputCls} w-full border-amber-400 bg-white text-base font-semibold text-slate-900 placeholder:font-normal`}
+        />
+        {!napomena.trim() && <p className="text-sm font-medium text-amber-900">Napomena nije upisana.</p>}
+      </div>
       <div className={hideZadaci ? 'hidden' : undefined}>
         <SectionTitle icon={<ListChecks className="h-4 w-4" />}>
           Radni zadaci ({zadaci.filter((z) => z.gotovo).length}/{zadaci.length})
@@ -510,6 +623,21 @@ export function NalogIzvrsenje({
         <label className={`mb-2 flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium ${teren ? 'border-sky-300 bg-sky-50 text-sky-900' : 'border-slate-200 text-slate-700'}`}>
           <input type="checkbox" checked={teren} onChange={(e) => changeTeren(e.target.checked)} className="h-4 w-4 rounded border-slate-300" />
           Teren (dodatno se obračunava)
+        </label>
+        <label className="mb-2 block text-xs font-medium text-slate-600">
+          Vozač
+          <select
+            value={vozac ?? ''}
+            onChange={(event) => changeVozac(event.target.value || null)}
+            className={`${inputCls} ml-2 max-w-xs`}
+          >
+            <option value="">Poslovođa (zadano)</option>
+            {visibleVremena.map((v) => (
+              <option key={v.radnik_id} value={v.radnik_id}>
+                {v.radnik ? `${v.radnik.ime} ${v.radnik.prezime}` : 'Radnik'}
+              </option>
+            ))}
+          </select>
         </label>
         {visibleVremena.length === 0 ? (
           <p className="text-xs text-slate-400">Na nalogu nema radnika.</p>
@@ -584,7 +712,7 @@ export function NalogIzvrsenje({
         </div>
       </div>
 
-      <div className="grid gap-4">
+      {!hideStavke && <div className="grid gap-4">
         <div>
           <SectionTitle icon={<Package className="h-4 w-4" />}>
             Materijal potreban za dalje ({stavke.filter((s) => s.tip === 'materijal' && s.gotovo).length}/{stavke.filter((s) => s.tip === 'materijal').length})
@@ -605,18 +733,32 @@ export function NalogIzvrsenje({
             items={stavke.filter((s) => s.tip === 'alat')}
             placeholder="npr. skela, brusilica"
             onAdd={(n) => addStavka('alat', n)}
+            equipment={alati}
+            onAddEquipment={addAlatIzPopisa}
             onToggle={toggleStavka}
             onRemove={removeStavka}
           />
         </div>
-      </div>
-      <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-3 shadow-[0_0_14px_rgba(251,191,36,0.55)] ring-2 ring-amber-200/70">
-        <SectionTitle icon={<FileText className="h-4 w-4 text-amber-600" />}>Napomene</SectionTitle>
-        <textarea rows={3} value={napomena} onChange={(e) => setNapomena(e.target.value)} onBlur={() => void saveDetails()} placeholder="Dodatne napomene uz nalog…"         className={`${inputCls} w-full border-amber-300 bg-white font-medium text-slate-900`} />
-              </div>
+        <div>
+          <SectionTitle icon={<Wrench className="h-4 w-4" />}>
+            Strojevi ({stavke.filter((s) => s.tip === 'stroj' && s.gotovo).length}/{stavke.filter((s) => s.tip === 'stroj').length}) — unesi radne sate za trošak gradilišta
+          </SectionTitle>
+          <Checklist
+            items={stavke.filter((s) => s.tip === 'stroj')}
+            placeholder=""
+            equipment={strojevi}
+            equipmentLabel="stroj"
+            onAddEquipment={addStrojIzPopisa}
+            onHoursChange={changeSati}
+            onHoursSave={saveSati}
+            onToggle={toggleStavka}
+            onRemove={removeStavka}
+          />
+        </div>
+      </div>}
       <div className="flex items-center gap-3">
         <button onClick={() => void saveDetails()} className="rounded-lg bg-sky-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-sky-700">
-          Spremi kilometre i napomene
+          Spremi kilometre i napomenu
         </button>
         {saved && (
           <span className="flex items-center gap-1 text-xs text-emerald-600">

@@ -8,7 +8,7 @@ import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import type { GradilisteStavka } from '@/lib/api';
 import {
   setNalogZadaci,
-  setNalogStavke,
+  setNalogStavke as saveNalogStavke,
   addNalogStavke,
   setRasporedGradilistePotvrdeno,
   fetchGradilisteZadaci,
@@ -511,7 +511,7 @@ export function RasporedView() {
         setError(`${message} Pokreni migraciju 20261015220000_zadaci_nalog_veza.sql.`);
         if (lock === 'lock') throw new Error(message);
       }
-      await setNalogStavke(
+      await saveNalogStavke(
         nalogId,
         nalogForm.gradiliste_id || null,
         nalogForm.stavka_ids,
@@ -1379,7 +1379,7 @@ export function RasporedView() {
                         className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                       />
                       <span className="flex-1 text-sm text-slate-700">{item.naziv}</span>
-                      <span className="text-xs text-slate-400">{item.tip === 'materijal' ? 'Materijal' : 'Alat'}</span>
+                      <span className="text-xs text-slate-400">{item.tip === 'materijal' ? 'Materijal' : item.tip === 'stroj' ? 'Stroj' : 'Alat'}</span>
                       {item.nalog_id && item.nalog_id !== formNalogId && <span className="text-xs text-sky-700">Prethodni nalog</span>}
                       {!item.nalog_id && <span className="text-xs text-slate-400">Gradilište</span>}
                     </label>
@@ -1472,7 +1472,10 @@ export function RasporedView() {
                   key={nalogForm.nalogId}
                   nalog={{ id: nalogForm.nalogId, gradiliste_id: nalogForm.gradiliste_id || null }}
                   radnikIds={nalogForm.radnik_ids}
-                  hideZadaci                  onChange={(zavrsen) => setNalogForm((f) => (f ? { ...f, status: zavrsen ? 'zavrsen' : f.status === 'zavrsen' ? 'u_tijeku' : f.status } : f))}                />
+                  hideZadaci
+                  hideStavke
+                  onChange={(zavrsen) => setNalogForm((f) => (f ? { ...f, status: zavrsen ? 'zavrsen' : f.status === 'zavrsen' ? 'u_tijeku' : f.status } : f))}
+                />
               </div>
             )}
             </div>

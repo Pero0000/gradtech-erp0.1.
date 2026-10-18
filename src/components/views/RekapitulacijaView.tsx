@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Select } from '@/components/ui/Field';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { RekapitulacijaSva } from './RekapitulacijaSva';
+import { RekapitulacijaFinancije } from './RekapitulacijaFinancije';
 
 const kategorijaLabel: Record<TrosakKategorija, string> = {
   materijal: 'Materijal',
@@ -57,6 +58,7 @@ function daysUntil(d: string): number {
 }
 
 export function RekapitulacijaView() {
+  const [tab, setTab] = useState<'pregled' | 'financije'>('pregled');
   const [satnica, setSatnica] = useState(() => {
     const saved = Number(localStorage.getItem('tm_univerzalna_satnica'));
     return saved > 0 ? saved : 18;
@@ -90,7 +92,7 @@ export function RekapitulacijaView() {
   }, []);
 
   useEffect(() => {
-    if (!selectedId || selectedId === 'all') return;
+    if (tab !== 'pregled' || !selectedId || selectedId === 'all') return;
     (async () => {
       setLoading(true);
       setError(null);
@@ -108,7 +110,7 @@ export function RekapitulacijaView() {
         setLoading(false);
       }
     })();
-  }, [selectedId]);
+  }, [selectedId, tab]);
 
   const selectedGradiliste = gradilista.find((g) => g.id === selectedId);
 
@@ -175,7 +177,18 @@ export function RekapitulacijaView() {
         />
       ) : (
         <>
-          <div className="mb-6 w-80">
+          <div className="mb-5 flex flex-wrap gap-2 border-b border-slate-200 pb-3" aria-label="Prikaz rekapitulacije">
+            {([
+              ['pregled', 'Pregled gradilišta'],
+              ['financije', 'Stvarni troškovi i prihodi'],
+            ] as const).map(([key, label]) => (
+              <button key={key} type="button" aria-pressed={tab === key} onClick={() => setTab(key)}
+                className={`rounded-lg px-4 py-2 text-sm font-semibold ${tab === key ? 'bg-sky-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {tab === 'pregled' && <div className="mb-6 w-80">
             <Select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
               <option value="all">Sva gradilišta (pregled)</option>
               {gradilista.map((g) => (
@@ -184,7 +197,7 @@ export function RekapitulacijaView() {
                 </option>
               ))}
             </Select>
-          </div>
+          </div>}
 
           <div className="mb-5 flex flex-wrap items-center gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
             <label className="inline-flex items-center gap-2">
@@ -210,7 +223,16 @@ export function RekapitulacijaView() {
             </label>
           </div>
 
-          {selectedId === 'all' && (
+          {tab === 'financije' && (
+            <RekapitulacijaFinancije
+              gradilista={gradilista}
+              satnica={satnica}
+              nettoPoRadnicima={nettoPoRadnicima}
+              onOpen={(id) => { setSelectedId(id); setTab('pregled'); }}
+            />
+          )}
+
+          {tab === 'pregled' && selectedId === 'all' && (
             <RekapitulacijaSva
               gradilista={gradilista}
               onOpen={setSelectedId}
@@ -219,7 +241,7 @@ export function RekapitulacijaView() {
             />
           )}
 
-          {selectedId !== 'all' && selectedGradiliste && (
+          {tab === 'pregled' && selectedId !== 'all' && selectedGradiliste && (
             <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center gap-3 mb-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
@@ -238,7 +260,7 @@ export function RekapitulacijaView() {
             </div>
           )}
 
-          {selectedId !== 'all' && (<>
+          {tab === 'pregled' && selectedId !== 'all' && (<>
           {/* Summary cards */}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-2 mb-8">
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

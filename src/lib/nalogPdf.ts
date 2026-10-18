@@ -81,6 +81,8 @@ export async function downloadNalogPdf(nalog: RadniNalog, gradiliste?: Pick<Grad
   const vr = new Map(vrijeme.map((v) => [v.radnik_id, v]));
   const poslovodjaId = izv?.poslovodja_id ?? nalog.poslovodja_id ?? null;
   const poslovodja = radnici.find((r) => r.id === poslovodjaId);
+  const vozacId = izv?.vozac_id ?? nalog.vozac_id ?? poslovodjaId;
+  const vozac = radnici.find((r) => r.id === vozacId);
   const od = vrijeme.map((v) => hhmm(v.vrijeme_od)).filter(Boolean).sort()[0];
   const doo = vrijeme.map((v) => hhmm(v.vrijeme_do)).filter(Boolean).sort().reverse()[0];
   const radnoVrijeme = od && doo ? `${od} – ${doo}` : '';
@@ -97,6 +99,7 @@ export async function downloadNalogPdf(nalog: RadniNalog, gradiliste?: Pick<Grad
   const r = (label: string, value: string) => `<div class="row"><div class="lab">${label}</div><div class="val">${esc(value)}</div></div>`;
   const materijal = stavke.filter((s) => s.tip === 'materijal').map((s) => s.naziv);
   const alat = stavke.filter((s) => s.tip === 'alat').map((s) => s.naziv);
+  const strojevi = stavke.filter((s) => s.tip === 'stroj').map((s) => s.naziv);
   const opisLinije = [...(nalog.opis ? nalog.opis.split('\n') : []), ...zadaci.map((z) => `• ${z.naziv}`)];
   const servisTxt = [servis.km != null ? `${num(servis.km)} km` : '', servis.datum ? fmtDate(servis.datum) : ''].filter(Boolean).join(' · ');
 
@@ -110,7 +113,7 @@ export async function downloadNalogPdf(nalog: RadniNalog, gradiliste?: Pick<Grad
       <div class="two">
         <div class="l">${workerRows}</div>
         <div class="r">
-          ${r('Vozač', '')}
+          ${r('Vozač', vozac ? `${vozac.prezime} ${vozac.ime}` : '')}
           ${r('Vozilo', vozilo ? `${vozilo.marka} ${vozilo.model ?? ''}`.trim() : '')}
           ${r('Registracija', vozilo?.registracija ?? '')}
           ${r('Poslovođa', poslovodja ? `${poslovodja.prezime} ${poslovodja.ime}` : '')}
@@ -122,7 +125,7 @@ export async function downloadNalogPdf(nalog: RadniNalog, gradiliste?: Pick<Grad
         </div>
       </div>
     </div>
-    <div class="box"><div class="h">Materijal uzet na gradilište</div><div class="b" style="min-height:92px">${lines(materijal, 4, true)}${alat.length ? `<div style="margin-top:4px;font-weight:700;font-size:10.5px;color:#475569;text-transform:uppercase">Alat</div>${lines(alat, 0, true)}` : ''}</div></div>
+    <div class="box"><div class="h">Materijal uzet na gradilište</div><div class="b" style="min-height:92px">${lines(materijal, 4, true)}${alat.length ? `<div style="margin-top:4px;font-weight:700;font-size:10.5px;color:#475569;text-transform:uppercase">Alat</div>${lines(alat, 0, true)}` : ''}${strojevi.length ? `<div style="margin-top:4px;font-weight:700;font-size:10.5px;color:#475569;text-transform:uppercase">Strojevi</div>${lines(strojevi, 0, true)}` : ''}</div></div>
     <div class="cols">
       <div><div class="h">Uzeti za sljedeći dan</div>${lines([], 6)}</div>
       <div><div class="h">Povrat iz</div>${lines([], 6)}</div>

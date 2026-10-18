@@ -467,7 +467,13 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                   {(n.radnici ?? []).length > 0 && (
                     <span className="flex items-center gap-1.5 text-xs text-slate-500">
                       <Users className="h-3.5 w-3.5" />
-                      {(n.radnici ?? []).map((r) => `${r.ime} ${r.prezime}${r.id === n.poslovodja_id ? ' (poslovođa)' : ''}`).join(', ')}
+                      {(n.radnici ?? []).map((r) => {
+                        const roles = [
+                          r.id === n.poslovodja_id ? 'poslovođa' : '',
+                          r.id === (n.vozac_id ?? n.poslovodja_id) ? 'vozač' : '',
+                        ].filter(Boolean);
+                        return `${r.ime} ${r.prezime}${roles.length ? ` (${roles.join(', ')})` : ''}`;
+                      }).join(', ')}
                     </span>
                   )}
                   {n.rok && (

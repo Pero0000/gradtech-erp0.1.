@@ -696,7 +696,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const terenList = costs.filter(isTeren);
   const nightList = costs.filter(isNight);
   const kmList = byKat('put');
-  const otherList = costs.filter((t) => !isTeren(t) && !isNight(t) && !['materijal', 'smjestaj', 'kooperanti', 'direktni', 'put'].includes(t.kategorija));
+  const otherList = costs.filter((t) => !isTeren(t) && !isNight(t) && !['materijal', 'smjestaj', 'kooperanti', 'direktni', 'put', 'oprema'].includes(t.kategorija));
   const costGroups: { key: string; label: string; hint?: string; total: number; hidden?: boolean; toggle?: 'teren' | 'nocna'; rows: { id: string; title: string; sub?: string; amount: number; trosak?: Trosak }[] }[] = [
     {
       key: 'sati',
@@ -714,6 +714,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     { key: 'kooperanti', label: 'Kooperanti', total: sumOf(byKat('kooperanti')), rows: byKat('kooperanti').map(costRow) },
     { key: 'direktni', label: 'Direktni troškovi', total: sumOf(byKat('direktni')), rows: byKat('direktni').map(costRow) },
     { key: 'km', label: 'Kilometri vozila', total: sumOf(kmList), rows: kmList.map(costRow) },
+    { key: 'strojevi', label: 'Strojevi', total: sumOf(byKat('oprema')), rows: byKat('oprema').map(costRow) },
     ...(otherList.length > 0 ? [{ key: 'ostalo', label: 'Ostalo', total: sumOf(otherList), rows: otherList.map(costRow) }] : []),
   ];
   const statusVariant = gradiliste.status === 'aktivno'

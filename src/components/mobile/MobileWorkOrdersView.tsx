@@ -4,6 +4,10 @@ import { useAuth } from '@/auth/useAuth';
 import { usePushRegistration } from '@/components/mobile/usePushRegistration';
 import {
   addNalogStavka,
+  addNalogAlatFromInventory,
+  addNalogStrojFromInventory,
+  updateNalogStavka,
+  addNalogZadatak,
   fetchGradilisteDokumenti,
   fetchMobileNalogTeam,
   fetchMobileRadniNalozi,
@@ -13,9 +17,11 @@ import {
   fetchNalogGradilisteDokumentIds,
   fetchNalogStavke,
   fetchNalogZadaci,
+  fetchOprema,
   finishMobileWorkerTime,
   saveMobileNalogReport,
   saveMobileWorkerTime,
+  setMobileNalogVozac,
   startMobileWorkerTime,
   submitMobileNalog,
   uploadNalogFoto,
@@ -27,7 +33,7 @@ import {
   type NalogStavka,
 } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
-import type { GradilisteZadatak } from '@/types';
+import type { GradilisteZadatak, Oprema } from '@/types';
 
 const reviewSections = [
   { id: 'upute', label: 'Upute i opis naloga' },
@@ -51,6 +57,7 @@ type MobileReport = {
 
 type MobileDetails = {
   gradilisteId: string | null;
+  vozacId: string | null;
   kmPocetak: number | null;
   kmKraj: number | null;
   napomena: string | null;
@@ -62,6 +69,8 @@ type MobileDetails = {
   mobileAlatNa: boolean;
   zadaci: GradilisteZadatak[];
   stavke: NalogStavka[];
+  alati: Oprema[];
+  strojevi: Oprema[];
   dokumenti: Array<NalogDokument | GradilisteDokument>;
   foto: NalogFoto[];
   ekipa: MobileWorkerTime[];
@@ -130,10 +139,12 @@ export function MobileWorkOrdersView() {
   const [notice, setNotice] = useState<string | null>(null);
   const [newMaterial, setNewMaterial] = useState('');
   const [newTool, setNewTool] = useState('');
+  const [newTask, setNewTask] = useState('');
   const [teamTimeDrafts, setTeamTimeDrafts] = useState<Record<string, { vrijemeOd: string; vrijemeDo: string }>>({});
 
   const selected = orders.find((order) => order.id === selectedId) ?? null;
   const isLeader = selected?.poslovodja_id === profile?.radnik_id;
+  const canEditOrder = selected?.mobile_status === 'dodijeljen' || selected?.mobile_status === 'u_tijeku';
   const isReviewed = reviewSections.every((section) => reviewed.includes(section.id));
 
   useEffect(() => {
@@ -197,24 +208,27 @@ export function MobileWorkOrdersView() {
     try {
       const { data: nalog, error: nalogError } = await supabase
         .from('radni_nalozi')
-        .select('gradiliste_id,km_pocetak,km_kraj,napomena,mobile_km_na,mobile_napomena_na,mobile_tasks_confirmed,mobile_foto_na,mobile_materijal_na,mobile_alat_na')
+        .select('gradiliste_id,vozac_id,km_pocetak,km_kraj,napomena,mobile_km_na,mobile_napomena_na,mobile_tasks_confirmed,mobile_foto_na,mobile_materijal_na,mobile_alat_na')
         .eq('id', order.id)
         .single();
       if (nalogError) throw nalogError;
 
-      const [zadaci, stavke, dokumenti, foto, linkedIds, ekipa] = await Promise.all([
+      const [zadaci, stavke, dokumenti, foto, linkedIds, ekipa, alati, strojevi] = await Promise.all([
         fetchNalogZadaci(order.id),
         fetchNalogStavke(order.id),
         fetchNalogDokumenti(order.id),
         fetchNalogFoto(order.id),
         fetchNalogGradilisteDokumentIds(order.id),
         fetchMobileNalogTeam(order.id),
+        fetchOprema('alat'),
+        fetchOprema('stroj'),
       ]);
       const siteDocs = nalog.gradiliste_id ? await fetchGradilisteDokumenti(nalog.gradiliste_id) : [];
       const selectedSiteDocs = siteDocs.filter((document) => linkedIds.includes(document.id));
 
       setDetails({
         gradilisteId: nalog.gradiliste_id,
+        vozacId: nalog.vozac_id,
         kmPocetak: nalog.km_pocetak,
         kmKraj: nalog.km_kraj,
         napomena: nalog.napomena,
@@ -226,6 +240,8 @@ export function MobileWorkOrdersView() {
         mobileAlatNa: nalog.mobile_alat_na,
         zadaci,
         stavke,
+        alati: alati.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'),
+        strojevi: strojevi.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'),
         dokumenti: [...dokumenti, ...selectedSiteDocs],
         foto,
         ekipa,
@@ -328,6 +344,26 @@ export function MobileWorkOrdersView() {
     });
   };
 
+  const addInventoryTool = async (opremaId: string) => {
+    if (!selected) return;
+    await runAction(
+      () => addNalogAlatFromInventory(selected.id, opremaId),
+      'Alat je dodan na nalog i evidentiran na gradilištu.',
+    );
+  };
+
+  const addInventoryMachine = async (opremaId: string) => {
+    if (!selected) return;
+    await runAction(
+      () => addNalogStrojFromInventory(selected.id, opremaId),
+      'Stroj je dodan na nalog i evidentiran na gradilištu.',
+    );
+  };
+
+  const setMachineHours = async (item: NalogStavka, hours: number | null) => {
+    await runAction(() => updateNalogStavka(item.id, { sati: hours }), 'Radni sati stroja su spremljeni.');
+  };
+
   const uploadPhotos = async (files: FileList | null) => {
     if (!selected || !files?.length) return;
     const chosen = Array.from(files);
@@ -345,6 +381,16 @@ export function MobileWorkOrdersView() {
         .eq('id', task.id);
       if (updateError) throw updateError;
     });
+  };
+
+  const addTask = async () => {
+    if (!selected || !details?.gradilisteId || !newTask.trim()) return;
+    const gradilisteId = details.gradilisteId;
+    const name = newTask.trim();
+    await runAction(async () => {
+      await addNalogZadatak(selected.id, gradilisteId, name);
+      setNewTask('');
+    }, 'Radni zadatak je dodan.');
   };
 
   const toggleItem = async (item: NalogStavka) => {
@@ -368,7 +414,7 @@ export function MobileWorkOrdersView() {
       radnikId: worker.radnik_id,
       vrijemeOd: draft.vrijemeOd,
       vrijemeDo: draft.vrijemeDo || null,
-      reviewedSections: reviewed,
+      reviewedSections: isLeader ? reviewed : [],
     });
   };
 
@@ -425,16 +471,76 @@ export function MobileWorkOrdersView() {
               {selected.rok && <p className="mt-3 text-xs text-slate-500">Rok: {new Date(`${selected.rok}T00:00:00`).toLocaleDateString('hr-HR')}</p>}
             </article>
 
+            {!loading && details && (
+              <WorkOrderPanel title="Vozač" icon={<Gauge className="h-5 w-5" />} tone="sky">
+                <label className="block text-sm font-medium text-slate-700">
+                  Odaberite vozača iz ekipe
+                  <select
+                    value={details.vozacId ?? ''}
+                    disabled={!canEditOrder || working}
+                    onChange={(event) => {
+                      const radnikId = event.target.value || null;
+                      void runAction(
+                        () => setMobileNalogVozac(selected.id, radnikId),
+                        'Vozač je spremljen.',
+                      );
+                    }}
+                    className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 disabled:bg-slate-100"
+                  >
+                    <option value="">Poslovođa (zadano)</option>
+                    {details.ekipa.map((worker) => (
+                      <option key={worker.radnik_id} value={worker.radnik_id}>
+                        {worker.ime} {worker.prezime}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="mt-2 text-sm text-slate-600">
+                  Trenutni vozač: {(() => {
+                    const driverId = details.vozacId ?? selected.poslovodja_id;
+                    const driver = details.ekipa.find((worker) => worker.radnik_id === driverId);
+                    return driver ? `${driver.ime} ${driver.prezime}` : 'poslovođa (još nije odabran)';
+                  })()}
+                </p>
+              </WorkOrderPanel>
+            )}
+
+            {!loading && details && (
+              <WorkOrderPanel title="Napomena uz radni nalog" icon={<FileText className="h-5 w-5" />} tone="amber">
+                <textarea
+                  rows={4}
+                  value={report.napomena}
+                  disabled={!canEditOrder || (isLeader && report.napomenaNa)}
+                  onChange={(event) => setReport((current) => ({ ...current, napomena: event.target.value, napomenaNa: false }))}
+                  placeholder="Važne upute i napomene za radnike…"
+                  className="w-full rounded-xl border-2 border-amber-300 bg-white p-3 text-base font-semibold text-slate-900 placeholder:font-normal disabled:bg-slate-100"
+                />
+                {!report.napomena.trim() && <p className="text-sm font-semibold text-amber-900">Napomena nije upisana.</p>}
+                {isLeader && canEditOrder && (
+                  <CheckField
+                    checked={report.napomenaNa}
+                    onChange={(checked) => setReport((current) => ({ ...current, napomenaNa: checked, napomena: checked ? '' : current.napomena }))}
+                    label="Potvrđujem da nema dodatne napomene."
+                  />
+                )}
+                {canEditOrder && (
+                  <Button variant="secondary" onClick={() => void runAction(saveReport, 'Napomena i izmjene izvještaja spremljene.')} disabled={working}>
+                    <Upload className="h-5 w-5" /> Spremi napomenu
+                  </Button>
+                )}
+              </WorkOrderPanel>
+            )}
+
             {loading && <p className="rounded-xl bg-white p-4 text-sm text-slate-500">Učitavanje naloga…</p>}
             {!loading && details && !selected.mobile_started_at && selected.mobile_status !== 'predan' && selected.mobile_status !== 'odobren' && (
               <WorkOrderPanel title="Pregled prije početka" icon={<ClipboardCheck className="h-5 w-5" />} tone="sky">
-                <p className="text-sm text-slate-600">Otvori i pregledaj sve stavke. Nakon potvrde možeš evidentirati vrijeme za bilo kojeg člana ekipe na ovom nalogu.</p>
+                <p className="text-sm text-slate-600">Svi djelatnici mogu pregledavati i dopunjavati podatke naloga. Poslovođa potvrđuje da su pregledani svi dijelovi.</p>
                 <div className="space-y-2">
                   <ReviewBlock title="Radni zadaci">
                     {details.zadaci.length ? details.zadaci.map((task) => <p key={task.id} className="text-sm text-slate-700">• {task.naziv}</p>) : <p className="text-sm text-slate-500">Nema upisanih zadataka.</p>}
                   </ReviewBlock>
                   <ReviewBlock title="Materijal i alat">
-                    {details.stavke.length ? details.stavke.map((item) => <p key={item.id} className="text-sm text-slate-700">• {item.tip === 'materijal' ? 'Materijal' : 'Alat'}: {item.naziv}</p>) : <p className="text-sm text-slate-500">Nema upisanih stavki.</p>}
+                    {details.stavke.length ? details.stavke.map((item) => <p key={item.id} className="text-sm text-slate-700">• {item.tip === 'materijal' ? 'Materijal' : item.tip === 'stroj' ? `Stroj${item.sati ? ` (${item.sati} h)` : ''}` : 'Alat'}: {item.naziv}</p>) : <p className="text-sm text-slate-500">Nema upisanih stavki.</p>}
                   </ReviewBlock>
                   <ReviewBlock title="Dokumenti i slike">
                     {details.dokumenti.length ? details.dokumenti.map((document) => <a key={document.id} href={document.url} target="_blank" rel="noreferrer" className="block min-h-10 py-2 text-sm font-medium text-sky-700 underline">{document.naziv}</a>) : <p className="text-sm text-slate-500">Nema priloženih dokumenata.</p>}
@@ -445,14 +551,14 @@ export function MobileWorkOrdersView() {
                     )}
                   </ReviewBlock>
                 </div>
-                <div className="space-y-2 border-t border-slate-100 pt-3">
+                {isLeader && <div className="space-y-2 border-t border-slate-100 pt-3">
                   {reviewSections.map((section) => (
                     <label key={section.id} className="flex min-h-12 items-center gap-3 rounded-xl border border-slate-200 px-3 py-2">
                       <input type="checkbox" checked={reviewedSet.has(section.id)} onChange={(event) => setReviewed((current) => event.target.checked ? [...current, section.id] : current.filter((id) => id !== section.id))} className="h-5 w-5 rounded border-slate-300 text-sky-700" />
-                      <span className="text-sm font-medium text-slate-800">Pregledao sam: {section.label.toLowerCase()}</span>
+                      <span className="text-sm font-medium text-slate-800">Poslovođa pregledao: {section.label.toLowerCase()}</span>
                     </label>
                   ))}
-                </div>
+                </div>}
               </WorkOrderPanel>
             )}
 
@@ -504,7 +610,7 @@ export function MobileWorkOrdersView() {
                               <Button
                                 variant="secondary"
                                 onClick={() => void runAction(() => saveWorkerTime(worker), `Radno vrijeme za ${worker.ime} ${worker.prezime} spremljeno.`)}
-                                disabled={working || !isReviewed}
+                                disabled={working || (isLeader && !isReviewed)}
                               >
                                 <Check className="h-5 w-5" /> Spremi radno vrijeme
                               </Button>
@@ -513,8 +619,12 @@ export function MobileWorkOrdersView() {
                               <div className="mt-3">
                                 <Button
                                   variant="secondary"
-                                  onClick={() => void runAction(() => startMobileWorkerTime(selected.id, worker.radnik_id, reviewed), `Početak vremena za ${worker.ime} ${worker.prezime} spremljen.`)}
-                                  disabled={working || !isReviewed}
+                                  onClick={() => void runAction(() => startMobileWorkerTime(
+                                    selected.id,
+                                    worker.radnik_id,
+                                    isLeader ? reviewed : [],
+                                  ), `Početak vremena za ${worker.ime} ${worker.prezime} spremljen.`)}
+                                  disabled={working || (isLeader && !isReviewed)}
                                 >
                                   <Clock3 className="h-5 w-5" /> Započni vrijeme
                                 </Button>
@@ -539,21 +649,21 @@ export function MobileWorkOrdersView() {
                   </WorkOrderPanel>
                 )}
 
-                {isLeader && selected.mobile_status === 'u_tijeku' && (
+                {canEditOrder && (
                   <div className="space-y-4">
-                    <WorkOrderPanel title="Završni izvještaj poslovođe" icon={<FileText className="h-5 w-5" />} tone="slate">
-                      <p className="text-sm leading-5 text-slate-600">Spremi podatke tijekom rada. Predaja je moguća nakon završetka vremena cijele ekipe.</p>
+                    <WorkOrderPanel title="Podaci i izvještaj ekipe" icon={<FileText className="h-5 w-5" />} tone="slate">
+                      <p className="text-sm leading-5 text-slate-600">Svi djelatnici mogu uređivati podatke naloga. Potvrdne elemente i predaju završnog izvještaja vodi poslovođa.</p>
                     </WorkOrderPanel>
 
                     <WorkOrderPanel title="Kilometri" icon={<Gauge className="h-5 w-5" />} tone="amber">
                       <div className="space-y-2">
                       <label className="block text-sm text-slate-600">Početno stanje
-                        <input inputMode="numeric" type="number" min="0" value={report.kmPocetak} disabled={report.kmNa} onChange={(event) => setReport((current) => ({ ...current, kmPocetak: event.target.value }))} className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-lg text-slate-900 disabled:bg-slate-100" />
+                        <input inputMode="numeric" type="number" min="0" value={report.kmPocetak} disabled={isLeader && report.kmNa} onChange={(event) => setReport((current) => ({ ...current, kmPocetak: event.target.value }))} className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-lg text-slate-900 disabled:bg-slate-100" />
                       </label>
                       <label className="block text-sm text-slate-600">Završno stanje
-                        <input inputMode="numeric" type="number" min="0" value={report.kmKraj} disabled={report.kmNa} onChange={(event) => setReport((current) => ({ ...current, kmKraj: event.target.value }))} className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-lg text-slate-900 disabled:bg-slate-100" />
+                        <input inputMode="numeric" type="number" min="0" value={report.kmKraj} disabled={isLeader && report.kmNa} onChange={(event) => setReport((current) => ({ ...current, kmKraj: event.target.value }))} className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-lg text-slate-900 disabled:bg-slate-100" />
                       </label>
-                      <CheckField checked={report.kmNa} onChange={(checked) => setReport((current) => ({ ...current, kmNa: checked, kmPocetak: checked ? '' : current.kmPocetak, kmKraj: checked ? '' : current.kmKraj }))} label="Kilometri nisu primjenjivi" />
+                      {isLeader && <CheckField checked={report.kmNa} onChange={(checked) => setReport((current) => ({ ...current, kmNa: checked, kmPocetak: checked ? '' : current.kmPocetak, kmKraj: checked ? '' : current.kmKraj }))} label="Kilometri nisu primjenjivi" />}
                       </div>
                     </WorkOrderPanel>
 
@@ -565,14 +675,26 @@ export function MobileWorkOrdersView() {
                           <span className={`text-sm ${task.gotovo ? 'text-emerald-800 line-through' : 'text-slate-800'}`}>{task.naziv}</span>
                         </label>
                       )) : <p className="text-sm text-slate-500">Nema radnih zadataka.</p>}
-                      <CheckField checked={report.tasksConfirmed} onChange={(checked) => setReport((current) => ({ ...current, tasksConfirmed: checked }))} label="Pregledao sam sve zadatke i označio što je završeno" />
-                      </div>
-                    </WorkOrderPanel>
-
-                    <WorkOrderPanel title="Napomena" icon={<FileText className="h-5 w-5" />} tone="sky">
-                      <div className="space-y-2">
-                      <textarea rows={4} value={report.napomena} disabled={report.napomenaNa} onChange={(event) => setReport((current) => ({ ...current, napomena: event.target.value }))} placeholder="Opiši izvedene radove ili važne okolnosti…" className="w-full rounded-xl border border-slate-300 p-3 text-base text-slate-900 disabled:bg-slate-100" />
-                      <CheckField checked={report.napomenaNa} onChange={(checked) => setReport((current) => ({ ...current, napomenaNa: checked, napomena: checked ? '' : current.napomena }))} label="Nemam dodatnu napomenu" />
+                      {details.gradilisteId && (
+                        <div className="flex gap-2">
+                          <input
+                            value={newTask}
+                            onChange={(event) => setNewTask(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                void addTask();
+                              }
+                            }}
+                            placeholder="Dodaj radni zadatak"
+                            className="min-h-12 min-w-0 flex-1 rounded-xl border border-slate-300 px-3 text-sm"
+                          />
+                          <button type="button" onClick={() => void addTask()} disabled={working || !newTask.trim()} className="min-h-12 rounded-xl bg-slate-800 px-4 text-white disabled:opacity-40" aria-label="Dodaj radni zadatak">
+                            <Plus className="h-5 w-5" />
+                          </button>
+                        </div>
+                      )}
+                      {isLeader && <CheckField checked={report.tasksConfirmed} onChange={(checked) => setReport((current) => ({ ...current, tasksConfirmed: checked }))} label="Potvrđujem da su pregledani svi zadaci i označeno što je završeno" />}
                       </div>
                     </WorkOrderPanel>
 
@@ -587,7 +709,7 @@ export function MobileWorkOrdersView() {
                         <Camera className="h-5 w-5" /> Fotografiraj ili odaberi slike
                         <input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(event) => { void uploadPhotos(event.target.files); event.currentTarget.value = ''; }} />
                       </label>
-                      <CheckField checked={report.fotoNa} onChange={(checked) => setReport((current) => ({ ...current, fotoNa: checked }))} label="Fotografija nije primjenjiva" />
+                      {isLeader && <CheckField checked={report.fotoNa} onChange={(checked) => setReport((current) => ({ ...current, fotoNa: checked }))} label="Fotografija nije primjenjiva" />}
                       </div>
                     </WorkOrderPanel>
 
@@ -601,7 +723,8 @@ export function MobileWorkOrdersView() {
                         onToggle={toggleItem}
                         noneChecked={report.materijalNa}
                         onNone={(checked) => setReport((current) => ({ ...current, materijalNa: checked }))}
-                        noneLabel="Nije potreban dodatni materijal"
+                        showNone={isLeader}
+                        noneLabel="Potvrđujem da dodatni materijal nije potreban"
                         placeholder="Npr. boja bijela 15 l"
                       />
                     </WorkOrderPanel>
@@ -610,38 +733,61 @@ export function MobileWorkOrdersView() {
                       <ItemEditor
                         title="Alat"
                         items={details.stavke.filter((item) => item.tip === 'alat')}
+                        equipment={details.alati}
                         value={newTool}
                         onValue={(value) => setNewTool(value)}
                         onAdd={() => void addItem('alat')}
+                        onAddEquipment={(opremaId) => void addInventoryTool(opremaId)}
                         onToggle={toggleItem}
                         noneChecked={report.alatNa}
                         onNone={(checked) => setReport((current) => ({ ...current, alatNa: checked }))}
-                        noneLabel="Nije potreban dodatni alat"
+                        showNone={isLeader}
+                        noneLabel="Potvrđujem da dodatni alat nije potreban"
                         placeholder="Npr. skela, brusilica"
                       />
                     </WorkOrderPanel>
 
-                    <WorkOrderPanel title="Potvrda i predaja" icon={<Check className="h-5 w-5" />} tone="emerald">
+                    <WorkOrderPanel title="Strojevi i radni sati" icon={<Wrench className="h-5 w-5" />} tone="amber">
+                      <ItemEditor
+                        title="Strojevi"
+                        items={details.stavke.filter((item) => item.tip === 'stroj')}
+                        equipment={details.strojevi}
+                        equipmentLabel="stroj"
+                        value=""
+                        onValue={() => undefined}
+                        onAdd={() => undefined}
+                        onAddEquipment={(opremaId) => void addInventoryMachine(opremaId)}
+                        onHours={(item, hours) => void setMachineHours(item, hours)}
+                        onToggle={toggleItem}
+                        noneChecked={false}
+                        onNone={() => undefined}
+                        showNone={false}
+                        noneLabel=""
+                        placeholder=""
+                      />
+                    </WorkOrderPanel>
+
+                    <Button variant="secondary" onClick={() => void runAction(saveReport, 'Izmjene izvještaja su spremljene.')} disabled={working}>
+                      <Upload className="h-5 w-5" /> Spremi izmjene izvještaja
+                    </Button>
+                    {isLeader && selected.mobile_status === 'u_tijeku' && <WorkOrderPanel title="Potvrda i predaja" icon={<Check className="h-5 w-5" />} tone="emerald">
                       <CheckField
                         checked={leaderConfirmed}
                         onChange={setLeaderConfirmed}
-                        label="Kao poslovođa potvrđujem radna vremena ekipe i pregledao sam završni izvještaj."
+                        label="Kao poslovođa potvrđujem da sam pregledao napomenu, radna vremena ekipe i završni izvještaj."
                       />
                       <div className="space-y-2">
-                        <Button variant="secondary" onClick={() => void runAction(saveReport, 'Izvještaj je spremljen.')} disabled={working}>
-                          <Upload className="h-5 w-5" /> Spremi izvještaj
-                        </Button>
                         <Button onClick={() => void runAction(async () => { await saveReport(); await submitMobileNalog(selected.id, leaderConfirmed); }, 'Nalog je predan na odobrenje.')} disabled={working || !leaderConfirmed}>
                           <Check className="h-5 w-5" /> Predaj nalog na odobrenje
                         </Button>
                       </div>
                       <p className="text-xs leading-5 text-slate-500">Prije predaje svi dodijeljeni djelatnici moraju imati završeno vrijeme. Samo poslovođa može potvrditi i predati nalog.</p>
-                    </WorkOrderPanel>
+                    </WorkOrderPanel>}
                   </div>
                 )}
 
                 {!isLeader && selected.mobile_status === 'u_tijeku' && (
-                  <p className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm leading-6 text-sky-900">Svi radnici evidentiraju vrijeme na ovom istom nalogu. Poslovođa pregledava i potvrđuje završni izvještaj.</p>
+                  <p className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm leading-6 text-sky-900">Možeš uređivati podatke, zadatke, materijal, alat i fotografije. Poslovođa je odgovoran za potvrde i predaju naloga.</p>
                 )}
 
                 {selected.mobile_status === 'predan' && <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-900">Nalog je predan poslovođi i čeka završno odobrenje u uredu.</p>}
@@ -734,35 +880,67 @@ function CheckField({ checked, onChange, label }: { checked: boolean; onChange: 
 function ItemEditor({
   title,
   items,
+  equipment,
+  equipmentLabel = 'alat',
   value,
   onValue,
   onAdd,
+  onAddEquipment,
+  onHours,
   onToggle,
   noneChecked,
   onNone,
   noneLabel,
+  showNone,
   placeholder,
 }: {
   title: string;
   items: NalogStavka[];
+  equipment?: Oprema[];
+  equipmentLabel?: 'alat' | 'stroj';
   value: string;
   onValue: (value: string) => void;
   onAdd: () => void;
+  onAddEquipment?: (opremaId: string) => void;
+  onHours?: (item: NalogStavka, hours: number | null) => void;
   onToggle: (item: NalogStavka) => void;
   noneChecked: boolean;
   onNone: (checked: boolean) => void;
   noneLabel: string;
+  showNone: boolean;
   placeholder: string;
 }) {
+  const [selectedEquipmentId, setSelectedEquipmentId] = useState('');
   return (
     <div className="space-y-2">
       {items.map((item) => (
-        <label key={item.id} className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 px-3 py-2">
-          <input type="checkbox" checked={item.gotovo} onChange={() => void onToggle(item)} className="h-5 w-5 rounded border-slate-300 text-emerald-700" />
-          <span className="text-sm text-slate-800">{item.naziv}</span>
-        </label>
+        <div key={item.id} className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 px-3 py-2">
+          <label className="flex min-w-0 flex-1 items-center gap-3">
+            <input type="checkbox" checked={item.gotovo} onChange={() => void onToggle(item)} className="h-5 w-5 rounded border-slate-300 text-emerald-700" />
+            <span className="text-sm text-slate-800">{item.naziv}</span>
+          </label>
+          {onHours && (
+            <label className="flex flex-shrink-0 items-center gap-1 text-xs text-slate-500">
+              <input
+                key={`${item.id}-${item.sati ?? ''}`}
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step="0.5"
+                defaultValue={item.sati ?? ''}
+                onBlur={(event) => {
+                  const next = event.target.value === '' ? null : Math.max(0, Number(event.target.value));
+                  if (next !== (item.sati ?? null)) onHours(item, next);
+                }}
+                className="min-h-11 w-20 rounded-lg border border-slate-300 px-2 text-right text-sm"
+                aria-label={`Radni sati stroja ${item.naziv}`}
+              />
+              h
+            </label>
+          )}
+        </div>
       ))}
-      <div className="flex gap-2">
+      {!(equipmentLabel === 'stroj') && <div className="flex gap-2">
         <input
           value={value}
           onChange={(event) => onValue(event.target.value)}
@@ -776,8 +954,37 @@ function ItemEditor({
           className="min-h-12 min-w-0 flex-1 rounded-xl border border-slate-300 px-3 text-sm"
         />
         <button type="button" onClick={onAdd} disabled={!value.trim()} className="min-h-12 rounded-xl bg-slate-800 px-4 text-white disabled:opacity-40" aria-label={`Dodaj stavku: ${title}`}><Plus className="h-5 w-5" /></button>
-      </div>
-      <CheckField checked={noneChecked} onChange={onNone} label={noneLabel} />
+      </div>}
+      {equipment && onAddEquipment && (
+        <div className="flex gap-2">
+          <select
+            value={selectedEquipmentId}
+            onChange={(event) => setSelectedEquipmentId(event.target.value)}
+            className="min-h-12 min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 text-sm"
+          >
+            <option value="">{equipmentLabel === 'stroj' ? 'Odaberi stroj iz popisa strojeva…' : 'Odaberi alat iz popisa opreme…'}</option>
+            {equipment.map((tool) => (
+              <option key={tool.id} value={tool.id}>
+                {tool.naziv}{tool.inventarski_broj ? ` · ${tool.inventarski_broj}` : ''}
+                {tool.gradilista?.naziv ? ` — ${tool.gradilista.naziv}` : ''}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => {
+              if (!selectedEquipmentId) return;
+              onAddEquipment(selectedEquipmentId);
+              setSelectedEquipmentId('');
+            }}
+            disabled={!selectedEquipmentId}
+            className="min-h-12 rounded-xl bg-sky-700 px-3 text-sm font-semibold text-white disabled:opacity-40"
+          >
+            Dodaj
+          </button>
+        </div>
+      )}
+      {showNone && <CheckField checked={noneChecked} onChange={onNone} label={noneLabel} />}
     </div>
   );
 }

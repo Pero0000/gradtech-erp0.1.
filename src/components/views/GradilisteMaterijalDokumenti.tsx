@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, FileText, Hammer, Package, Plus, Trash2 } from 'lucide-react';
+import { Camera, FileText, Hammer, Package, Plus, Trash2, Wrench } from 'lucide-react';
 import {
   addGradilisteStavka,
   deleteGradilisteDokument,
@@ -47,13 +47,13 @@ function StavkeList({
 }: {
   items: GradilisteStavka[];
   placeholder: string;
-  onAdd: (naziv: string) => void;
+  onAdd?: (naziv: string) => void;
   onToggle: (s: GradilisteStavka) => void;
   onRemove: (s: GradilisteStavka) => void;
 }) {
   const [text, setText] = useState('');
   const submit = () => {
-    if (!text.trim()) return;
+    if (!text.trim() || !onAdd) return;
     onAdd(text.trim());
     setText('');
   };
@@ -65,6 +65,7 @@ function StavkeList({
           <div key={s.id} className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs ${s.gotovo ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
             <input type="checkbox" checked={s.gotovo} onChange={() => onToggle(s)} className="h-4 w-4 flex-shrink-0 accent-emerald-600" title="Označi kao riješeno" />
             <span className={`min-w-0 flex-1 break-words ${s.gotovo ? 'font-medium text-emerald-800 line-through decoration-emerald-400' : 'text-slate-800'}`}>{s.naziv}</span>
+            {s.tip === 'stroj' && s.sati ? <span className="flex-shrink-0 text-[10px] text-slate-500">{s.sati} h</span> : null}
             <span className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] ${s.nalog_id ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700'}`}>
               {s.nalog_id ? 'na nalogu' : 'čeka nalog'}
             </span>
@@ -74,7 +75,7 @@ function StavkeList({
           </div>
         ))}
       </div>
-      <div className="mt-2 flex items-center gap-2">
+      {onAdd && <div className="mt-2 flex items-center gap-2">
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -96,7 +97,7 @@ function StavkeList({
           <Plus className="h-3.5 w-3.5" />
           Dodaj
         </button>
-      </div>
+      </div>}
     </div>
   );
 }
@@ -170,6 +171,7 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
 
   const materijal = stavke.filter((s) => s.tip === 'materijal');
   const alat = stavke.filter((s) => s.tip === 'alat');
+  const strojevi = stavke.filter((s) => s.tip === 'stroj');
   const docs = dokumenti.filter((d) => d.vrsta === 'dokument');
   const slike = dokumenti.filter((d) => d.vrsta === 'slika');
 
@@ -182,6 +184,10 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
         </SectionBox>
         <SectionBox title={`Alat (${alat.filter((s) => s.gotovo).length}/${alat.length})`} icon={<Hammer className="h-4 w-4" />}>
           <StavkeList items={alat} placeholder="npr. skela, brusilica" onAdd={(n) => addStavka('alat', n)} onToggle={toggleStavka} onRemove={removeStavka} />
+        </SectionBox>
+        <SectionBox title={`Strojevi (${strojevi.filter((s) => s.gotovo).length}/${strojevi.length})`} icon={<Wrench className="h-4 w-4" />}>
+          <StavkeList items={strojevi} placeholder="" onToggle={toggleStavka} onRemove={removeStavka} />
+          <p className="mt-2 text-[11px] text-slate-500">Strojevi se dodaju na radni nalog iz popisa strojeva; radni sati × cijena sata ulaze u trošak gradilišta.</p>
         </SectionBox>
       </div>
       <p className="-mt-2 mb-1 text-[11px] text-slate-500">Materijal i alat s oznakom „čeka nalog” automatski ulaze u idući radni nalog ovog gradilišta.</p>

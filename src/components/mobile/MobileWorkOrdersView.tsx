@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Camera, Check, ChevronLeft, ChevronRight, ClipboardCheck, Clock3, CreditCard, FileText, Flag, Gauge, ListChecks, LogOut, Package, Play, Plus, RefreshCw, Wrench } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, Camera, ImagePlus, Trash2, Check, ChevronLeft, ChevronRight, ClipboardCheck, Clock3, CreditCard, FileText, Flag, Gauge, ListChecks, LogOut, Package, Play, Plus, RefreshCw, Wrench } from 'lucide-react';
 import { useAuth } from '@/auth/useAuth';
 import { usePushRegistration } from '@/components/mobile/usePushRegistration';
 import {
@@ -75,7 +75,42 @@ const emptyReport: MobileReport = {
   encStanje: '',
 };
 
+const DEFAULT_POCETAK_RADA = '06:00';
 const DEFAULT_KRAJ_RADA = '16:00';
+const MAX_FOTO_STRANICA = 1600;
+
+interface PhotoUpload {
+  id: string;
+  nalogId: string;
+  file: File;
+  previewUrl: string;
+  status: 'ceka' | 'salje' | 'greska';
+  poruka?: string;
+}
+
+// Fotografije s mobitela (5–12 MB) smanjuju se prije slanja da upload bude brz i pouzdan.
+async function compressPhoto(file: File): Promise<File> {
+  if (file.type && !file.type.startsWith('image/')) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_FOTO_STRANICA / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const context = canvas.getContext('2d');
+    if (!context) return file;
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+    if (!blob || (file.size > 0 && blob.size >= file.size)) return file;
+    const baseName = (file.name || 'fotografija').replace(/\.[^.]+$/, '');
+    return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg' });
+  } catch {
+    return file;
+  }
+}
+
+const uploadId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
 function errorMessage(reason: unknown, fallback: string) {
   if (reason instanceof Error) return reason.message;
@@ -138,6 +173,10 @@ export function MobileWorkOrdersView() {
   const [newTool, setNewTool] = useState('');
   const [newTask, setNewTask] = useState('');
   const [teamTimeDrafts, setTeamTimeDrafts] = useState<Record<string, { vrijemeOd: string; vrijemeDo: string }>>({});
+
+  const [photoQueue, setPhotoQueue] = useState<PhotoUpload[]>([]);
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
 
   const selected = orders.find((order) => order.id === selectedId) ?? null;
   const isLeader = selected?.poslovodja_id === profile?.radnik_id;
@@ -239,14 +278,19 @@ export function MobileWorkOrdersView() {
         foto,
         ekipa,
       });
-      setTeamTimeDrafts(Object.fromEntries(ekipa.map((worker) => [
+      const savedPotvrde = (nalog.mobile_potvrde as string[] | null) ?? [];
+      const timeConfirmed = savedPotvrde.includes('vrijeme');
+      // Dok vrijeme nije potvrđeno pretpostavka je uvijek 06:00–16:00; ručne izmjene se čuvaju između osvježavanja.
+      setTeamTimeDrafts((current) => Object.fromEntries(ekipa.map((worker) => [
         worker.radnik_id,
-        {
-          vrijemeOd: worker.vrijeme_od?.slice(0, 5) ?? '',
-          vrijemeDo: worker.vrijeme_do?.slice(0, 5) ?? DEFAULT_KRAJ_RADA,
-        },
+        timeConfirmed
+          ? {
+            vrijemeOd: worker.vrijeme_od?.slice(0, 5) ?? DEFAULT_POCETAK_RADA,
+            vrijemeDo: worker.vrijeme_do?.slice(0, 5) ?? DEFAULT_KRAJ_RADA,
+          }
+          : (!showLoading && current[worker.radnik_id]) || { vrijemeOd: DEFAULT_POCETAK_RADA, vrijemeDo: DEFAULT_KRAJ_RADA },
       ])));
-      setPotvrde((nalog.mobile_potvrde as string[] | null) ?? []);
+      setPotvrde(savedPotvrde);
       setReport({
         kmPocetak: nalog.km_pocetak?.toString() ?? '',
         kmKraj: nalog.km_kraj?.toString() ?? '',
@@ -371,13 +415,47 @@ export function MobileWorkOrdersView() {
     await runAction(() => updateNalogStavka(item.id, { sati: hours }), 'Radni sati stroja su spremljeni.');
   };
 
-  const uploadPhotos = async (files: FileList | null) => {
+  const queuePhotos = (files: FileList | null) => {
     if (!selected || !files?.length) return;
-    const chosen = Array.from(files);
-    await runAction(async () => {
-      for (const file of chosen) await uploadNalogFoto(selected.id, file, false);
+    const nalogId = selected.id;
+    const items: PhotoUpload[] = Array.from(files).map((file) => ({
+      id: uploadId(),
+      nalogId,
+      file,
+      previewUrl: URL.createObjectURL(file),
+      status: 'ceka',
+    }));
+    setPhotoQueue((current) => [...current, ...items]);
+  };
+
+  const removeQueuedPhoto = (id: string) => {
+    setPhotoQueue((current) => {
+      const item = current.find((photo) => photo.id === id);
+      if (item) URL.revokeObjectURL(item.previewUrl);
+      return current.filter((photo) => photo.id !== id);
     });
   };
+
+  useEffect(() => {
+    if (photoQueue.some((photo) => photo.status === 'salje')) return;
+    const next = photoQueue.find((photo) => photo.status === 'ceka');
+    if (!next) return;
+    setPhotoQueue((current) => current.map((photo) => photo.id === next.id ? { ...photo, status: 'salje' } : photo));
+    void (async () => {
+      try {
+        await uploadNalogFoto(next.nalogId, await compressPhoto(next.file), false);
+        removeQueuedPhoto(next.id);
+        const foto = await fetchNalogFoto(next.nalogId).catch(() => null);
+        if (foto && selectedIdRef.current === next.nalogId) {
+          setDetails((current) => current ? { ...current, foto } : current);
+        }
+      } catch (reason) {
+        setPhotoQueue((current) => current.map((photo) => photo.id === next.id
+          ? { ...photo, status: 'greska', poruka: errorMessage(reason, 'Fotografija nije poslana.') }
+          : photo));
+      }
+    })();
+  }, [photoQueue]);
 
   const toggleTask = async (task: GradilisteZadatak) => {
     await runAction(async () => {
@@ -482,6 +560,7 @@ export function MobileWorkOrdersView() {
     if (value === 'na') next.push('km_kraj:na');
     await runAction(() => saveReport({ potvrde: next, report: nextReport }));
   };
+  const selectedPhotoQueue = photoQueue.filter((photo) => photo.nalogId === selectedId);
   const materijalStavke = details?.stavke.filter((item) => item.tip === 'materijal') ?? [];
   const alatStavke = details?.stavke.filter((item) => item.tip === 'alat') ?? [];
   const strojStavke = details?.stavke.filter((item) => item.tip === 'stroj') ?? [];
@@ -508,7 +587,10 @@ export function MobileWorkOrdersView() {
   const potvrdaOf = (key: string): 'da' | 'na' | null =>
     potvrde.includes(key) ? 'da' : potvrde.includes(`${key}:na`) ? 'na' : null;
   const finishChecks = [
-    ...(Object.keys(sectionLabels) as SectionKey[]).map((key) => ({ label: sectionLabels[key], ok: potvrdaOf(key) !== null })),
+    ...(Object.keys(sectionLabels) as SectionKey[]).map((key) => ({
+      label: sectionLabels[key],
+      ok: potvrdaOf(key) !== null && (key !== 'foto' || selectedPhotoQueue.length === 0),
+    })),
     { label: 'Radno vrijeme', ok: potvrde.includes('vrijeme') },
     { label: 'Stanje ENC-a', ok: potvrdaOf('enc') !== null },
     { label: 'Kilometri povratka', ok: report.kmNa || potvrdaOf('km_kraj') !== null },
@@ -796,15 +878,56 @@ export function MobileWorkOrdersView() {
                           {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.naziv ?? 'Fotografija naloga'} className="aspect-square w-full rounded-lg object-cover" /></a>)}
                         </div>
                       )}
-                      <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-300 px-3 text-sm font-semibold text-slate-700">
-                        <Camera className="h-5 w-5" /> Fotografiraj ili odaberi slike
-                        <input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(event) => { void uploadPhotos(event.target.files); event.currentTarget.value = ''; }} />
-                      </label>
+                      {selectedPhotoQueue.length > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium text-slate-700">
+                            {selectedPhotoQueue.some((photo) => photo.status !== 'greska')
+                              ? `Šaljem fotografije… (preostalo ${selectedPhotoQueue.filter((photo) => photo.status !== 'greska').length})`
+                              : 'Neke fotografije nisu poslane.'}
+                          </p>
+                          <div className="grid grid-cols-3 gap-2">
+                            {selectedPhotoQueue.map((photo) => (
+                              <div key={photo.id} className="relative">
+                                <img src={photo.previewUrl} alt="Fotografija u slanju" className={`aspect-square w-full rounded-lg object-cover ${photo.status === 'greska' ? 'opacity-40' : 'opacity-60'}`} />
+                                {photo.status === 'salje' && <RefreshCw className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 animate-spin text-white drop-shadow" />}
+                                {photo.status === 'greska' && (
+                                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-1">
+                                    <button type="button" onClick={() => setPhotoQueue((current) => current.map((item) => item.id === photo.id ? { ...item, status: 'ceka', poruka: undefined } : item))} className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-slate-800 shadow" title={photo.poruka}>
+                                      Ponovi
+                                    </button>
+                                    <button type="button" onClick={() => removeQueuedPhoto(photo.id)} className="rounded-md bg-white p-1 text-red-600 shadow" aria-label="Ukloni fotografiju">
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                          {selectedPhotoQueue.find((photo) => photo.poruka)?.poruka && (
+                            <p className="text-xs text-red-600">{selectedPhotoQueue.find((photo) => photo.poruka)?.poruka}</p>
+                          )}
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl bg-rose-600 px-3 text-sm font-semibold text-white active:bg-rose-700">
+                          <Camera className="h-5 w-5" /> Fotografiraj
+                          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(event) => { queuePhotos(event.target.files); event.currentTarget.value = ''; }} />
+                        </label>
+                        <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-300 px-3 text-sm font-semibold text-slate-700">
+                          <ImagePlus className="h-5 w-5" /> Iz galerije
+                          <input type="file" accept="image/*" multiple className="hidden" onChange={(event) => { queuePhotos(event.target.files); event.currentTarget.value = ''; }} />
+                        </label>
+                      </div>
+                      <p className="text-xs text-slate-500">Slikaj koliko god treba – svaka se fotografija šalje u pozadini dok slikaš dalje.</p>
                       <SectionConfirm
                         value={potvrdaOf('foto')}
                         onChange={(value) => {
                           if (value === 'da' && details.foto.length === 0) {
                             setError('Dodaj barem jednu fotografiju ili odaberi „Nije primjenjivo”.');
+                            return;
+                          }
+                          if (value === 'da' && selectedPhotoQueue.length > 0) {
+                            setError('Pričekaj da se sve fotografije pošalju.');
                             return;
                           }
                           void setPotvrda('foto', value);
@@ -819,7 +942,7 @@ export function MobileWorkOrdersView() {
                       tone="amber"
                       summary={`${materijalStavke.filter((item) => item.gotovo).length} / ${materijalStavke.length} za nastavak`}
                     >
-                      <p className="text-sm text-slate-500">Dopiši utrošeni materijal i označi što je potrebno za nastavak radova.</p>
+                      <p className="text-sm text-slate-500">upiši što je potrebno za nastavak radova</p>
                       <ItemEditor
                         title="Materijal"
                         items={materijalStavke}
@@ -839,7 +962,7 @@ export function MobileWorkOrdersView() {
                       tone="sky"
                       summary={`${alatStavke.filter((item) => item.gotovo).length} / ${alatStavke.length} za nastavak`}
                     >
-                      <p className="text-sm text-slate-500">Dopiši korišteni alat i označi što je potrebno za nastavak radova.</p>
+                      <p className="text-sm text-slate-500">upiši što je potrebno za nastavak radova</p>
                       <ItemEditor
                         title="Alat"
                         items={alatStavke}
@@ -876,10 +999,10 @@ export function MobileWorkOrdersView() {
                     <StepHeader step={3} title="Završetak dana" text="Potvrdi radno vrijeme, stanje ENC-a i kilometre povratka, zatim zaključi nalog." />
 
                     <WorkOrderPanel title="Radno vrijeme" icon={<Clock3 className="h-5 w-5" />} tone="sky">
-                      <p className="text-sm text-slate-600">Završetak je unaprijed postavljen na {DEFAULT_KRAJ_RADA}. Ispravi ako je potrebno pa potvrdi.</p>
+                      <p className="text-sm text-slate-600">Radno vrijeme je unaprijed postavljeno na {DEFAULT_POCETAK_RADA}–{DEFAULT_KRAJ_RADA}. Ispravi ako je potrebno pa potvrdi.</p>
                       <div className="space-y-3">
                         {details.ekipa.map((worker) => {
-                          const timeDraft = teamTimeDrafts[worker.radnik_id] ?? { vrijemeOd: '', vrijemeDo: DEFAULT_KRAJ_RADA };
+                          const timeDraft = teamTimeDrafts[worker.radnik_id] ?? { vrijemeOd: DEFAULT_POCETAK_RADA, vrijemeDo: DEFAULT_KRAJ_RADA };
                           const locked = !isLeader || potvrde.includes('vrijeme') || working;
                           return (
                             <div key={worker.radnik_id} className="rounded-xl border border-slate-200 p-3">

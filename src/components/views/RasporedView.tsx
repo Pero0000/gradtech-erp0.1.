@@ -566,10 +566,6 @@ export function RasporedView() {
         return;
       }
     }
-    if (payload.type === 'radnik' && isWorkerAssignedToLockedVehicle(payload.id)) {
-      setError('Radnik je na vozilu sa zaključenim radnim nalogom i ne može se premjestiti.');
-      return;
-    }
     if (payload.assignmentId
       && (payload.type === 'gradiliste' && isLockedAssignment(payload.assignmentId)
         || payload.type === 'radnik' && isLockedWorkerAssignment(payload.assignmentId))) {
@@ -687,8 +683,7 @@ export function RasporedView() {
   }
 
   const categoryStatuses = categories.find((c) => c.key === activeCategory)?.statuses ?? [];
-  const sites = gradilista.filter((g) => categoryStatuses.includes(g.status)
-    && !siteAssignments.some((a) => a.gradiliste_id === g.id));
+  const sites = gradilista.filter((g) => categoryStatuses.includes(g.status));
   const columns = readColumns(gradilista).map((column) =>
     column.filter((id) => sites.some((site) => site.id === id)));
   const workers = radnici.filter((r) => (r.status === 'aktivan' || workerAssignments.some((a) => a.radnik_id === r.id))
@@ -701,7 +696,7 @@ export function RasporedView() {
       <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dnevni raspored</h1>
-          <p className="mt-1 text-sm text-slate-500">Povuci gradilišta i radnike u vozila. Povuci natrag na popis za uklanjanje.</p>
+          <p className="mt-1 text-sm text-slate-500">Gradilište možeš dodati na više vozila. Radnika s vozila na kojem je nalog zaključan povuci s popisa zaposlenika na drugo vozilo da ga tamo dodaš bez micanja s prvog.</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -836,6 +831,11 @@ export function RasporedView() {
                         className={`cursor-grab rounded-lg border bg-white p-2 shadow-sm hover:border-sky-300 active:cursor-grabbing ${dropTarget === `site-${g.id}` ? 'border-sky-400 ring-2 ring-sky-400' : 'border-slate-200'}`}
                       >
                         <p className="break-words text-[13px] font-semibold leading-tight text-slate-900">{g.naziv}</p>
+                        {siteAssignments.some((assignment) => assignment.gradiliste_id === g.id) && (
+                          <p className="mt-1 text-[10px] font-medium text-sky-700">
+                            Već na rasporedu · dodaj i na drugo vozilo
+                          </p>
+                        )}
                         {region && (
                           <span className={`mt-1 inline-flex rounded-full border px-1.5 text-[9px] font-medium leading-3 ${region.badge}`}>
                             {region.label}
@@ -1120,20 +1120,15 @@ export function RasporedView() {
                 .map((a) => vehicleOf(a.vozilo_id)?.registracija)
                 .filter(Boolean)
                 .join(', ');
-              const workerLocked = isWorkerAssignedToLockedVehicle(r.id);
               return (
               <div
                 key={r.id}
-                draggable={!workerLocked}
-                onDragStart={(e) => {
-                  if (workerLocked) {
-                    e.preventDefault();
-                    return;
-                  }
-                  startDrag(e, { type: 'radnik', id: r.id });
-                }}
-                title={workerLocked ? 'Radnik je na vozilu sa zaključenim radnim nalogom' : undefined}
-                className={`flex items-center gap-1.5 rounded-lg border bg-white px-2 py-1.5 shadow-sm ${workerLocked ? 'cursor-not-allowed opacity-70' : 'cursor-grab active:cursor-grabbing'} ${assignments.length > 1 ? 'border-red-200' : assignments.length === 1 ? 'border-emerald-200' : 'border-slate-200 hover:border-sky-300'}`}
+                draggable
+                onDragStart={(e) => startDrag(e, { type: 'radnik', id: r.id })}
+                title={assignments.some((assignment) => isVehicleOrderLocked(assignment.vozilo_id))
+                  ? 'Povuci na drugo vozilo za dodjelu bez uklanjanja sa zaključenog naloga'
+                  : 'Povuci u vozilo za dodjelu'}
+                className={`flex cursor-grab items-center gap-1.5 rounded-lg border bg-white px-2 py-1.5 shadow-sm active:cursor-grabbing ${assignments.length > 1 ? 'border-red-200' : assignments.length === 1 ? 'border-emerald-200' : 'border-slate-200 hover:border-sky-300'}`}
                 >
                   <GripVertical className="h-3.5 w-3.5 flex-shrink-0 text-slate-300" />
                   <div className="min-w-0 flex-1">

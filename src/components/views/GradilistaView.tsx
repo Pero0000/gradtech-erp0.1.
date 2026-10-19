@@ -79,6 +79,20 @@ const categoryDefaultStatus: Record<GradilisteCategory, GradilisteStatus> = {
   ponude: 'ponuda',
 };
 
+const emptyArchiveFilter = {
+  query: '',
+  investitorId: '',
+  objektId: '',
+  regija: '' as GradilisteRegija | '',
+  dateField: 'datum_zavrsetka' as 'datum_zavrsetka' | 'datum_pocetka',
+  dateFrom: '',
+  dateTo: '',
+};
+type ArchiveSortKey = 'naziv' | 'investitor' | 'objekt' | 'regija' | 'datum_pocetka' | 'datum_zavrsetka';
+
+const formatDate = (value: string | null | undefined) =>
+  value ? new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString('hr-HR') : '—';
+
 function emptyGradilisteColumns(): string[][] {
   return [[], [], []];
 }
@@ -150,6 +164,8 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
   const [newZadaci, setNewZadaci] = useState<{ naziv: string; rok: string }[]>([]);
   const [zadatakNaziv, setZadatakNaziv] = useState('');
   const [zadatakRok, setZadatakRok] = useState('');
+  const [archiveFilter, setArchiveFilter] = useState(emptyArchiveFilter);
+  const [archiveSort, setArchiveSort] = useState<{ key: ArchiveSortKey; asc: boolean }>({ key: 'datum_zavrsetka', asc: false });
 
   const persistBoardLayout = (columns: string[][], sortModes: GradilisteSortMode[]) => {
     const save = layoutSaveQueue.current
@@ -281,6 +297,43 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
     gradilisteCategories.find((category) => category.key === activeCategory)?.statuses.includes(item.status),
   );
   const selectedGradiliste = items.find((item) => item.id === selectedGradilisteId) ?? null;
+
+  const investitorOf = (g: Gradiliste) => g.objekti?.investitori ?? null;
+  const archiveObjekti = objekti.filter((o) => !archiveFilter.investitorId || o.investitor_id === archiveFilter.investitorId);
+  const archiveItems = activeCategory !== 'arhiva' ? [] : visibleItems
+    .filter((g) => {
+      const q = archiveFilter.query.trim().toLocaleLowerCase();
+      const text = [g.naziv, g.adresa, g.opis, g.voditelj_gradilista, g.objekti?.naziv, investitorOf(g)?.naziv]
+        .filter(Boolean).join(' ').toLocaleLowerCase();
+      const date = (g[archiveFilter.dateField] ?? '').slice(0, 10);
+      return (!q || text.includes(q))
+        && (!archiveFilter.investitorId || investitorOf(g)?.id === archiveFilter.investitorId)
+        && (!archiveFilter.objektId || g.objekt_id === archiveFilter.objektId)
+        && (!archiveFilter.regija || g.regija === archiveFilter.regija)
+        && (!archiveFilter.dateFrom || (date !== '' && date >= archiveFilter.dateFrom))
+        && (!archiveFilter.dateTo || (date !== '' && date <= archiveFilter.dateTo));
+    })
+    .sort((a, b) => {
+      const value = (g: Gradiliste) => {
+        switch (archiveSort.key) {
+          case 'investitor': return investitorOf(g)?.naziv ?? '';
+          case 'objekt': return g.objekti?.naziv ?? '';
+          case 'regija': return g.regija ? regionInfo[g.regija].label : '';
+          case 'datum_pocetka': return g.datum_pocetka ?? '';
+          case 'datum_zavrsetka': return g.datum_zavrsetka ?? '';
+          default: return g.naziv;
+        }
+      };
+      const first = value(a);
+      const second = value(b);
+      // Prazne vrijednosti uvijek idu na kraj.
+      if (!first || !second) return first === second ? 0 : first ? -1 : 1;
+      const result = first.localeCompare(second, 'hr');
+      return archiveSort.asc ? result : -result;
+    });
+  const archiveFilterActive = JSON.stringify(archiveFilter) !== JSON.stringify(emptyArchiveFilter);
+  const toggleArchiveSort = (key: ArchiveSortKey) =>
+    setArchiveSort((current) => ({ key, asc: current.key === key ? !current.asc : key === 'naziv' || key === 'investitor' || key === 'objekt' || key === 'regija' }));
 
   const openCreate = (columnIndex?: number) => {
     setEditing(null);
@@ -522,6 +575,135 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
       ) : (
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
           <div className="min-w-0">
+          {activeCategory === 'arhiva' ? (
+            <div className="space-y-3">
+              <div className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-2 xl:grid-cols-3">
+                <TextInput
+                  aria-label="Pretraži arhivu"
+                  value={archiveFilter.query}
+                  onChange={(event) => setArchiveFilter((f) => ({ ...f, query: event.target.value }))}
+                  placeholder="Pretraži naziv, adresu, napomenu…"
+                  className="sm:col-span-2 xl:col-span-3"
+                />
+                <Select
+                  aria-label="Investitor"
+                  value={archiveFilter.investitorId}
+                  onChange={(event) => setArchiveFilter((f) => ({ ...f, investitorId: event.target.value, objektId: '' }))}
+                >
+                  <option value="">Svi investitori</option>
+                  {investitori.map((i) => <option key={i.id} value={i.id}>{i.naziv}</option>)}
+                </Select>
+                <Select
+                  aria-label="Objekt"
+                  value={archiveFilter.objektId}
+                  onChange={(event) => setArchiveFilter((f) => ({ ...f, objektId: event.target.value }))}
+                >
+                  <option value="">Svi objekti</option>
+                  {archiveObjekti.map((o) => <option key={o.id} value={o.id}>{o.naziv}</option>)}
+                </Select>
+                <Select
+                  aria-label="Regija"
+                  value={archiveFilter.regija}
+                  onChange={(event) => setArchiveFilter((f) => ({ ...f, regija: event.target.value as GradilisteRegija | '' }))}
+                >
+                  <option value="">Sve regije</option>
+                  {(Object.keys(regionInfo) as GradilisteRegija[]).map((r) => <option key={r} value={r}>{regionInfo[r].label}</option>)}
+                </Select>
+                <Select
+                  aria-label="Datum za filtriranje"
+                  value={archiveFilter.dateField}
+                  onChange={(event) => setArchiveFilter((f) => ({ ...f, dateField: event.target.value as typeof f.dateField }))}
+                >
+                  <option value="datum_zavrsetka">Krajnji rok</option>
+                  <option value="datum_pocetka">Početni rok</option>
+                </Select>
+                <label className="flex items-center gap-2 text-xs text-slate-500">
+                  Od
+                  <TextInput type="date" value={archiveFilter.dateFrom} onChange={(event) => setArchiveFilter((f) => ({ ...f, dateFrom: event.target.value }))} />
+                </label>
+                <label className="flex items-center gap-2 text-xs text-slate-500">
+                  Do
+                  <TextInput type="date" value={archiveFilter.dateTo} onChange={(event) => setArchiveFilter((f) => ({ ...f, dateTo: event.target.value }))} />
+                </label>
+                <div className="flex items-center justify-between gap-2 sm:col-span-2 xl:col-span-3">
+                  <span className="text-xs text-slate-500">Prikazano {archiveItems.length} od {visibleItems.length}</span>
+                  {archiveFilterActive && (
+                    <button type="button" onClick={() => setArchiveFilter(emptyArchiveFilter)} className="text-xs font-medium text-sky-700 hover:text-sky-900">
+                      Očisti filtre
+                    </button>
+                  )}
+                </div>
+              </div>
+              {archiveItems.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
+                  {visibleItems.length === 0 ? 'Nema arhiviranih gradilišta.' : 'Nema gradilišta za odabrane filtre.'}
+                </p>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
+                      <tr>
+                        {([
+                          ['naziv', 'Gradilište'],
+                          ['investitor', 'Investitor'],
+                          ['objekt', 'Objekt'],
+                          ['regija', 'Regija'],
+                          ['datum_pocetka', 'Početak'],
+                          ['datum_zavrsetka', 'Završetak'],
+                        ] as [ArchiveSortKey, string][]).map(([key, label]) => (
+                          <th key={key} className="whitespace-nowrap px-3 py-2.5">
+                            <button type="button" onClick={() => toggleArchiveSort(key)} className="inline-flex items-center gap-1 uppercase hover:text-slate-800">
+                              {label}
+                              {archiveSort.key === key && <span aria-hidden>{archiveSort.asc ? '▲' : '▼'}</span>}
+                            </button>
+                          </th>
+                        ))}
+                        <th className="px-3 py-2.5"><span className="sr-only">Akcije</span></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {archiveItems.map((g) => (
+                        <tr
+                          key={g.id}
+                          onClick={() => setSelectedGradilisteId(g.id)}
+                          className={`group cursor-pointer ${selectedGradilisteId === g.id ? 'bg-sky-50' : 'hover:bg-slate-50'}`}
+                        >
+                          <td className="max-w-56 px-3 py-2.5">
+                            <p className="truncate font-medium text-slate-900" title={g.naziv}>{g.naziv}</p>
+                            {g.adresa && <p className="truncate text-xs text-slate-400" title={g.adresa}>{g.adresa}</p>}
+                          </td>
+                          <td className="max-w-40 truncate px-3 py-2.5 text-slate-600">{investitorOf(g)?.naziv ?? '—'}</td>
+                          <td className="max-w-40 truncate px-3 py-2.5 text-slate-600">{g.objekti?.naziv ?? '—'}</td>
+                          <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{g.regija ? regionInfo[g.regija].label : '—'}</td>
+                          <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{formatDate(g.datum_pocetka)}</td>
+                          <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{formatDate(g.datum_zavrsetka)}</td>
+                          <td className="whitespace-nowrap px-2 py-2.5 text-right">
+                            <button
+                              type="button"
+                              onClick={(event) => { event.stopPropagation(); openEdit(g); }}
+                              className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600"
+                              aria-label={`Uredi ${g.naziv}`}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => { event.stopPropagation(); setDeleteId(g.id); }}
+                              className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+                              aria-label={`Izbriši ${g.naziv}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : (
+          <>
           {visibleItems.length === 0 && (
             <p className="mb-3 text-sm text-slate-500">Nema gradilišta u kategoriji {gradilisteCategories.find((category) => category.key === activeCategory)?.label.toLocaleLowerCase()}.</p>
           )}
@@ -713,6 +895,8 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
             );
           })}
           </div>
+          </>
+          )}
           </div>
           {selectedGradiliste && (
             <GradilisteDetailsPanel

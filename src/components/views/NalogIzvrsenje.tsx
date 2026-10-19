@@ -458,8 +458,8 @@ export function NalogIzvrsenje({
 
   const addZadatak = () => {
     const naziv = newZadatak.trim();
-    if (!naziv || !nalog.gradiliste_id) return;
-    const gradilisteId = nalog.gradiliste_id;
+    if (!naziv) return;
+    const gradilisteId = nalog.gradiliste_id ?? null;
     void guard(async () => {
       await addNalogZadatak(nalog.id, gradilisteId, naziv);
       setNewZadatak('');
@@ -601,7 +601,7 @@ export function NalogIzvrsenje({
           ))}
           {zadaci.length === 0 && <p className="text-xs text-slate-400">Nema zadataka na ovom nalogu.</p>}
         </div>
-        {nalog.gradiliste_id && (
+        {(
           <div className="mt-2 flex gap-2">
             <input
               value={newZadatak}

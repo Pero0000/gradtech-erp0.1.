@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Camera, Check, ChevronLeft, ChevronRight, ClipboardCheck, Clock3, FileText, Gauge, ListChecks, LogOut, Package, Plus, RefreshCw, Upload, Wrench } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, Camera, Check, ChevronLeft, ChevronRight, ClipboardCheck, Clock3, CreditCard, FileText, Flag, Gauge, ListChecks, LogOut, Package, Play, Plus, RefreshCw, Wrench } from 'lucide-react';
 import { useAuth } from '@/auth/useAuth';
 import { usePushRegistration } from '@/components/mobile/usePushRegistration';
 import {
@@ -18,8 +18,7 @@ import {
   fetchNalogStavke,
   fetchNalogZadaci,
   fetchOprema,
-  finishMobileWorkerTime,
-  saveMobileNalogReport,
+  saveMobileNalogIzvjestaj,
   saveMobileWorkerTime,
   setMobileNalogVozac,
   startMobileWorkerTime,
@@ -35,38 +34,31 @@ import {
 import { supabase } from '@/lib/supabase';
 import type { GradilisteZadatak, Oprema } from '@/types';
 
-const reviewSections = [
-  { id: 'upute', label: 'Upute i opis naloga' },
-  { id: 'zadaci', label: 'Radni zadaci' },
-  { id: 'materijal', label: 'Materijal za nastavak' },
-  { id: 'alat', label: 'Alat za nastavak' },
-  { id: 'dokumenti', label: 'Dokumenti i slike' },
-] as const;
+// Pregled koji poslovođa potvrđuje pri pokretanju vremena (zahtjev RPC-a mobile_start_worker_time).
+const reviewSectionIds = ['upute', 'zadaci', 'materijal', 'alat', 'dokumenti'];
+
+type PrepKey = 'napomena' | 'zadaci' | 'materijal_na' | 'alat_na' | 'dokumenti';
+type SectionKey = 'poslovi' | 'foto' | 'materijal' | 'alat' | 'strojevi';
+
+const sectionLabels: Record<SectionKey, string> = {
+  poslovi: 'Poslovi',
+  foto: 'Fotografije',
+  materijal: 'Materijal',
+  alat: 'Alat',
+  strojevi: 'Strojevi',
+};
 
 type MobileReport = {
   kmPocetak: string;
   kmKraj: string;
   kmNa: boolean;
-  napomena: string;
-  napomenaNa: boolean;
-  tasksConfirmed: boolean;
-  fotoNa: boolean;
-  materijalNa: boolean;
-  alatNa: boolean;
+  encStanje: string;
 };
 
 type MobileDetails = {
   gradilisteId: string | null;
   vozacId: string | null;
-  kmPocetak: number | null;
-  kmKraj: number | null;
   napomena: string | null;
-  mobileKmNa: boolean;
-  mobileNapomenaNa: boolean;
-  mobileTasksConfirmed: boolean;
-  mobileFotoNa: boolean;
-  mobileMaterijalNa: boolean;
-  mobileAlatNa: boolean;
   zadaci: GradilisteZadatak[];
   stavke: NalogStavka[];
   alati: Oprema[];
@@ -80,13 +72,10 @@ const emptyReport: MobileReport = {
   kmPocetak: '',
   kmKraj: '',
   kmNa: false,
-  napomena: '',
-  napomenaNa: false,
-  tasksConfirmed: false,
-  fotoNa: false,
-  materijalNa: false,
-  alatNa: false,
+  encStanje: '',
 };
+
+const DEFAULT_KRAJ_RADA = '16:00';
 
 function errorMessage(reason: unknown, fallback: string) {
   if (reason instanceof Error) return reason.message;
@@ -138,10 +127,9 @@ export function MobileWorkOrdersView() {
   const [orders, setOrders] = useState<MobileRadniNalog[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [details, setDetails] = useState<MobileDetails | null>(null);
-  const [reviewed, setReviewed] = useState<string[]>([]);
   const [report, setReport] = useState<MobileReport>(emptyReport);
-  const [noteConfirmed, setNoteConfirmed] = useState(false);
-  const [leaderConfirmed, setLeaderConfirmed] = useState(false);
+  const [potvrde, setPotvrde] = useState<string[]>([]);
+  const [prep, setPrep] = useState<PrepKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -153,8 +141,6 @@ export function MobileWorkOrdersView() {
 
   const selected = orders.find((order) => order.id === selectedId) ?? null;
   const isLeader = selected?.poslovodja_id === profile?.radnik_id;
-  const canEditOrder = selected?.mobile_status === 'dodijeljen' || selected?.mobile_status === 'u_tijeku';
-  const isReviewed = reviewSections.every((section) => reviewed.includes(section.id));
 
   useEffect(() => {
     if (!profile?.radnik_id) return;
@@ -213,16 +199,20 @@ export function MobileWorkOrdersView() {
       setLoading(true);
       setError(null);
       setNotice(null);
-      setNoteConfirmed(false);
-      setLeaderConfirmed(false);
+      setPrep([]);
     }
     try {
       const { data: nalog, error: nalogError } = await supabase
         .from('radni_nalozi')
-        .select('gradiliste_id,vozac_id,km_pocetak,km_kraj,napomena,mobile_km_na,mobile_napomena_na,mobile_tasks_confirmed,mobile_foto_na,mobile_materijal_na,mobile_alat_na')
+        .select('gradiliste_id,vozac_id,km_pocetak,km_kraj,napomena,mobile_km_na,enc_stanje,mobile_potvrde')
         .eq('id', order.id)
         .single();
-      if (nalogError) throw nalogError;
+      if (nalogError) {
+        if (/enc_stanje|mobile_potvrde/.test(nalogError.message)) {
+          throw new Error('Pokreni migraciju 20261019120000_mobile_tijek_naloga.sql u Supabaseu.');
+        }
+        throw nalogError;
+      }
 
       const [zadaci, stavke, dokumenti, foto, linkedIds, ekipa, alati, strojevi] = await Promise.all([
         fetchNalogZadaci(order.id),
@@ -240,15 +230,7 @@ export function MobileWorkOrdersView() {
       setDetails({
         gradilisteId: nalog.gradiliste_id,
         vozacId: nalog.vozac_id,
-        kmPocetak: nalog.km_pocetak,
-        kmKraj: nalog.km_kraj,
         napomena: nalog.napomena,
-        mobileKmNa: nalog.mobile_km_na,
-        mobileNapomenaNa: nalog.mobile_napomena_na,
-        mobileTasksConfirmed: nalog.mobile_tasks_confirmed,
-        mobileFotoNa: nalog.mobile_foto_na,
-        mobileMaterijalNa: nalog.mobile_materijal_na,
-        mobileAlatNa: nalog.mobile_alat_na,
         zadaci,
         stavke,
         alati: alati.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'),
@@ -259,19 +241,17 @@ export function MobileWorkOrdersView() {
       });
       setTeamTimeDrafts(Object.fromEntries(ekipa.map((worker) => [
         worker.radnik_id,
-        { vrijemeOd: worker.vrijeme_od?.slice(0, 5) ?? '', vrijemeDo: worker.vrijeme_do?.slice(0, 5) ?? '' },
+        {
+          vrijemeOd: worker.vrijeme_od?.slice(0, 5) ?? '',
+          vrijemeDo: worker.vrijeme_do?.slice(0, 5) ?? DEFAULT_KRAJ_RADA,
+        },
       ])));
-      setReviewed(order.mobile_reviewed_sections ?? []);
+      setPotvrde((nalog.mobile_potvrde as string[] | null) ?? []);
       setReport({
         kmPocetak: nalog.km_pocetak?.toString() ?? '',
         kmKraj: nalog.km_kraj?.toString() ?? '',
         kmNa: nalog.mobile_km_na,
-        napomena: nalog.napomena ?? '',
-        napomenaNa: nalog.mobile_napomena_na,
-        tasksConfirmed: nalog.mobile_tasks_confirmed,
-        fotoNa: nalog.mobile_foto_na,
-        materijalNa: nalog.mobile_materijal_na,
-        alatNa: nalog.mobile_alat_na,
+        encStanje: nalog.enc_stanje?.toString() ?? '',
       });
     } catch (reason) {
       setError(errorMessage(reason, 'Detalje radnog naloga nije moguće učitati.'));
@@ -320,27 +300,39 @@ export function MobileWorkOrdersView() {
     }
   };
 
-  const saveReport = async () => {
+  const saveReport = async (overrides: { potvrde?: string[]; report?: MobileReport } = {}) => {
     if (!selected) return;
-    const numberOrNull = (value: string) => value.trim() === '' ? null : Number(value);
-    const kmPocetak = numberOrNull(report.kmPocetak);
-    const kmKraj = numberOrNull(report.kmKraj);
+    const current = overrides.report ?? report;
+    const numberOrNull = (value: string) => value.trim() === '' ? null : Number(value.replace(',', '.'));
+    const kmPocetak = numberOrNull(current.kmPocetak);
+    const kmKraj = numberOrNull(current.kmKraj);
+    const encStanje = numberOrNull(current.encStanje);
     if ((kmPocetak !== null && (!Number.isInteger(kmPocetak) || kmPocetak < 0)) ||
       (kmKraj !== null && (!Number.isInteger(kmKraj) || kmKraj < 0))) {
       throw new Error('Kilometri moraju biti cijeli pozitivni brojevi.');
     }
-    await saveMobileNalogReport({
+    if (encStanje !== null && (!Number.isFinite(encStanje) || encStanje < 0)) {
+      throw new Error('Stanje ENC-a mora biti pozitivan broj.');
+    }
+    await saveMobileNalogIzvjestaj({
       nalogId: selected.id,
       kmPocetak,
       kmKraj,
-      kmNa: report.kmNa,
-      napomena: report.napomena,
-      napomenaNa: report.napomenaNa,
-      tasksConfirmed: report.tasksConfirmed,
-      fotoNa: report.fotoNa,
-      materijalNa: report.materijalNa,
-      alatNa: report.alatNa,
+      kmNa: current.kmNa,
+      encStanje,
+      potvrde: overrides.potvrde ?? potvrde,
     });
+  };
+
+  const setPotvrda = async (key: string, value: 'da' | 'na' | null) => {
+    const next = potvrde.filter((item) => item !== key && item !== `${key}:na`);
+    if (value === 'da') next.push(key);
+    if (value === 'na') next.push(`${key}:na`);
+    await runAction(() => saveReport({ potvrde: next }));
+  };
+
+  const togglePrep = (key: PrepKey, checked: boolean) => {
+    setPrep((current) => checked ? [...current.filter((item) => item !== key), key] : current.filter((item) => item !== key));
   };
 
   const addItem = async (tip: 'materijal' | 'alat') => {
@@ -351,10 +343,10 @@ export function MobileWorkOrdersView() {
       await addNalogStavka(selected.id, tip, value);
       if (tip === 'materijal') {
         setNewMaterial('');
-        setReport((current) => ({ ...current, materijalNa: false }));
+        togglePrep('materijal_na', false);
       } else {
         setNewTool('');
-        setReport((current) => ({ ...current, alatNa: false }));
+        togglePrep('alat_na', false);
       }
     });
   };
@@ -384,7 +376,6 @@ export function MobileWorkOrdersView() {
     const chosen = Array.from(files);
     await runAction(async () => {
       for (const file of chosen) await uploadNalogFoto(selected.id, file, false);
-      setReport((current) => ({ ...current, fotoNa: false }));
     });
   };
 
@@ -399,7 +390,7 @@ export function MobileWorkOrdersView() {
   };
 
   const addTask = async () => {
-    if (!selected || !details?.gradilisteId || !newTask.trim()) return;
+    if (!selected || !details || !newTask.trim()) return;
     const gradilisteId = details.gradilisteId;
     const name = newTask.trim();
     await runAction(async () => {
@@ -408,32 +399,122 @@ export function MobileWorkOrdersView() {
     }, 'Radni zadatak je dodan.');
   };
 
-  const toggleItem = async (item: NalogStavka) => {
-    await runAction(async () => {
-      const { error: updateError } = await supabase
-        .from('radni_nalozi_stavke')
-        .update({ gotovo: !item.gotovo })
-        .eq('id', item.id);
-      if (updateError) throw updateError;
-    });
+  const toggleItem = async (item: NalogStavka, field: 'gotovo' | 'uzeto' = 'gotovo') => {
+    await runAction(() => updateNalogStavka(item.id, { [field]: !item[field] }));
   };
 
-  const saveWorkerTime = async (worker: MobileWorkerTime) => {
-    if (!selected) return;
-    const draft = teamTimeDrafts[worker.radnik_id];
-    if (!draft?.vrijemeOd) {
-      throw new Error('Unesi vrijeme početka rada.');
+  const numberOrNull = (value: string) => value.trim() === '' ? null : Number(value.replace(',', '.'));
+
+  const startSite = async () => {
+    if (!selected || !details) return;
+    await saveReport({ potvrde: [] });
+    const notStarted = details.ekipa.filter((worker) => !worker.mobile_started_at);
+    // Poslovođa prvi, kako bi njegov pregled bio evidentiran prije ostatka ekipe.
+    notStarted.sort((a, b) => Number(b.radnik_id === selected.poslovodja_id) - Number(a.radnik_id === selected.poslovodja_id));
+    for (const worker of notStarted) {
+      await startMobileWorkerTime(selected.id, worker.radnik_id, reviewSectionIds);
     }
-    await saveMobileWorkerTime({
-      nalogId: selected.id,
-      radnikId: worker.radnik_id,
-      vrijemeOd: draft.vrijemeOd,
-      vrijemeDo: draft.vrijemeDo || null,
-      reviewedSections: isLeader ? reviewed : [],
-    });
   };
 
-  const reviewedSet = useMemo(() => new Set(reviewed), [reviewed]);
+  const confirmWorkTime = async (checked: boolean) => {
+    if (!selected || !details) return;
+    if (!checked) {
+      await setPotvrda('vrijeme', null);
+      return;
+    }
+    await runAction(async () => {
+      for (const worker of details.ekipa) {
+        const draft = teamTimeDrafts[worker.radnik_id];
+        if (!draft?.vrijemeOd || !draft.vrijemeDo) {
+          throw new Error(`Upiši početak i završetak rada za ${worker.ime} ${worker.prezime}.`);
+        }
+        if (draft.vrijemeDo <= draft.vrijemeOd) {
+          throw new Error(`Završetak rada mora biti nakon početka (${worker.ime} ${worker.prezime}).`);
+        }
+      }
+      for (const worker of details.ekipa) {
+        const draft = teamTimeDrafts[worker.radnik_id];
+        await saveMobileWorkerTime({
+          nalogId: selected.id,
+          radnikId: worker.radnik_id,
+          vrijemeOd: draft.vrijemeOd,
+          vrijemeDo: draft.vrijemeDo,
+          reviewedSections: reviewSectionIds,
+        });
+      }
+      await saveReport({ potvrde: [...potvrde.filter((item) => item !== 'vrijeme'), 'vrijeme'] });
+    }, 'Radno vrijeme ekipe je potvrđeno.');
+  };
+
+  const confirmEnc = async (value: 'da' | 'na' | null) => {
+    if (value === 'da') {
+      const enc = numberOrNull(report.encStanje);
+      if (enc === null || !Number.isFinite(enc) || enc < 0) {
+        setError('Upiši stanje ENC-a prije potvrde.');
+        return;
+      }
+    }
+    const nextReport = value === 'na' ? { ...report, encStanje: '' } : report;
+    if (value === 'na') setReport(nextReport);
+    const next = potvrde.filter((item) => item !== 'enc' && item !== 'enc:na');
+    if (value === 'da') next.push('enc');
+    if (value === 'na') next.push('enc:na');
+    await runAction(() => saveReport({ potvrde: next, report: nextReport }));
+  };
+
+  const confirmKmKraj = async (value: 'da' | 'na' | null) => {
+    if (value === 'da') {
+      const start = numberOrNull(report.kmPocetak);
+      const end = numberOrNull(report.kmKraj);
+      if (end === null || !Number.isInteger(end)) {
+        setError('Upiši kilometre povratka.');
+        return;
+      }
+      if (start !== null && end < start) {
+        setError('Kilometri povratka ne smiju biti manji od početnih.');
+        return;
+      }
+    }
+    const nextReport = value === 'na' ? { ...report, kmKraj: '' } : report;
+    if (value === 'na') setReport(nextReport);
+    const next = potvrde.filter((item) => item !== 'km_kraj' && item !== 'km_kraj:na');
+    if (value === 'da') next.push('km_kraj');
+    if (value === 'na') next.push('km_kraj:na');
+    await runAction(() => saveReport({ potvrde: next, report: nextReport }));
+  };
+  const materijalStavke = details?.stavke.filter((item) => item.tip === 'materijal') ?? [];
+  const alatStavke = details?.stavke.filter((item) => item.tip === 'alat') ?? [];
+  const strojStavke = details?.stavke.filter((item) => item.tip === 'stroj') ?? [];
+  const hasNapomena = Boolean(details?.napomena?.trim());
+  const kmPocetakValue = numberOrNull(report.kmPocetak);
+  const prepChecks = [
+    { label: 'Napomena pročitana', ok: !hasNapomena || prep.includes('napomena') },
+    { label: 'Radni zadaci pregledani', ok: prep.includes('zadaci') },
+    {
+      label: 'Materijal preuzet',
+      ok: materijalStavke.length ? materijalStavke.every((item) => item.uzeto) : prep.includes('materijal_na'),
+    },
+    {
+      label: 'Alat preuzet',
+      ok: alatStavke.length ? alatStavke.every((item) => item.uzeto) : prep.includes('alat_na'),
+    },
+    { label: 'Dokumenti pregledani', ok: prep.includes('dokumenti') },
+    {
+      label: 'Početni kilometri',
+      ok: report.kmNa || (kmPocetakValue !== null && Number.isInteger(kmPocetakValue) && kmPocetakValue >= 0),
+    },
+  ];
+  const prepReady = prepChecks.every((check) => check.ok);
+  const potvrdaOf = (key: string): 'da' | 'na' | null =>
+    potvrde.includes(key) ? 'da' : potvrde.includes(`${key}:na`) ? 'na' : null;
+  const finishChecks = [
+    ...(Object.keys(sectionLabels) as SectionKey[]).map((key) => ({ label: sectionLabels[key], ok: potvrdaOf(key) !== null })),
+    { label: 'Radno vrijeme', ok: potvrde.includes('vrijeme') },
+    { label: 'Stanje ENC-a', ok: potvrdaOf('enc') !== null },
+    { label: 'Kilometri povratka', ok: report.kmNa || potvrdaOf('km_kraj') !== null },
+  ];
+  const finishReady = finishChecks.every((check) => check.ok);
+
   const signOutUser = async () => {
     try {
       await signOut();
@@ -486,236 +567,189 @@ export function MobileWorkOrdersView() {
               {selected.rok && <p className="mt-3 text-xs text-slate-500">Rok: {new Date(`${selected.rok}T00:00:00`).toLocaleDateString('hr-HR')}</p>}
             </article>
 
-            {!loading && details && (
-              <WorkOrderPanel title="Vozač" icon={<Gauge className="h-5 w-5" />} tone="sky">
-                <label className="block text-sm font-medium text-slate-700">
-                  Odaberite vozača iz ekipe
-                  <select
-                    value={details.vozacId ?? ''}
-                    disabled={!canEditOrder || working}
-                    onChange={(event) => {
-                      const radnikId = event.target.value || null;
-                      void runAction(
-                        () => setMobileNalogVozac(selected.id, radnikId),
-                        'Vozač je spremljen.',
-                      );
-                    }}
-                    className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 disabled:bg-slate-100"
-                  >
-                    <option value="">Poslovođa (zadano)</option>
-                    {details.ekipa.map((worker) => (
-                      <option key={worker.radnik_id} value={worker.radnik_id}>
-                        {worker.ime} {worker.prezime}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <p className="mt-2 text-sm text-slate-600">
-                  Trenutni vozač: {(() => {
-                    const driverId = details.vozacId ?? selected.poslovodja_id;
-                    const driver = details.ekipa.find((worker) => worker.radnik_id === driverId);
-                    return driver ? `${driver.ime} ${driver.prezime}` : 'poslovođa (još nije odabran)';
-                  })()}
-                </p>
-              </WorkOrderPanel>
-            )}
-
-            {!loading && details && (
-              <section className="overflow-hidden rounded-2xl border-2 border-amber-400 bg-amber-50 shadow-md shadow-amber-100">
-                <div className="flex items-center gap-3 border-b border-amber-200 bg-amber-100 px-4 py-4">
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white">
-                    <AlertTriangle className="h-6 w-6" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-extrabold uppercase tracking-wider text-amber-800">Važno za ekipu</p>
-                    <h3 className="text-lg font-extrabold text-slate-900">Napomena uz radni nalog</h3>
-                  </div>
-                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${report.napomena.trim() ? 'bg-amber-200 text-amber-900' : report.napomenaNa ? 'bg-emerald-100 text-emerald-800' : 'bg-white text-amber-900'}`}>
-                    {report.napomena.trim() ? 'Pročitati' : report.napomenaNa ? 'Potvrđeno' : 'Potrebna potvrda'}
-                  </span>
-                </div>
-                <div className="space-y-3 p-4">
-                  <p className="text-sm leading-5 text-amber-950">Ovdje upišite važne upute za radnike. Napomena će biti prikazana uz radni nalog.</p>
-                  <textarea
-                    rows={4}
-                    value={report.napomena}
-                    disabled={!canEditOrder || (isLeader && report.napomenaNa)}
-                    onChange={(event) => {
-                      setReport((current) => ({ ...current, napomena: event.target.value, napomenaNa: false }));
-                      setNoteConfirmed(false);
-                    }}
-                    placeholder="Upišite napomenu ili važne upute…"
-                    className="w-full rounded-xl border-2 border-amber-400 bg-white p-4 text-base font-semibold leading-6 text-slate-900 placeholder:font-normal placeholder:text-slate-400 focus:border-amber-600 focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:bg-amber-100"
-                  />
-                  {!report.napomena.trim() && (
-                    <p className="rounded-xl border border-amber-300 bg-white p-3 text-sm font-semibold text-amber-900">
-                      {isLeader ? 'Upišite napomenu ili potvrdite da nije potrebna.' : 'Poslovođa još nije upisao napomenu.'}
-                    </p>
-                  )}
-                  {report.napomena.trim() && (
-                    <CheckField
-                      checked={noteConfirmed}
-                      onChange={setNoteConfirmed}
-                      label="Potvrđujem da sam pročitao/la i razumio/la napomenu."
-                    />
-                  )}
-                {isLeader && canEditOrder && (
-                  <CheckField
-                    checked={report.napomenaNa}
-                    onChange={(checked) => {
-                      setReport((current) => ({ ...current, napomenaNa: checked, napomena: checked ? '' : current.napomena }));
-                      setNoteConfirmed(false);
-                    }}
-                    label="Potvrđujem da nema dodatne napomene."
-                  />
-                )}
-                {canEditOrder && (
-                  <Button
-                    onClick={() => void runAction(saveReport, 'Napomena i izmjene izvještaja spremljene.')}
-                    disabled={working || (report.napomena.trim() ? !noteConfirmed : !isLeader || !report.napomenaNa)}
-                  >
-                    <Upload className="h-5 w-5" /> Spremi potvrđenu napomenu
-                  </Button>
-                )}
-                </div>
-              </section>
-            )}
-
             {loading && <p className="rounded-xl bg-white p-4 text-sm text-slate-500">Učitavanje naloga…</p>}
-            {!loading && details && !selected.mobile_started_at && selected.mobile_status !== 'predan' && selected.mobile_status !== 'odobren' && (
-              <WorkOrderPanel title="Pregled prije početka" icon={<ClipboardCheck className="h-5 w-5" />} tone="sky">
-                <p className="text-sm text-slate-600">Svi djelatnici mogu pregledavati i dopunjavati podatke naloga. Poslovođa potvrđuje da su pregledani svi dijelovi.</p>
-                <div className="space-y-2">
-                  <ReviewBlock title="Radni zadaci">
-                    {details.zadaci.length ? details.zadaci.map((task) => <p key={task.id} className="text-sm text-slate-700">• {task.naziv}</p>) : <p className="text-sm text-slate-500">Nema upisanih zadataka.</p>}
-                  </ReviewBlock>
-                  <ReviewBlock title="Materijal i alat">
-                    {details.stavke.length ? details.stavke.map((item) => <p key={item.id} className="text-sm text-slate-700">• {item.tip === 'materijal' ? 'Materijal' : item.tip === 'stroj' ? `Stroj${item.sati ? ` (${item.sati} h)` : ''}` : 'Alat'}: {item.naziv}</p>) : <p className="text-sm text-slate-500">Nema upisanih stavki.</p>}
-                  </ReviewBlock>
-                  <ReviewBlock title="Dokumenti i slike">
-                    {details.dokumenti.length ? details.dokumenti.map((document) => <a key={document.id} href={document.url} target="_blank" rel="noreferrer" className="block min-h-10 py-2 text-sm font-medium text-sky-700 underline">{document.naziv}</a>) : <p className="text-sm text-slate-500">Nema priloženih dokumenata.</p>}
-                    {details.foto.length > 0 && (
-                      <div className="mt-2 grid grid-cols-4 gap-2">
-                        {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.naziv ?? 'Slika naloga'} className="aspect-square w-full rounded-lg object-cover" /></a>)}
-                      </div>
-                    )}
-                  </ReviewBlock>
-                </div>
-                {isLeader && <div className="space-y-2 border-t border-slate-100 pt-3">
-                  {reviewSections.map((section) => (
-                    <label key={section.id} className="flex min-h-12 items-center gap-3 rounded-xl border border-slate-200 px-3 py-2">
-                      <input type="checkbox" checked={reviewedSet.has(section.id)} onChange={(event) => setReviewed((current) => event.target.checked ? [...current, section.id] : current.filter((id) => id !== section.id))} className="h-5 w-5 rounded border-slate-300 text-sky-700" />
-                      <span className="text-sm font-medium text-slate-800">Poslovođa pregledao: {section.label.toLowerCase()}</span>
-                    </label>
-                  ))}
-                </div>}
-              </WorkOrderPanel>
-            )}
 
-            {!loading && details && selected.mobile_status !== 'nije_poslan' && (
+            {!loading && details && (
               <>
-                {(selected.mobile_status === 'dodijeljen' || selected.mobile_status === 'u_tijeku') && (
-                    <WorkOrderPanel title="Radno vrijeme ekipe" icon={<Clock3 className="h-5 w-5" />} tone="sky">
-                      <p className="text-sm text-slate-600">Svi unosi ostaju na ovom radnom nalogu. Svaki dodijeljeni radnik može evidentirati vrijeme bilo kojeg člana ekipe.</p>
-                      <div className="mt-3 space-y-3">
-                        {details.ekipa.map((worker) => {
-                          const timeDraft = teamTimeDrafts[worker.radnik_id] ?? {
-                            vrijemeOd: worker.vrijeme_od?.slice(0, 5) ?? '',
-                            vrijemeDo: worker.vrijeme_do?.slice(0, 5) ?? '',
-                          };
-                          return (
-                          <div key={worker.radnik_id} className="rounded-xl border border-slate-200 p-3">
-                            <p className="font-semibold text-slate-900">{worker.ime} {worker.prezime}</p>
-                            <label className="mt-2 block text-sm text-slate-700">Početak
-                              <input
-                                type="time"
-                                value={timeDraft.vrijemeOd}
-                                onChange={(event) => setTeamTimeDrafts((current) => ({
-                                  ...current,
-                                  [worker.radnik_id]: { ...timeDraft, vrijemeOd: event.target.value },
-                                }))}
-                                className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-base"
-                              />
-                            </label>
-                            <label className="mt-2 block text-sm text-slate-700">Završetak
-                              <input
-                                type="time"
-                                value={timeDraft.vrijemeDo}
-                                onFocus={() => {
-                                  if (!timeDraft.vrijemeDo) {
-                                    setTeamTimeDrafts((current) => ({
-                                      ...current,
-                                      [worker.radnik_id]: { ...timeDraft, vrijemeDo: '16:00' },
-                                    }));
-                                  }
-                                }}
-                                onChange={(event) => setTeamTimeDrafts((current) => ({
-                                  ...current,
-                                  [worker.radnik_id]: { ...timeDraft, vrijemeDo: event.target.value },
-                                }))}
-                                className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-base"
-                              />
-                            </label>
-                            <div className="mt-3">
-                              <Button
-                                variant="secondary"
-                                onClick={() => void runAction(() => saveWorkerTime(worker), `Radno vrijeme za ${worker.ime} ${worker.prezime} spremljeno.`)}
-                                disabled={working || (isLeader && !isReviewed)}
-                              >
-                                <Check className="h-5 w-5" /> Spremi radno vrijeme
-                              </Button>
-                            </div>
-                            {!worker.mobile_started_at ? (
-                              <div className="mt-3">
-                                <Button
-                                  variant="secondary"
-                                  onClick={() => void runAction(() => startMobileWorkerTime(
-                                    selected.id,
-                                    worker.radnik_id,
-                                    isLeader ? reviewed : [],
-                                  ), `Početak vremena za ${worker.ime} ${worker.prezime} spremljen.`)}
-                                  disabled={working || (isLeader && !isReviewed)}
-                                >
-                                  <Clock3 className="h-5 w-5" /> Započni vrijeme
-                                </Button>
-                              </div>
-                            ) : !worker.mobile_finished_at ? (
-                              <div className="mt-3">
-                                <Button
-                                  variant="secondary"
-                                  onClick={() => void runAction(() => finishMobileWorkerTime(selected.id, worker.radnik_id), `Završetak vremena za ${worker.ime} ${worker.prezime} spremljen.`)}
-                                  disabled={working}
-                                >
-                                  <Check className="h-5 w-5" /> Završi vrijeme
-                                </Button>
-                              </div>
-                            ) : (
-                              <p className="mt-3 rounded-lg bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">Vrijeme je završeno.</p>
-                            )}
-                          </div>
-                          );
-                        })}
+                {hasNapomena && (
+                  <section className="overflow-hidden rounded-2xl border-2 border-amber-400 bg-amber-50 shadow-md shadow-amber-100">
+                    <div className="flex items-center gap-3 border-b border-amber-200 bg-amber-100 px-4 py-4">
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white">
+                        <AlertTriangle className="h-6 w-6" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-extrabold uppercase tracking-wider text-amber-800">Važno za ekipu</p>
+                        <h3 className="text-lg font-extrabold text-slate-900">Napomena uz radni nalog</h3>
                       </div>
-                  </WorkOrderPanel>
+                    </div>
+                    <div className="space-y-3 p-4">
+                      <p className="whitespace-pre-wrap text-base font-semibold leading-6 text-slate-900">{details.napomena}</p>
+                      {selected.mobile_status === 'dodijeljen' && (
+                        <CheckField
+                          checked={prep.includes('napomena')}
+                          onChange={(checked) => togglePrep('napomena', checked)}
+                          label="Pročitao/la sam i razumijem napomenu."
+                        />
+                      )}
+                    </div>
+                  </section>
                 )}
 
-                {canEditOrder && (
-                  <div className="space-y-4">
-                    <WorkOrderPanel title="Podaci i izvještaj ekipe" icon={<FileText className="h-5 w-5" />} tone="slate">
-                      <p className="text-sm leading-5 text-slate-600">Svi djelatnici mogu uređivati podatke naloga. Potvrdne elemente i predaju završnog izvještaja vodi poslovođa.</p>
+                {selected.mobile_status === 'dodijeljen' && (
+                  <>
+                    <StepHeader step={1} title="Priprema prije polaska" text="Pregledaj nalog, preuzmi materijal i alat te upiši početne kilometre." />
+
+                    <WorkOrderPanel title="Vozač" icon={<Gauge className="h-5 w-5" />} tone="sky">
+                      <label className="block text-sm font-medium text-slate-700">
+                        Odaberite vozača iz ekipe
+                        <select
+                          value={details.vozacId ?? ''}
+                          disabled={working}
+                          onChange={(event) => {
+                            const radnikId = event.target.value || null;
+                            void runAction(() => setMobileNalogVozac(selected.id, radnikId), 'Vozač je spremljen.');
+                          }}
+                          className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 disabled:bg-slate-100"
+                        >
+                          <option value="">Poslovođa (zadano)</option>
+                          {details.ekipa.map((worker) => (
+                            <option key={worker.radnik_id} value={worker.radnik_id}>{worker.ime} {worker.prezime}</option>
+                          ))}
+                        </select>
+                      </label>
                     </WorkOrderPanel>
 
-                    <WorkOrderPanel title="Kilometri" icon={<Gauge className="h-5 w-5" />} tone="amber">
-                      <div className="space-y-2">
-                      <label className="block text-sm text-slate-600">Početno stanje
-                        <input inputMode="numeric" type="number" min="0" value={report.kmPocetak} disabled={isLeader && report.kmNa} onChange={(event) => setReport((current) => ({ ...current, kmPocetak: event.target.value }))} className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-lg text-slate-900 disabled:bg-slate-100" />
-                      </label>
-                      <label className="block text-sm text-slate-600">Završno stanje
-                        <input inputMode="numeric" type="number" min="0" value={report.kmKraj} disabled={isLeader && report.kmNa} onChange={(event) => setReport((current) => ({ ...current, kmKraj: event.target.value }))} className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-lg text-slate-900 disabled:bg-slate-100" />
-                      </label>
-                      {isLeader && <CheckField checked={report.kmNa} onChange={(checked) => setReport((current) => ({ ...current, kmNa: checked, kmPocetak: checked ? '' : current.kmPocetak, kmKraj: checked ? '' : current.kmKraj }))} label="Kilometri nisu primjenjivi" />}
+                    <WorkOrderPanel title="Radni zadaci" icon={<ListChecks className="h-5 w-5" />} tone="emerald" summary={`${details.zadaci.length} zadataka`}>
+                      {details.zadaci.length ? (
+                        <ul className="space-y-2">
+                          {details.zadaci.map((task) => (
+                            <li key={task.id} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-base font-semibold text-slate-900">{task.naziv}</li>
+                          ))}
+                        </ul>
+                      ) : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Nema upisanih zadataka.</p>}
+                      <div className="flex gap-2">
+                        <input
+                          value={newTask}
+                          onChange={(event) => setNewTask(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault();
+                              void addTask();
+                            }
+                          }}
+                          placeholder="Dodaj radni zadatak"
+                          disabled={working}
+                          className="min-h-12 min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 placeholder:text-slate-400"
+                        />
+                        <button type="button" onClick={() => void addTask()} disabled={working || !newTask.trim()} className="inline-flex min-h-12 w-12 items-center justify-center rounded-xl bg-indigo-600 text-white disabled:opacity-40" aria-label="Dodaj radni zadatak">
+                          <Plus className="h-5 w-5" />
+                        </button>
                       </div>
+                      <CheckField checked={prep.includes('zadaci')} onChange={(checked) => togglePrep('zadaci', checked)} label="Pregledao/la sam radne zadatke." />
                     </WorkOrderPanel>
+
+                    <WorkOrderPanel
+                      title="Materijal"
+                      icon={<Package className="h-5 w-5" />}
+                      tone="amber"
+                      summary={`${materijalStavke.filter((item) => item.uzeto).length} / ${materijalStavke.length} uzeto`}
+                    >
+                      <p className="text-sm text-slate-500">Označi svaki materijal koji si uzeo/la.</p>
+                      <ItemEditor
+                        title="Materijal"
+                        items={materijalStavke}
+                        checkKey="uzeto"
+                        value={newMaterial}
+                        onValue={setNewMaterial}
+                        onAdd={() => void addItem('materijal')}
+                        onToggle={(item) => void toggleItem(item, 'uzeto')}
+                        noneChecked={prep.includes('materijal_na')}
+                        onNone={(checked) => togglePrep('materijal_na', checked)}
+                        showNone={materijalStavke.length === 0}
+                        noneLabel="Materijal nije potreban."
+                        placeholder="Npr. boja bijela 15 l"
+                        working={working}
+                      />
+                    </WorkOrderPanel>
+
+                    <WorkOrderPanel
+                      title="Alat"
+                      icon={<Wrench className="h-5 w-5" />}
+                      tone="sky"
+                      summary={`${alatStavke.filter((item) => item.uzeto).length} / ${alatStavke.length} uzeto`}
+                    >
+                      <p className="text-sm text-slate-500">Označi svaki alat koji si uzeo/la.</p>
+                      <ItemEditor
+                        title="Alat"
+                        items={alatStavke}
+                        checkKey="uzeto"
+                        equipment={details.alati}
+                        value={newTool}
+                        onValue={setNewTool}
+                        onAdd={() => void addItem('alat')}
+                        onAddEquipment={(opremaId) => void addInventoryTool(opremaId)}
+                        onToggle={(item) => void toggleItem(item, 'uzeto')}
+                        noneChecked={prep.includes('alat_na')}
+                        onNone={(checked) => togglePrep('alat_na', checked)}
+                        showNone={alatStavke.length === 0}
+                        noneLabel="Alat nije potreban."
+                        placeholder="Npr. skela, brusilica"
+                        working={working}
+                      />
+                    </WorkOrderPanel>
+
+                    <WorkOrderPanel title="Dokumenti i slike" icon={<FileText className="h-5 w-5" />} tone="slate">
+                      <ReviewBlock title="Prilozi">
+                        {details.dokumenti.length ? details.dokumenti.map((document) => <a key={document.id} href={document.url} target="_blank" rel="noreferrer" className="block min-h-10 py-2 text-sm font-medium text-sky-700 underline">{document.naziv}</a>) : <p className="text-sm text-slate-500">Nema priloženih dokumenata.</p>}
+                        {details.foto.length > 0 && (
+                          <div className="mt-2 grid grid-cols-4 gap-2">
+                            {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.naziv ?? 'Slika naloga'} className="aspect-square w-full rounded-lg object-cover" /></a>)}
+                          </div>
+                        )}
+                      </ReviewBlock>
+                      <CheckField checked={prep.includes('dokumenti')} onChange={(checked) => togglePrep('dokumenti', checked)} label="Pregledao/la sam dokumente i slike." />
+                    </WorkOrderPanel>
+
+                    <WorkOrderPanel title="Početni kilometri" icon={<Gauge className="h-5 w-5" />} tone="amber">
+                      <label className="block text-sm text-slate-600">Stanje brojila pri polasku (km)
+                        <input
+                          inputMode="numeric"
+                          type="number"
+                          min="0"
+                          value={report.kmPocetak}
+                          disabled={report.kmNa}
+                          onChange={(event) => setReport((current) => ({ ...current, kmPocetak: event.target.value }))}
+                          className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-lg text-slate-900 disabled:bg-slate-100"
+                        />
+                      </label>
+                      {isLeader && (
+                        <CheckField
+                          checked={report.kmNa}
+                          onChange={(checked) => setReport((current) => ({ ...current, kmNa: checked, kmPocetak: checked ? '' : current.kmPocetak, kmKraj: checked ? '' : current.kmKraj }))}
+                          label="Kilometri nisu primjenjivi (bez vozila)."
+                        />
+                      )}
+                    </WorkOrderPanel>
+
+                    <WorkOrderPanel title="Započni gradilište" icon={<Play className="h-5 w-5" />} tone="emerald">
+                      <Checklist items={prepChecks} />
+                      {isLeader ? (
+                        <Button onClick={() => void runAction(startSite, 'Gradilište je započeto. Radno vrijeme ekipe teče od sada.')} disabled={working || !prepReady}>
+                          <Play className="h-5 w-5" /> Započni gradilište
+                        </Button>
+                      ) : (
+                        <p className="rounded-xl bg-sky-50 p-3 text-sm text-sky-900">Gradilište započinje poslovođa nakon što je sve preuzeto.</p>
+                      )}
+                    </WorkOrderPanel>
+                  </>
+                )}
+
+                {selected.mobile_status === 'u_tijeku' && (
+                  <>
+                    <StepHeader step={2} title="Rad na gradilištu" text="Za svaki dio odaberi „Potvrđujem” ili „Nije primjenjivo”." />
+                    {!isLeader && (
+                      <p className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm leading-6 text-sky-900">Možeš dopunjavati poslove, fotografije, materijal, alat i strojeve. Potvrde i zaključivanje naloga radi poslovođa.</p>
+                    )}
 
                     <WorkOrderPanel
                       title="Poslovi"
@@ -723,22 +757,19 @@ export function MobileWorkOrdersView() {
                       tone="emerald"
                       summary={`${details.zadaci.filter((task) => task.gotovo).length} / ${details.zadaci.length} obavljeno`}
                     >
-                      <p className="text-sm text-slate-500">Označite posao nakon što ga završite.</p>
+                      <p className="text-sm text-slate-500">Označi posao nakon što ga završiš.</p>
                       <div className="space-y-3">
-                      {details.zadaci.length ? details.zadaci.map((task) => (
-                        <label key={task.id} className={`flex min-h-[5.5rem] items-start gap-4 rounded-2xl border p-4 ${task.gotovo ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200 bg-slate-50/60'}`}>
-                          <input type="checkbox" checked={task.gotovo} onChange={() => void toggleTask(task)} disabled={working} className="mt-0.5 h-7 w-7 shrink-0 rounded-md border-2 border-slate-300 accent-emerald-600" />
-                          <span className="min-w-0 flex-1">
-                            <span className={`block text-base font-semibold leading-6 ${task.gotovo ? 'text-slate-500 line-through' : 'text-slate-900'}`}>{task.naziv}</span>
-                            {task.gotovo_at && <span className="mt-1 block text-sm text-emerald-700">Završeno · {new Date(task.gotovo_at).toLocaleTimeString('hr-HR', { hour: '2-digit', minute: '2-digit' })}</span>}
-                          </span>
-                        </label>
-                      )) : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Nema upisanih poslova.</p>}
-                      {details.gradilisteId && (
-                        <div className="space-y-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 p-4">
-                          <label htmlFor="mobile-new-task" className="block text-sm font-bold text-slate-900">Dodaj posao</label>
+                        {details.zadaci.length ? details.zadaci.map((task) => (
+                          <label key={task.id} className={`flex min-h-[5.5rem] items-start gap-4 rounded-2xl border p-4 ${task.gotovo ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200 bg-slate-50/60'}`}>
+                            <input type="checkbox" checked={task.gotovo} onChange={() => void toggleTask(task)} disabled={working} className="mt-0.5 h-7 w-7 shrink-0 rounded-md border-2 border-slate-300 accent-emerald-600" />
+                            <span className="min-w-0 flex-1">
+                              <span className={`block text-base font-semibold leading-6 ${task.gotovo ? 'text-slate-500 line-through' : 'text-slate-900'}`}>{task.naziv}</span>
+                              {task.gotovo_at && <span className="mt-1 block text-sm text-emerald-700">Završeno · {new Date(task.gotovo_at).toLocaleTimeString('hr-HR', { hour: '2-digit', minute: '2-digit' })}</span>}
+                            </span>
+                          </label>
+                        )) : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Nema upisanih poslova.</p>}
+                        <div className="flex gap-2">
                           <input
-                            id="mobile-new-task"
                             value={newTask}
                             onChange={(event) => setNewTask(event.target.value)}
                             onKeyDown={(event) => {
@@ -747,21 +778,19 @@ export function MobileWorkOrdersView() {
                                 void addTask();
                               }
                             }}
-                            placeholder="Naziv posla"
+                            placeholder="Dodaj posao"
                             disabled={working}
-                            className="min-h-14 w-full rounded-xl border border-slate-300 bg-white px-4 text-base text-slate-900 placeholder:text-slate-400"
+                            className="min-h-12 min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 placeholder:text-slate-400"
                           />
-                          <button type="button" onClick={() => void addTask()} disabled={working || !newTask.trim()} className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-base font-bold text-white active:bg-indigo-700 disabled:opacity-40">
-                            <Plus className="h-5 w-5" /> Dodaj posao
+                          <button type="button" onClick={() => void addTask()} disabled={working || !newTask.trim()} className="inline-flex min-h-12 w-12 items-center justify-center rounded-xl bg-indigo-600 text-white disabled:opacity-40" aria-label="Dodaj posao">
+                            <Plus className="h-5 w-5" />
                           </button>
                         </div>
-                      )}
-                      {isLeader && <CheckField checked={report.tasksConfirmed} onChange={(checked) => setReport((current) => ({ ...current, tasksConfirmed: checked }))} label="Potvrđujem da su pregledani svi zadaci i označeno što je završeno" />}
                       </div>
+                      <SectionConfirm value={potvrdaOf('poslovi')} onChange={(value) => void setPotvrda('poslovi', value)} disabled={working || !isLeader} />
                     </WorkOrderPanel>
 
-                    <WorkOrderPanel title="Fotografije izvedenog rada" icon={<Camera className="h-5 w-5" />} tone="rose">
-                      <div className="space-y-2">
+                    <WorkOrderPanel title="Fotografije izvedenog rada" icon={<Camera className="h-5 w-5" />} tone="rose" summary={`${details.foto.length} fotografija`}>
                       {details.foto.length > 0 && (
                         <div className="grid grid-cols-3 gap-2">
                           {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.naziv ?? 'Fotografija naloga'} className="aspect-square w-full rounded-lg object-cover" /></a>)}
@@ -771,62 +800,65 @@ export function MobileWorkOrdersView() {
                         <Camera className="h-5 w-5" /> Fotografiraj ili odaberi slike
                         <input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(event) => { void uploadPhotos(event.target.files); event.currentTarget.value = ''; }} />
                       </label>
-                      {isLeader && <CheckField checked={report.fotoNa} onChange={(checked) => setReport((current) => ({ ...current, fotoNa: checked }))} label="Fotografija nije primjenjiva" />}
-                      </div>
+                      <SectionConfirm
+                        value={potvrdaOf('foto')}
+                        onChange={(value) => {
+                          if (value === 'da' && details.foto.length === 0) {
+                            setError('Dodaj barem jednu fotografiju ili odaberi „Nije primjenjivo”.');
+                            return;
+                          }
+                          void setPotvrda('foto', value);
+                        }}
+                        disabled={working || !isLeader}
+                      />
                     </WorkOrderPanel>
 
                     <WorkOrderPanel
-                      title="Materijali"
+                      title="Materijal"
                       icon={<Package className="h-5 w-5" />}
                       tone="amber"
-                      summary={`${details.stavke.filter((item) => item.tip === 'materijal' && item.gotovo).length} / ${details.stavke.filter((item) => item.tip === 'materijal').length} za nastavak`}
+                      summary={`${materijalStavke.filter((item) => item.gotovo).length} / ${materijalStavke.length} za nastavak`}
                     >
-                      <p className="text-sm text-slate-500">Označite materijal koji je potreban za nastavak radova.</p>
+                      <p className="text-sm text-slate-500">Dopiši utrošeni materijal i označi što je potrebno za nastavak radova.</p>
                       <ItemEditor
                         title="Materijal"
-                        items={details.stavke.filter((item) => item.tip === 'materijal')}
+                        items={materijalStavke}
                         value={newMaterial}
-                        onValue={(value) => setNewMaterial(value)}
+                        onValue={setNewMaterial}
                         onAdd={() => void addItem('materijal')}
-                        onToggle={toggleItem}
-                        noneChecked={report.materijalNa}
-                        onNone={(checked) => setReport((current) => ({ ...current, materijalNa: checked }))}
-                        showNone={isLeader}
-                        noneLabel="Potvrđujem da dodatni materijal nije potreban"
+                        onToggle={(item) => void toggleItem(item)}
                         placeholder="Npr. boja bijela 15 l"
                         working={working}
                       />
+                      <SectionConfirm value={potvrdaOf('materijal')} onChange={(value) => void setPotvrda('materijal', value)} disabled={working || !isLeader} />
                     </WorkOrderPanel>
 
                     <WorkOrderPanel
-                      title="Alati za ponijeti"
+                      title="Alat"
                       icon={<Wrench className="h-5 w-5" />}
                       tone="sky"
-                      summary={`${details.stavke.filter((item) => item.tip === 'alat' && item.gotovo).length} / ${details.stavke.filter((item) => item.tip === 'alat').length} spremno`}
+                      summary={`${alatStavke.filter((item) => item.gotovo).length} / ${alatStavke.length} za nastavak`}
                     >
-                      <p className="text-sm text-slate-500">Označite alat koji treba ponijeti na gradilište.</p>
+                      <p className="text-sm text-slate-500">Dopiši korišteni alat i označi što je potrebno za nastavak radova.</p>
                       <ItemEditor
                         title="Alat"
-                        items={details.stavke.filter((item) => item.tip === 'alat')}
+                        items={alatStavke}
                         equipment={details.alati}
                         value={newTool}
-                        onValue={(value) => setNewTool(value)}
+                        onValue={setNewTool}
                         onAdd={() => void addItem('alat')}
                         onAddEquipment={(opremaId) => void addInventoryTool(opremaId)}
-                        onToggle={toggleItem}
-                        noneChecked={report.alatNa}
-                        onNone={(checked) => setReport((current) => ({ ...current, alatNa: checked }))}
-                        showNone={isLeader}
-                        noneLabel="Potvrđujem da dodatni alat nije potreban"
+                        onToggle={(item) => void toggleItem(item)}
                         placeholder="Npr. skela, brusilica"
                         working={working}
                       />
+                      <SectionConfirm value={potvrdaOf('alat')} onChange={(value) => void setPotvrda('alat', value)} disabled={working || !isLeader} />
                     </WorkOrderPanel>
 
                     <WorkOrderPanel title="Strojevi i radni sati" icon={<Wrench className="h-5 w-5" />} tone="amber">
                       <ItemEditor
                         title="Strojevi"
-                        items={details.stavke.filter((item) => item.tip === 'stroj')}
+                        items={strojStavke}
                         equipment={details.strojevi}
                         equipmentLabel="stroj"
                         value=""
@@ -834,40 +866,115 @@ export function MobileWorkOrdersView() {
                         onAdd={() => undefined}
                         onAddEquipment={(opremaId) => void addInventoryMachine(opremaId)}
                         onHours={(item, hours) => void setMachineHours(item, hours)}
-                        onToggle={toggleItem}
-                        noneChecked={false}
-                        onNone={() => undefined}
-                        showNone={false}
-                        noneLabel=""
+                        onToggle={(item) => void toggleItem(item)}
                         placeholder=""
                         working={working}
                       />
+                      <SectionConfirm value={potvrdaOf('strojevi')} onChange={(value) => void setPotvrda('strojevi', value)} disabled={working || !isLeader} />
                     </WorkOrderPanel>
 
-                    <Button variant="secondary" onClick={() => void runAction(saveReport, 'Izmjene izvještaja su spremljene.')} disabled={working}>
-                      <Upload className="h-5 w-5" /> Spremi izmjene izvještaja
-                    </Button>
-                    {isLeader && selected.mobile_status === 'u_tijeku' && <WorkOrderPanel title="Potvrda i predaja" icon={<Check className="h-5 w-5" />} tone="emerald">
-                      <CheckField
-                        checked={leaderConfirmed}
-                        onChange={setLeaderConfirmed}
-                        label="Kao poslovođa potvrđujem da sam pregledao napomenu, radna vremena ekipe i završni izvještaj."
-                      />
-                      <div className="space-y-2">
-                        <Button onClick={() => void runAction(async () => { await saveReport(); await submitMobileNalog(selected.id, leaderConfirmed); }, 'Nalog je predan na odobrenje.')} disabled={working || !leaderConfirmed}>
-                          <Check className="h-5 w-5" /> Predaj nalog na odobrenje
-                        </Button>
+                    <StepHeader step={3} title="Završetak dana" text="Potvrdi radno vrijeme, stanje ENC-a i kilometre povratka, zatim zaključi nalog." />
+
+                    <WorkOrderPanel title="Radno vrijeme" icon={<Clock3 className="h-5 w-5" />} tone="sky">
+                      <p className="text-sm text-slate-600">Završetak je unaprijed postavljen na {DEFAULT_KRAJ_RADA}. Ispravi ako je potrebno pa potvrdi.</p>
+                      <div className="space-y-3">
+                        {details.ekipa.map((worker) => {
+                          const timeDraft = teamTimeDrafts[worker.radnik_id] ?? { vrijemeOd: '', vrijemeDo: DEFAULT_KRAJ_RADA };
+                          const locked = !isLeader || potvrde.includes('vrijeme') || working;
+                          return (
+                            <div key={worker.radnik_id} className="rounded-xl border border-slate-200 p-3">
+                              <p className="font-semibold text-slate-900">{worker.ime} {worker.prezime}</p>
+                              <div className="mt-2 grid grid-cols-2 gap-2">
+                                <label className="block text-sm text-slate-700">Početak
+                                  <input
+                                    type="time"
+                                    value={timeDraft.vrijemeOd}
+                                    disabled={locked}
+                                    onChange={(event) => setTeamTimeDrafts((current) => ({ ...current, [worker.radnik_id]: { ...timeDraft, vrijemeOd: event.target.value } }))}
+                                    className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-base disabled:bg-slate-100"
+                                  />
+                                </label>
+                                <label className="block text-sm text-slate-700">Završetak
+                                  <input
+                                    type="time"
+                                    value={timeDraft.vrijemeDo}
+                                    disabled={locked}
+                                    onChange={(event) => setTeamTimeDrafts((current) => ({ ...current, [worker.radnik_id]: { ...timeDraft, vrijemeDo: event.target.value } }))}
+                                    className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-base disabled:bg-slate-100"
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                      <p className="text-xs leading-5 text-slate-500">Prije predaje svi dodijeljeni djelatnici moraju imati završeno vrijeme. Samo poslovođa može potvrditi i predati nalog.</p>
-                    </WorkOrderPanel>}
-                  </div>
+                      {isLeader && (
+                        <CheckField
+                          checked={potvrde.includes('vrijeme')}
+                          onChange={(checked) => void confirmWorkTime(checked)}
+                          label="Potvrđujem radno vrijeme cijele ekipe."
+                        />
+                      )}
+                    </WorkOrderPanel>
+
+                    <WorkOrderPanel title="Stanje ENC-a" icon={<CreditCard className="h-5 w-5" />} tone="slate">
+                      <label className="block text-sm text-slate-600">Stanje ENC uređaja (€)
+                        <input
+                          inputMode="decimal"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={report.encStanje}
+                          disabled={!isLeader || potvrdaOf('enc') !== null || working}
+                          onChange={(event) => setReport((current) => ({ ...current, encStanje: event.target.value }))}
+                          className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-lg text-slate-900 disabled:bg-slate-100"
+                        />
+                      </label>
+                      <SectionConfirm value={potvrdaOf('enc')} onChange={(value) => void confirmEnc(value)} disabled={working || !isLeader} />
+                    </WorkOrderPanel>
+
+                    <WorkOrderPanel title="Kilometri povratka" icon={<Gauge className="h-5 w-5" />} tone="amber">
+                      {report.kmNa ? (
+                        <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">Kilometri su pri polasku označeni kao nisu primjenjivi.</p>
+                      ) : (
+                        <>
+                          <p className="text-sm text-slate-600">Početno stanje: <span className="font-semibold text-slate-900">{report.kmPocetak || '—'} km</span></p>
+                          <label className="block text-sm text-slate-600">Stanje brojila po povratku (km)
+                            <input
+                              inputMode="numeric"
+                              type="number"
+                              min="0"
+                              value={report.kmKraj}
+                              disabled={!isLeader || potvrdaOf('km_kraj') !== null || working}
+                              onChange={(event) => setReport((current) => ({ ...current, kmKraj: event.target.value }))}
+                              className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-lg text-slate-900 disabled:bg-slate-100"
+                            />
+                          </label>
+                          {report.kmPocetak && report.kmKraj && Number(report.kmKraj) >= Number(report.kmPocetak) && (
+                            <p className="text-sm text-slate-600">Prijeđeno: <span className="font-semibold text-slate-900">{Number(report.kmKraj) - Number(report.kmPocetak)} km</span></p>
+                          )}
+                          <SectionConfirm value={potvrdaOf('km_kraj')} onChange={(value) => void confirmKmKraj(value)} disabled={working || !isLeader} />
+                        </>
+                      )}
+                    </WorkOrderPanel>
+
+                    <WorkOrderPanel title="Zaključi radni nalog" icon={<Flag className="h-5 w-5" />} tone="emerald">
+                      <Checklist items={finishChecks} />
+                      {isLeader ? (
+                        <Button
+                          onClick={() => void runAction(() => submitMobileNalog(selected.id, true), 'Radni nalog je zaključen i poslan u ured na odobrenje.')}
+                          disabled={working || !finishReady}
+                        >
+                          <Flag className="h-5 w-5" /> Zaključi radni nalog
+                        </Button>
+                      ) : (
+                        <p className="rounded-xl bg-sky-50 p-3 text-sm text-sky-900">Nalog zaključuje poslovođa.</p>
+                      )}
+                    </WorkOrderPanel>
+                  </>
                 )}
 
-                {!isLeader && selected.mobile_status === 'u_tijeku' && (
-                  <p className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm leading-6 text-sky-900">Možeš uređivati podatke, zadatke, materijal, alat i fotografije. Poslovođa je odgovoran za potvrde i predaju naloga.</p>
-                )}
-
-                {selected.mobile_status === 'predan' && <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-900">Nalog je predan poslovođi i čeka završno odobrenje u uredu.</p>}
+                {selected.mobile_status === 'predan' && <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-900">Nalog je zaključen i čeka završno odobrenje u uredu.</p>}
                 {selected.mobile_status === 'odobren' && <p className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900">Nalog je pregledan i odobren.</p>}
               </>
             )}
@@ -990,10 +1097,11 @@ function ItemEditor({
   onAddEquipment,
   onHours,
   onToggle,
-  noneChecked,
+  checkKey = 'gotovo',
+  noneChecked = false,
   onNone,
-  noneLabel,
-  showNone,
+  noneLabel = '',
+  showNone = false,
   placeholder,
   working,
 }: {
@@ -1007,10 +1115,11 @@ function ItemEditor({
   onAddEquipment?: (opremaId: string) => void;
   onHours?: (item: NalogStavka, hours: number | null) => void;
   onToggle: (item: NalogStavka) => void;
-  noneChecked: boolean;
-  onNone: (checked: boolean) => void;
-  noneLabel: string;
-  showNone: boolean;
+  checkKey?: 'gotovo' | 'uzeto';
+  noneChecked?: boolean;
+  onNone?: (checked: boolean) => void;
+  noneLabel?: string;
+  showNone?: boolean;
   placeholder: string;
   working: boolean;
 }) {
@@ -1022,12 +1131,14 @@ function ItemEditor({
         const equipmentDetails = linkedEquipment
           ? `${linkedEquipment.gradilista?.naziv ?? 'Skladište'}${linkedEquipment.inventarski_broj ? ` · ${linkedEquipment.inventarski_broj}` : ''}`
           : null;
+        const checked = Boolean(item[checkKey]);
         return (
-          <div key={item.id} className={`flex min-h-[5.5rem] items-start gap-4 rounded-2xl border p-4 ${item.gotovo ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200 bg-slate-50/60'}`}>
+          <div key={item.id} className={`flex min-h-[5.5rem] items-start gap-4 rounded-2xl border p-4 ${checked ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200 bg-slate-50/60'}`}>
             <label className="flex min-w-0 flex-1 items-start gap-4">
-              <input type="checkbox" checked={item.gotovo} onChange={() => void onToggle(item)} disabled={working} className="mt-0.5 h-7 w-7 shrink-0 rounded-md border-2 border-slate-300 accent-emerald-600" />
+              <input type="checkbox" checked={checked} onChange={() => void onToggle(item)} disabled={working} className="mt-0.5 h-7 w-7 shrink-0 rounded-md border-2 border-slate-300 accent-emerald-600" />
               <span className="min-w-0 flex-1">
-                <span className={`block text-base font-semibold leading-6 ${item.gotovo ? 'text-slate-500 line-through' : 'text-slate-900'}`}>{item.naziv}</span>
+                <span className={`block text-base font-semibold leading-6 ${checked && checkKey === 'gotovo' ? 'text-slate-500 line-through' : 'text-slate-900'}`}>{item.naziv}</span>
+                {checked && checkKey === 'uzeto' && <span className="mt-1 block text-sm font-medium text-emerald-700">Uzeto</span>}
                 {equipmentDetails && <span className="mt-1 block text-sm text-slate-500">{equipmentDetails}</span>}
               </span>
             </label>
@@ -1106,7 +1217,70 @@ function ItemEditor({
           </button>
         </div>
       )}
-      {showNone && <CheckField checked={noneChecked} onChange={onNone} label={noneLabel} />}
+      {showNone && onNone && <CheckField checked={noneChecked} onChange={onNone} label={noneLabel} />}
+    </div>
+  );
+}
+
+function SectionConfirm({
+  value,
+  onChange,
+  disabled,
+  confirmLabel = 'Potvrđujem',
+  naLabel = 'Nije primjenjivo',
+}: {
+  value: 'da' | 'na' | null;
+  onChange: (value: 'da' | 'na' | null) => void;
+  disabled?: boolean;
+  confirmLabel?: string;
+  naLabel?: string;
+}) {
+  const base = 'inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border-2 px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60';
+  return (
+    <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(value === 'da' ? null : 'da')}
+        className={`${base} ${value === 'da' ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
+      >
+        <Check className="h-4 w-4" /> {confirmLabel}
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(value === 'na' ? null : 'na')}
+        className={`${base} ${value === 'na' ? 'border-slate-600 bg-slate-600 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
+      >
+        {naLabel}
+      </button>
+    </div>
+  );
+}
+
+function Checklist({ items }: { items: Array<{ label: string; ok: boolean }> }) {
+  return (
+    <ul className="space-y-2">
+      {items.map((item) => (
+        <li key={item.label} className="flex items-center gap-3 text-sm">
+          <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${item.ok ? 'bg-emerald-600 text-white' : 'border-2 border-slate-300 bg-white'}`}>
+            {item.ok && <Check className="h-4 w-4" />}
+          </span>
+          <span className={item.ok ? 'text-slate-500' : 'font-semibold text-slate-800'}>{item.label}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function StepHeader({ step, title, text }: { step: number; title: string; text: string }) {
+  return (
+    <div className="flex items-start gap-3 px-1 pt-2">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-900 text-sm font-bold text-white">{step}</span>
+      <div>
+        <h3 className="text-lg font-extrabold text-slate-900">{title}</h3>
+        <p className="text-sm text-slate-600">{text}</p>
+      </div>
     </div>
   );
 }

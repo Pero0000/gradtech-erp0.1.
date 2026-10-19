@@ -8,6 +8,10 @@ import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import type { GradilisteStavka } from '@/lib/api';
 import {
   setNalogZadaci,
+  addNalogZadatak,
+  deleteGradilisteZadatak,
+  fetchNalogZadaci,
+  fetchNalogBrojevi,
   setNalogStavke as saveNalogStavke,
   addNalogStavke,
   setRasporedGradilistePotvrdeno,
@@ -52,6 +56,7 @@ interface NalogForm {
   fresh?: boolean;
   nalogId?: string;
   zakljucen_at: string | null;
+  bez_troska: boolean;
   assignmentId: string;
   broj: string;
   gradiliste_id: string;
@@ -63,6 +68,7 @@ interface NalogForm {
   radnik_ids: string[];
   radnik_options: string[];
   zadatak_ids: string[];
+  novi_zadaci: string[];
   stavka_ids: string[];
   nove_stavke: { tip: 'materijal' | 'alat'; naziv: string }[];
 }
@@ -198,6 +204,7 @@ export function RasporedView() {
   const [nalogStavkeLoading, setNalogStavkeLoading] = useState(false);
   const [noviMaterijal, setNoviMaterijal] = useState('');
   const [noviAlat, setNoviAlat] = useState('');
+  const [noviZadatak, setNoviZadatak] = useState('');
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [lockedNalozi, setLockedNalozi] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useState<Category>('aktivna');
@@ -206,20 +213,25 @@ export function RasporedView() {
   const [nalogZadaci, setNalogZadaciList] = useState<GradilisteZadatak[]>([]);
   const formGradilisteId = nalogForm?.gradiliste_id ?? '';
   const formNalogId = nalogForm?.nalogId;
-  const visibleZadaci = nalogZadaci.filter(
-    (z) => (!z.gotovo || z.nalog_id === formNalogId) && (!z.nalog_id || z.nalog_id === formNalogId),
-  );
+  const [zadatakNalozi, setZadatakNalozi] = useState<Record<string, string>>({});
+  // Otvoreni zadaci vidljivi su i kad ih drži drugi (nezavršeni) nalog, da se mogu prebaciti na ovaj.
+  const visibleZadaci = nalogZadaci.filter((z) => !z.gotovo || z.nalog_id === formNalogId);
   const visibleStavke = nalogStavke.filter((item) => !item.gotovo || item.nalog_id === formNalogId);
 
   useEffect(() => {
-    if (!formGradilisteId) {
+    if (!formGradilisteId && !formNalogId) {
       setNalogZadaciList([]);
       return;
     }
     let cancelled = false;
-    fetchGradilisteZadaci(formGradilisteId)
-      .then((list) => {
-        if (!cancelled) setNalogZadaciList(list);
+    // Nalog bez gradilišta (popis "Ostalo") ima samo zadatke upisane izravno na nalog.
+    (formGradilisteId ? fetchGradilisteZadaci(formGradilisteId) : fetchNalogZadaci(formNalogId as string))
+      .then(async (list) => {
+        if (cancelled) return;
+        setNalogZadaciList(list);
+        const otherIds = [...new Set(list.map((z) => z.nalog_id).filter((id): id is string => Boolean(id) && id !== formNalogId))];
+        const brojevi = await fetchNalogBrojevi(otherIds).catch(() => ({} as Record<string, string>));
+        if (!cancelled) setZadatakNalozi(brojevi);
       })
       .catch(() => {
         if (!cancelled) setNalogZadaciList([]);
@@ -227,7 +239,7 @@ export function RasporedView() {
     return () => {
       cancelled = true;
     };
-  }, [formGradilisteId]);
+  }, [formGradilisteId, formNalogId]);
 
   useEffect(() => {
     if (!formGradilisteId) {
@@ -388,7 +400,12 @@ export function RasporedView() {
     }
   };
 
-  const openNalog = async (assignmentId: string, g: Gradiliste, opis: string, radnikIds: string[]) => {
+  const openNalog = async (
+    assignmentId: string,
+    target: { gradiliste_id: string | null; naziv: string; bez_troska?: boolean },
+    opis: string,
+    radnikIds: string[],
+  ) => {
     setError(null);
     try {
       let broj: string;
@@ -399,13 +416,14 @@ export function RasporedView() {
       }
       const created = await createNalogFromRaspored(assignmentId, {
         broj,
-        gradiliste_id: g.id,
-        naslov: `${g.naziv} – ${new Date(selectedDate + 'T00:00:00').toLocaleDateString('hr-HR')}`,
+        gradiliste_id: target.gradiliste_id,
+        naslov: `${target.naziv} – ${new Date(selectedDate + 'T00:00:00').toLocaleDateString('hr-HR')}`,
         opis: opis || null,
         status: 'otvoren',
         prioritet: 'srednji',
         rok: selectedDate,
         radnik_ids: radnikIds,
+        bez_troska: target.bez_troska,
       });
       await loadDay(selectedDate);
       await openExistingNalog(assignmentId, created.id);
@@ -428,12 +446,14 @@ export function RasporedView() {
         .filter((w) => w.vozilo_id === siteAssignments.find((s) => s.id === assignmentId)?.vozilo_id)
         .map((w) => w.radnik_id);
       const isDraft = !nalog.zakljucen_at;
-      const linkedZadaci = nalog.gradiliste_id
-        ? (await fetchGradilisteZadaci(nalog.gradiliste_id).catch(() => [] as GradilisteZadatak[])).filter((z) => z.nalog_id === nalogId)
-        : [];
+      const linkedZadaci = (nalog.gradiliste_id
+        ? (await fetchGradilisteZadaci(nalog.gradiliste_id).catch(() => [] as GradilisteZadatak[]))
+        : await fetchNalogZadaci(nalogId).catch(() => [] as GradilisteZadatak[])
+      ).filter((z) => z.nalog_id === nalogId);
       setNalogForm({
         nalogId,
         zakljucen_at: nalog.zakljucen_at ?? null,
+        bez_troska: Boolean(nalog.bez_troska),
         assignmentId,
         broj: nalog.broj,
         gradiliste_id: nalog.gradiliste_id ?? '',
@@ -445,11 +465,13 @@ export function RasporedView() {
         radnik_ids: isDraft ? [...new Set([...savedIds, ...carIds])] : savedIds,
         radnik_options: [...new Set([...savedIds, ...carIds])],
         zadatak_ids: linkedZadaci.map((z) => z.id),
+        novi_zadaci: [],
         stavka_ids: [],
         nove_stavke: [],
       });
       setNoviMaterijal('');
       setNoviAlat('');
+      setNoviZadatak('');
     } catch (e) {
       setError(errMsg(e, 'Greška pri učitavanju naloga'));
     }
@@ -460,6 +482,14 @@ export function RasporedView() {
     setConfirmDiscard(false);
     setNoviMaterijal('');
     setNoviAlat('');
+    setNoviZadatak('');
+  };
+
+  const addDraftZadatak = () => {
+    const naziv = noviZadatak.trim();
+    if (!naziv) return;
+    setNalogForm((current) => current ? { ...current, novi_zadaci: [...current.novi_zadaci, naziv] } : current);
+    setNoviZadatak('');
   };
 
   const addDraftStavka = (tip: 'materijal' | 'alat') => {
@@ -506,9 +536,19 @@ export function RasporedView() {
       const validIds = nalogZadaci.filter((z) => nalogForm.zadatak_ids.includes(z.id)).map((z) => z.id);
       try {
         await setNalogZadaci(nalogId, nalogForm.gradiliste_id || null, validIds);
+        // Odznačeni zadatak bez gradilišta nema kamo vratiti pa se briše.
+        for (const z of nalogZadaci) {
+          if (!z.gradiliste_id && z.nalog_id === nalogId && !nalogForm.zadatak_ids.includes(z.id)) {
+            await deleteGradilisteZadatak(z.id);
+          }
+        }
+        for (const naziv of [...nalogForm.novi_zadaci, noviZadatak.trim()].filter(Boolean)) {
+          await addNalogZadatak(nalogId, nalogForm.gradiliste_id || null, naziv);
+        }
+        setNalogForm((current) => current ? { ...current, novi_zadaci: [] } : current);
       } catch (reason) {
         const message = errMsg(reason, 'Zadaci nisu spremljeni.');
-        setError(`${message} Pokreni migraciju 20261015220000_zadaci_nalog_veza.sql.`);
+        setError(message.includes('migracij') ? message : `${message} Pokreni migracije 20261015220000_zadaci_nalog_veza.sql i 20261019110000_zadaci_bez_gradilista.sql.`);
         if (lock === 'lock') throw new Error(message);
       }
       await saveNalogStavke(
@@ -947,28 +987,6 @@ export function RasporedView() {
                                     }}
                                     className={`min-w-0 flex-1 bg-transparent text-[13px] font-medium outline-none focus:ring-1 focus:ring-sky-500 ${a.iz_ostalo ? 'text-pink-500' : 'text-slate-900'}`}
                                   />
-                                  {a.iz_ostalo && (
-                                    <label
-                                      title={a.gradiliste_potvrdeno
-                                        ? isVehicleOrderLocked(vozilo.id) || siteAssignments.some((other) => other.id !== a.id && other.vozilo_id === vozilo.id && other.gradiliste_potvrdeno)
-                                          ? 'Makni ovu potvrdu; vozilo ostaje zaključano dok postoji druga potvrda ili zaključen nalog'
-                                          : 'Odznači za otključavanje vozila'
-                                        : vehicleLocked
-                                          ? 'Vozilo je zaključano zbog druge potvrde ili zaključenog naloga'
-                                          : 'Potvrdi ovu stavku i zaključaj vozilo'}
-                                      className={`flex flex-shrink-0 items-center gap-0.5 rounded px-1 text-[10px] ${vehicleLocked && !a.gradiliste_potvrdeno ? 'cursor-not-allowed text-slate-300' : 'cursor-pointer text-slate-600'}`}
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={Boolean(a.gradiliste_potvrdeno)}
-                                        disabled={vehicleLocked && !a.gradiliste_potvrdeno}
-                                        onChange={(event) => toggleSiteConfirmation(a, event.target.checked)}
-                                        aria-label={`Potvrdi stavku Ostalo ${a.tekst ?? ''}`}
-                                        className="h-3.5 w-3.5 accent-emerald-600"
-                                      />
-                                      Potvrdi
-                                    </label>
-                                  )}
                                 </div>
                               ) : (
                                 <span className="min-w-0 flex-1 break-words text-[13px] font-medium leading-tight text-blue-800">{g?.naziv ?? 'Nepoznato gradilište'}</span>
@@ -983,34 +1001,39 @@ export function RasporedView() {
                               >
                                 <X className="h-3.5 w-3.5" />
                               </button>
-                              {!isText && g && (
-                                <>
-                                  {a.gradiliste_potvrdeno && !a.iz_ostalo && (
-                                    <label
-                                      title="Ukloni ranije spremljenu potvrdu gradilišta"
-                                      className="flex flex-shrink-0 cursor-pointer items-center gap-0.5 rounded px-1 text-[10px] text-amber-700"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked
-                                        onChange={() => toggleSiteConfirmation(a, false)}
-                                        aria-label={`Ukloni staru potvrdu za gradilište ${g.naziv}`}
-                                        className="h-3.5 w-3.5 accent-amber-600"
-                                      />
-                                      Ukloni staru potvrdu
-                                    </label>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => void (a.nalog_id ? openExistingNalog(a.id, a.nalog_id) : openNalog(a.id, g, [vozilo.registracija, carTime].filter(Boolean).join(', '), carWorkers.map((w) => w.radnik_id)))}
-                                    title={nalogLocked ? 'Zaključen radni nalog – otvori' : hasNalog ? 'Nacrt radnog naloga – otvori' : 'Kreiraj radni nalog'}
-                                    aria-label={hasNalog ? 'Otvori radni nalog' : 'Kreiraj radni nalog'}
-                                    className={`flex flex-shrink-0 items-center gap-0.5 rounded px-1 text-[10px] font-semibold ${nalogLocked ? 'bg-emerald-500 text-white' : hasNalog ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-600 hover:bg-sky-100 hover:text-sky-800'}`}
-                                  >
-                                    {nalogLocked ? <Check className="h-3 w-3" /> : <ClipboardList className="h-3 w-3" />}
-                                    RN
-                                  </button>
-                                </>
+                              {a.gradiliste_potvrdeno && (g || a.iz_ostalo) && (
+                                <label
+                                  title={a.iz_ostalo ? 'Ukloni ranije spremljenu potvrdu stavke Ostalo' : 'Ukloni ranije spremljenu potvrdu gradilišta'}
+                                  className="flex flex-shrink-0 cursor-pointer items-center gap-0.5 rounded px-1 text-[10px] text-amber-700"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked
+                                    onChange={() => toggleSiteConfirmation(a, false)}
+                                    aria-label={`Ukloni staru potvrdu za ${g?.naziv ?? a.tekst ?? 'stavku'}`}
+                                    className="h-3.5 w-3.5 accent-amber-600"
+                                  />
+                                  Ukloni staru potvrdu
+                                </label>
+                              )}
+                              {(g || a.iz_ostalo) && (
+                                <button
+                                  type="button"
+                                  onClick={() => void (a.nalog_id
+                                    ? openExistingNalog(a.id, a.nalog_id)
+                                    : openNalog(
+                                      a.id,
+                                      g ? { gradiliste_id: g.id, naziv: g.naziv } : { gradiliste_id: null, naziv: a.tekst ?? 'Ostalo', bez_troska: true },
+                                      [vozilo.registracija, carTime].filter(Boolean).join(', '),
+                                      carWorkers.map((w) => w.radnik_id),
+                                    ))}
+                                  title={nalogLocked ? 'Zaključen radni nalog – otvori' : hasNalog ? 'Nacrt radnog naloga – otvori' : a.iz_ostalo ? 'Kreiraj radni nalog (ne ulazi u trošak)' : 'Kreiraj radni nalog'}
+                                  aria-label={hasNalog ? 'Otvori radni nalog' : 'Kreiraj radni nalog'}
+                                  className={`flex flex-shrink-0 items-center gap-0.5 rounded px-1 text-[10px] font-semibold ${nalogLocked ? 'bg-emerald-500 text-white' : hasNalog ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-600 hover:bg-sky-100 hover:text-sky-800'}`}
+                                >
+                                  {nalogLocked ? <Check className="h-3 w-3" /> : <ClipboardList className="h-3 w-3" />}
+                                  RN
+                                </button>
                               )}
                             </div>
                           </div>
@@ -1288,13 +1311,19 @@ export function RasporedView() {
             <Field label="Naslov *">
               <TextInput value={nalogForm.naslov} onChange={(e) => setNalogForm({ ...nalogForm, naslov: e.target.value })} />
             </Field>
-            <Field label="Gradilište">
-              <Select value={nalogForm.gradiliste_id} onChange={(e) => setNalogForm({ ...nalogForm, gradiliste_id: e.target.value })}>
-                {gradilista.map((g) => (
-                  <option key={g.id} value={g.id}>{g.naziv}</option>
-                ))}
-              </Select>
-            </Field>
+            {nalogForm.bez_troska ? (
+              <p className="rounded-lg border border-pink-200 bg-pink-50 px-3 py-2 text-xs text-pink-700">
+                Nalog s popisa Ostalo – sati radnika bilježe se u radno vrijeme, ali ništa ne ulazi u trošak.
+              </p>
+            ) : (
+              <Field label="Gradilište">
+                <Select value={nalogForm.gradiliste_id} onChange={(e) => setNalogForm({ ...nalogForm, gradiliste_id: e.target.value })}>
+                  {gradilista.map((g) => (
+                    <option key={g.id} value={g.id}>{g.naziv}</option>
+                  ))}
+                </Select>
+              </Field>
+            )}
             <Field label="Opis">
               <Textarea rows={3} value={nalogForm.opis} onChange={(e) => setNalogForm({ ...nalogForm, opis: e.target.value })} placeholder="Detaljan opis zadatka…" />
             </Field>
@@ -1324,7 +1353,7 @@ export function RasporedView() {
             <div>
               <p className="mb-2 text-sm font-medium text-slate-700">Radni zadaci za ovaj nalog</p>
               {visibleZadaci.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Nema otvorenih radnih zadataka za ovo gradilište.</p>
+                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">{nalogForm.gradiliste_id ? 'Nema otvorenih radnih zadataka za ovo gradilište.' : 'Upiši radne zadatke za ovaj nalog.'}</p>
               ) : (
                 <div className="max-h-40 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
                   {visibleZadaci.map((z) => (
@@ -1343,18 +1372,68 @@ export function RasporedView() {
                         className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                       />
                       <span className="flex-1 text-sm text-slate-700">{z.naziv}</span>
+                      {z.nalog_id && z.nalog_id !== formNalogId && (
+                        <span className="text-xs text-amber-700" title="Označavanjem se zadatak prebacuje na ovaj nalog">
+                          Na nalogu {zadatakNalozi[z.nalog_id] ?? 'drugom'}
+                        </span>
+                      )}
                       {z.rok && <span className="text-xs text-slate-400">{new Date(z.rok + 'T00:00:00').toLocaleDateString('hr-HR')}</span>}
                     </label>
                   ))}
                 </div>
               )}
+              <div className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                  <ClipboardList className="h-3.5 w-3.5 text-slate-500" /> Novi radni zadatak
+                </p>
+                {nalogForm.novi_zadaci.length > 0 && (
+                  <div className="space-y-1.5">
+                    {nalogForm.novi_zadaci.map((naziv, index) => (
+                      <div key={`zadatak-${index}`} className="flex min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs">
+                        <span className="min-w-0 flex-1 break-words text-slate-700">{naziv}</span>
+                        <button
+                          type="button"
+                          onClick={() => setNalogForm((current) => current ? { ...current, novi_zadaci: current.novi_zadaci.filter((_, itemIndex) => itemIndex !== index) } : current)}
+                          className="flex-shrink-0 text-slate-400 hover:text-red-600"
+                          aria-label={`Ukloni ${naziv}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex min-w-0 gap-2">
+                  <input
+                    value={noviZadatak}
+                    onChange={(event) => setNoviZadatak(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        addDraftZadatak();
+                      }
+                    }}
+                    placeholder="Npr. bojanje hodnika 1. kat"
+                    className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={addDraftZadatak}
+                    disabled={!noviZadatak.trim()}
+                    className="inline-flex flex-shrink-0 items-center justify-center rounded-lg bg-sky-600 px-2.5 text-white hover:bg-sky-700 disabled:opacity-40"
+                    aria-label="Dodaj radni zadatak"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
             </div>
             <div>
               <p className="mb-2 text-sm font-medium text-slate-700">Materijal i alat za ovaj nalog</p>
               {nalogStavkeLoading ? (
                 <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Učitavanje materijala i alata…</p>
               ) : visibleStavke.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Nema otvorenog materijala ni alata za ovo gradilište.</p>
+                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">{nalogForm.bez_troska ? 'Dodaj materijal i alat potreban za ovaj nalog.' : 'Nema otvorenog materijala ni alata za ovo gradilište.'}</p>
               ) : (
                 <div className="max-h-48 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
                   {visibleStavke.map((item) => (

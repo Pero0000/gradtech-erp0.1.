@@ -305,6 +305,7 @@ export interface DnevniRasporedRadnik {
   zakljucen_at?: string | null;
   mobile_status?: MobileNalogStatus;
   teren?: boolean;
+  bez_troska?: boolean;
   poslovodja_id?: string | null;
   vozac_id?: string | null;
                                                                                                                                                                             rok: string | null;
@@ -329,7 +330,7 @@ zadatak_id?: string | null;
 
                                                                                                                                                                                                 export interface GradilisteZadatak {
   id: string;
-  gradiliste_id: string;
+  gradiliste_id: string | null;
   naziv: string;
   gotovo: boolean;
   gotovo_at: string | null;

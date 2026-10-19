@@ -914,16 +914,35 @@ export async function fetchRadniNalozi(): Promise<RadniNalog[]> {
       `
       *,
       gradilista:gradiliste_id ( id, naziv ),
-      radnici:radni_nalozi_radnici ( radnik:radnik_id ( * ) )
+      radnici:radni_nalozi_radnici ( radnik_id, radnik:radnik_id ( * ) )
     `,
     )
     .order('datum_kreiranja', { ascending: false });
   if (error) throw error;
 
-  return (data ?? []).map((n: any) => ({
+  const rows = (data ?? []) as any[];
+  const missing = rows
+    .filter((n) => (n.radnici ?? []).some((rr: any) => !rr.radnik))
+    .map((n) => n.id as string);
+  const imena = await fetchNalogRadniciImena(missing);
+  return rows.map((n: any) => ({
     ...n,
-    radnici: (n.radnici ?? []).map((rr: any) => rr.radnik).filter(Boolean),
+    radnici: (n.radnici ?? [])
+      .map((rr: any) => rr.radnik ?? imena.get(rr.radnik_id) ?? null)
+      .filter(Boolean),
   }));
+}
+
+// Bez prava na modul Radnici join na tablicu radnici vraća null; imena se tada dohvaćaju posebno.
+async function fetchNalogRadniciImena(nalogIds: string[]): Promise<Map<string, Radnik>> {
+  const result = new Map<string, Radnik>();
+  if (nalogIds.length === 0) return result;
+  const { data, error } = await supabase.rpc('get_nalog_radnici_imena', { p_nalog_ids: nalogIds });
+  if (error) return result;
+  for (const r of (data ?? []) as { radnik_id: string; ime: string; prezime: string }[]) {
+    result.set(r.radnik_id, { id: r.radnik_id, ime: r.ime, prezime: r.prezime, uloga: '' } as Radnik);
+  }
+  return result;
 }
 
 export async function generateNalogBroj(): Promise<string> {
@@ -1634,7 +1653,15 @@ export async function fetchNalogRadnikVrijeme(nalogId: string): Promise<NalogRad
     .select('radnik_id, vrijeme_od, vrijeme_do, radnik:radnik_id ( id, ime, prezime )')
     .eq('nalog_id', nalogId);
   if (error) throw error;
-  return (data ?? []) as unknown as NalogRadnikVrijeme[];
+  const rows = (data ?? []) as unknown as NalogRadnikVrijeme[];
+  if (rows.some((r) => !r.radnik)) {
+    const imena = await fetchNalogRadniciImena([nalogId]);
+    return rows.map((r) => {
+      const ime = imena.get(r.radnik_id);
+      return r.radnik || !ime ? r : { ...r, radnik: { id: ime.id, ime: ime.ime, prezime: ime.prezime } };
+    });
+  }
+  return rows;
 }
 
 export async function saveNalogRadnikVrijeme(nalogId: string, radnikId: string, od: string | null, doo: string | null) {

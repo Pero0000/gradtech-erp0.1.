@@ -196,6 +196,11 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
     setModalOpen(true);
   };
 
+  const radnikOptions = [
+    ...radnici,
+    ...(editing?.radnici ?? []).filter((r) => !radnici.some((x) => x.id === r.id)),
+  ];
+
   const toggleRadnik = (id: string) => {
     setForm((f) => ({
       ...f,
@@ -656,13 +661,13 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
           <div>
             <p className="mb-2 text-sm font-medium text-slate-700">Dodijeljeni radnici</p>
             <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
-              {radnici.length === 0 ? (
+              {radnikOptions.length === 0 ? (
                 <div className="flex items-center gap-2 px-3 py-2 text-sm text-slate-400">
                   <AlertCircle className="h-4 w-4" />
                   Nema radnika. Dodajte radnike prvo.
                 </div>
               ) : (
-                radnici.map((r) => (
+                radnikOptions.map((r) => (
                   <label
                     key={r.id}
                     className="flex items-center gap-3 px-3 py-2 hover:bg-slate-50 cursor-pointer"
@@ -674,7 +679,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                       className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                     />
                     <span className="text-sm text-slate-700">
-                      {r.ime} {r.prezime} <span className="text-slate-400">— {r.uloga}</span>
+                      {r.ime} {r.prezime}{r.uloga && <span className="text-slate-400"> — {r.uloga}</span>}
                     </span>
                   </label>
                 ))

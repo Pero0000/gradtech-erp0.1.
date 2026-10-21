@@ -1,4 +1,4 @@
-﻿import { supabase } from './supabase';
+import { supabase } from './supabase';
 import { nocniInterval } from './postavke';
 import { minuteSmjene, nocniIzNapomene, type ObracunPrava } from './obracunSati';
 import { requireCompany } from './company';
@@ -1923,6 +1923,7 @@ export interface NalogStavka {
   uzeto?: boolean;
   oprema_id?: string | null;
   sati?: number | null;
+  created_at?: string;
 }
 
 export async function fetchNalogStavke(nalogId: string): Promise<NalogStavka[]> {
@@ -2032,6 +2033,7 @@ export interface GradilisteStavka {
   izvor_id?: string | null;
   oprema_id?: string | null;
   sati?: number | null;
+  created_at?: string;
 }
 
 export async function fetchGradilisteStavke(gradilisteId: string): Promise<GradilisteStavka[]> {

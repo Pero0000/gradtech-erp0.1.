@@ -599,6 +599,15 @@ export function MobileWorkOrdersView() {
   const selectedPhotoQueue = photoQueue.filter((photo) => photo.nalogId === selectedId);
   const materijalStavke = details?.stavke.filter((item) => item.tip === 'materijal') ?? [];
   const alatStavke = details?.stavke.filter((item) => item.tip === 'alat') ?? [];
+  // Nakon pokretanja gradilišta prikazuju se samo stavke upisane za nastavak radova.
+  const siteStartedAt = [selected?.mobile_started_at, ...(details?.ekipa ?? []).map((worker) => worker.mobile_started_at)]
+    .filter((value): value is string => Boolean(value))
+    .sort()[0] ?? null;
+  const zaNastavak = (item: NalogStavka) => Boolean(siteStartedAt && item.created_at && item.created_at >= siteStartedAt);
+  const materijalZaNastavak = materijalStavke.filter(zaNastavak);
+  const alatZaNastavak = alatStavke.filter(zaNastavak);
+  // Prije pokretanja gradilišta ostaje samo alat iz popisa opreme.
+  const alatIzOpreme = alatStavke.filter((item) => Boolean(item.oprema_id));
   const strojStavke = details?.stavke.filter((item) => item.tip === 'stroj') ?? [];
   const hasNapomena = Boolean(details?.napomena?.trim());
   const radniZadaci = details?.zadaci.filter((task) => zadatakVrsta(task) === 'zadatak') ?? [];
@@ -614,7 +623,7 @@ export function MobileWorkOrdersView() {
     },
     {
       label: 'Alat preuzet',
-      ok: alatStavke.length ? alatStavke.every((item) => item.uzeto) : prep.includes('alat_na'),
+      ok: alatIzOpreme.length ? alatIzOpreme.every((item) => item.uzeto) : prep.includes('alat_na'),
     },
     { label: 'Dokumenti pregledani', ok: prep.includes('dokumenti') },
     {
@@ -789,6 +798,7 @@ export function MobileWorkOrdersView() {
                         value={newMaterial}
                         onValue={setNewMaterial}
                         onAdd={() => void addItem('materijal')}
+                        allowAdd={false}
                         onToggle={(item) => void toggleItem(item, 'uzeto')}
                         noneChecked={prep.includes('materijal_na')}
                         onNone={(checked) => togglePrep('materijal_na', checked)}
@@ -803,22 +813,23 @@ export function MobileWorkOrdersView() {
                       title="Alat"
                       icon={<Wrench className="h-5 w-5" />}
                       tone="sky"
-                      summary={`${alatStavke.filter((item) => item.uzeto).length} / ${alatStavke.length} uzeto`}
+                      summary={`${alatIzOpreme.filter((item) => item.uzeto).length} / ${alatIzOpreme.length} uzeto`}
                     >
-                      <p className="text-sm text-slate-500">Označi svaki alat koji si uzeo/la.</p>
+                      <p className="text-sm text-slate-500">Alat iz popisa opreme. Označi svaki alat koji si uzeo/la.</p>
                       <ItemEditor
                         title="Alat"
-                        items={alatStavke}
+                        items={alatIzOpreme}
                         checkKey="uzeto"
                         equipment={details.alati}
                         value={newTool}
                         onValue={setNewTool}
                         onAdd={() => void addItem('alat')}
                         onAddEquipment={(opremaId) => void addInventoryTool(opremaId)}
+                        allowAdd={false}
                         onToggle={(item) => void toggleItem(item, 'uzeto')}
                         noneChecked={prep.includes('alat_na')}
                         onNone={(checked) => togglePrep('alat_na', checked)}
-                        showNone={alatStavke.length === 0}
+                        showNone={alatIzOpreme.length === 0}
                         noneLabel="Alat nije potreban."
                         placeholder="Npr. skela, brusilica"
                         working={working}
@@ -991,12 +1002,12 @@ export function MobileWorkOrdersView() {
                       title="Materijal"
                       icon={<Package className="h-5 w-5" />}
                       tone="amber"
-                      summary={`${materijalStavke.filter((item) => item.gotovo).length} / ${materijalStavke.length} za nastavak`}
+                      summary={`${materijalZaNastavak.length} za nastavak`}
                     >
                       <p className="text-sm text-slate-500">upiši što je potrebno za nastavak radova</p>
                       <ItemEditor
                         title="Materijal"
-                        items={materijalStavke}
+                        items={materijalZaNastavak}
                         value={newMaterial}
                         onValue={setNewMaterial}
                         onAdd={() => void addItem('materijal')}
@@ -1011,17 +1022,15 @@ export function MobileWorkOrdersView() {
                       title="Alat"
                       icon={<Wrench className="h-5 w-5" />}
                       tone="sky"
-                      summary={`${alatStavke.filter((item) => item.gotovo).length} / ${alatStavke.length} za nastavak`}
+                      summary={`${alatZaNastavak.length} za nastavak`}
                     >
                       <p className="text-sm text-slate-500">upiši što je potrebno za nastavak radova</p>
                       <ItemEditor
                         title="Alat"
-                        items={alatStavke}
-                        equipment={details.alati}
+                        items={alatZaNastavak}
                         value={newTool}
                         onValue={setNewTool}
                         onAdd={() => void addItem('alat')}
-                        onAddEquipment={(opremaId) => void addInventoryTool(opremaId)}
                         onToggle={(item) => void toggleItem(item)}
                         placeholder="Npr. skela, brusilica"
                         working={working}
@@ -1293,6 +1302,7 @@ function ItemEditor({
   onValue,
   onAdd,
   onAddEquipment,
+  allowAdd = true,
   onHours,
   onToggle,
   checkKey = 'gotovo',
@@ -1311,6 +1321,7 @@ function ItemEditor({
   onValue: (value: string) => void;
   onAdd: () => void;
   onAddEquipment?: (opremaId: string) => void;
+  allowAdd?: boolean;
   onHours?: (item: NalogStavka, hours: number | null) => void;
   onToggle: (item: NalogStavka) => void;
   checkKey?: 'gotovo' | 'uzeto';
@@ -1363,7 +1374,7 @@ function ItemEditor({
         );
       })}
       {items.length === 0 && <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Nema stavki.</p>}
-      {!(equipmentLabel === 'stroj') && <div className="space-y-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 p-4">
+      {allowAdd && equipmentLabel !== 'stroj' && <div className="space-y-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 p-4">
         <label htmlFor={`new-${equipmentLabel}-${title}`} className="block text-sm font-bold text-slate-900">Dodaj {title.toLocaleLowerCase('hr-HR')}</label>
         <input
           id={`new-${equipmentLabel}-${title}`}

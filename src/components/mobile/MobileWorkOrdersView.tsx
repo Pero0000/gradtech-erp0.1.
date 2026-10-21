@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Camera, ImagePlus, Trash2, Check, ChevronLeft, ChevronRight, ClipboardCheck, Clock3, CreditCard, FileText, Flag, Gauge, ListChecks, LogOut, Package, Play, Plus, RefreshCw, Wrench } from 'lucide-react';
+import { AlertTriangle, Camera, ImagePlus, Trash2, Check, ChevronLeft, ChevronRight, ClipboardCheck, Clock3, CreditCard, FileText, Flag, Gauge, ListChecks, LogOut, Package, Play, Plus, RefreshCw, Truck, Wrench } from 'lucide-react';
 import { useAuth } from '@/auth/useAuth';
 import { usePushRegistration } from '@/components/mobile/usePushRegistration';
 import {
@@ -12,6 +12,7 @@ import {
   fetchMobileNalogTeam,
   fetchMobileRadniNalozi,
   fetchMobileWorkerDisplayName,
+  fetchMojPortalVrijeme,
   fetchNalogDokumenti,
   fetchNalogFoto,
   fetchNalogGradilisteDokumentIds,
@@ -33,6 +34,14 @@ import {
 } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import type { GradilisteZadatak, Oprema } from '@/types';
+import { WorkerDocumentsTab, WorkerScheduleTab, WorkerTimeTab, type WorkerPortalTab } from '@/components/mobile/WorkerPortalTabs';
+
+const portalTabs: Array<{ id: WorkerPortalTab; label: string; title: string; icon: React.ReactNode }> = [
+  { id: 'nalozi', label: 'Nalozi', title: 'Moji radni nalozi', icon: <ClipboardCheck className="h-5 w-5" /> },
+  { id: 'raspored', label: 'Raspored', title: 'Raspored ekipa i vozila', icon: <Truck className="h-5 w-5" /> },
+  { id: 'vrijeme', label: 'Vrijeme', title: 'Moje radno vrijeme', icon: <Clock3 className="h-5 w-5" /> },
+  { id: 'dokumenti', label: 'Dokumenti', title: 'Moji dokumenti', icon: <FileText className="h-5 w-5" /> },
+];
 
 // Pregled koji poslovođa potvrđuje pri pokretanju vremena (zahtjev RPC-a mobile_start_worker_time).
 const reviewSectionIds = ['upute', 'zadaci', 'materijal', 'alat', 'dokumenti'];
@@ -156,7 +165,7 @@ function Button({
 }
 
 export function MobileWorkOrdersView() {
-  const { profile, signOut } = useAuth();
+  const { profile, company, signOut } = useAuth();
   const pushError = usePushRegistration(profile?.id ?? '');
   const [workerName, setWorkerName] = useState<string | null>(null);
   const [orders, setOrders] = useState<MobileRadniNalog[]>([]);
@@ -175,6 +184,8 @@ export function MobileWorkOrdersView() {
   const [teamTimeDrafts, setTeamTimeDrafts] = useState<Record<string, { vrijemeOd: string; vrijemeDo: string }>>({});
 
   const [photoQueue, setPhotoQueue] = useState<PhotoUpload[]>([]);
+  const [portalTab, setPortalTab] = useState<WorkerPortalTab>('nalozi');
+  const [portalVrijeme, setPortalVrijeme] = useState(false);
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
 
@@ -191,6 +202,29 @@ export function MobileWorkOrdersView() {
       });
     return () => { active = false; };
   }, [profile?.radnik_id]);
+
+  useEffect(() => {
+    if (!profile?.radnik_id) return;
+    let active = true;
+    const load = () => {
+      void fetchMojPortalVrijeme()
+        .then((visible) => {
+          if (!active) return;
+          setPortalVrijeme(visible);
+          if (!visible) setPortalTab((tab) => (tab === 'vrijeme' ? 'nalozi' : tab));
+        })
+        .catch(() => undefined);
+    };
+    load();
+    const onVisible = () => { if (document.visibilityState === 'visible') load(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      active = false;
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [profile?.radnik_id]);
+
+  const visiblePortalTabs = portalTabs.filter((tab) => tab.id !== 'vrijeme' || portalVrijeme);
 
   const refreshOrders = useCallback(async () => {
     const list = await fetchMobileRadniNalozi();
@@ -610,9 +644,9 @@ export function MobileWorkOrdersView() {
       <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 pt-[max(env(safe-area-inset-top),0.75rem)]">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">
-            Tm-color{workerName ? ` · ${workerName}` : ''}
+            {company?.naziv}{workerName ? ` · ${workerName}` : ''}
           </p>
-          <h1 className="text-lg font-bold text-slate-900">Moji radni nalozi</h1>
+          <h1 className="text-lg font-bold text-slate-900">Portal djelatnika</h1>
         </div>
         <div className="flex gap-2">
           <button type="button" onClick={() => void refreshOrders().catch((reason: unknown) => setError(errorMessage(reason, 'Osvježavanje nije uspjelo.')))} className="rounded-lg p-2 text-slate-500" aria-label="Osvježi naloge">
@@ -1128,8 +1162,32 @@ export function MobileWorkOrdersView() {
                 ))}
               </div>
             </div>
-            <h2 className="px-1 pt-2 text-lg font-bold text-slate-900">Moji radni nalozi</h2>
-            {loading ? <p className="rounded-xl bg-white p-4 text-sm text-slate-500">Učitavanje naloga…</p> : orders.length === 0 ? (
+            {!profile?.radnik_id && (
+              <p role="alert" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                Račun još nije povezan s djelatnikom. Zamoli administratora da ga poveže u „Korisnici i prava”.
+              </p>
+            )}
+            <nav aria-label="Portal djelatnika" className={`grid ${visiblePortalTabs.length === 4 ? 'grid-cols-4' : 'grid-cols-3'} gap-1 rounded-2xl bg-white p-1 shadow-sm`}>
+              {visiblePortalTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setPortalTab(tab.id)}
+                  aria-current={portalTab === tab.id ? 'page' : undefined}
+                  className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-bold ${portalTab === tab.id ? 'bg-sky-700 text-white' : 'text-slate-600 active:bg-slate-100'}`}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
+            <h2 className="px-1 pt-2 text-lg font-bold text-slate-900">{portalTabs.find((tab) => tab.id === portalTab)?.title}</h2>
+            {portalTab === 'raspored' && <WorkerScheduleTab radnikId={profile?.radnik_id ?? null} />}
+            {portalTab === 'vrijeme' && portalVrijeme && <WorkerTimeTab />}
+            {portalTab === 'dokumenti' && (profile?.radnik_id
+              ? <WorkerDocumentsTab radnikId={profile.radnik_id} orders={orders} />
+              : <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">Nema dokumenata.</p>)}
+            {portalTab === 'nalozi' && (loading ? <p className="rounded-xl bg-white p-4 text-sm text-slate-500">Učitavanje naloga…</p> : orders.length === 0 ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center">
                 <ClipboardCheck className="mx-auto h-8 w-8 text-slate-400" />
                 <p className="mt-3 font-semibold text-slate-800">Nema dodijeljenih naloga</p>
@@ -1150,7 +1208,7 @@ export function MobileWorkOrdersView() {
                   <ChevronRight className="h-4 w-4 text-slate-400" />
                 </div>
               </button>
-            ))}
+            )))}
           </section>
         )}
       </div>

@@ -14,16 +14,22 @@ import { Modal } from '@/components/ui/Modal';
 import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { useAuth } from '@/auth/useAuth';
+import { ObracunSatiPanel } from './ObracunSatiPanel';
 
 const emptyForm = {
   radnik_id: '',
   gradiliste_id: '',
   datum: new Date().toISOString().split('T')[0],
   sati: '8',
+  nocni_sati: '0',
   napomena: '',
 };
 
 export function RadnoVrijemeView() {
+  const { canAccess } = useAuth();
+  const canObracun = canAccess('radnici', 'view');
+  const [tab, setTab] = useState<'evidencija' | 'obracun'>('evidencija');
   const [items, setItems] = useState<RadnoVrijeme[]>([]);
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [radnici, setRadnici] = useState<Radnik[]>([]);
@@ -68,6 +74,7 @@ export function RadnoVrijemeView() {
       gradiliste_id: rv.gradiliste_id ?? '',
       datum: rv.datum,
       sati: rv.sati.toString(),
+      nocni_sati: String(rv.nocni_sati ?? 0),
       napomena: rv.napomena ?? '',
     });
     setModalOpen(true);
@@ -83,6 +90,7 @@ export function RadnoVrijemeView() {
         datum: form.datum,
         sati: parseFloat(form.sati),
         napomena: form.napomena.trim() || null,
+        ...(imaNocniStupac ? { nocni_sati: Math.min(parseFloat(form.sati), parseFloat(form.nocni_sati) || 0) } : {}),
       };
       if (editing) {
         await updateRadnoVrijeme(editing.id, payload);
@@ -110,9 +118,41 @@ export function RadnoVrijemeView() {
 
   const filtered = filterDatum ? items.filter((rv) => rv.datum === filterDatum) : items;
   const ukupnoSati = filtered.reduce((sum, rv) => sum + rv.sati, 0);
+  // Stupac nocni_sati postoji tek nakon migracije obracun_sati.
+  const imaNocniStupac = items.some((rv) => rv.nocni_sati !== undefined);
 
   if (loading) {
     return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
+  }
+
+  const tabs = canObracun && (
+    <div className="mb-6 flex gap-1 border-b border-slate-200" role="tablist" aria-label="Radno vrijeme">
+      {([['evidencija', 'Evidencija'], ['obracun', 'Obračun sati']] as const).map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          role="tab"
+          aria-selected={tab === key}
+          onClick={() => setTab(key)}
+          className={`-mb-px border-b-2 px-4 py-2 text-sm font-semibold ${tab === key ? 'border-sky-600 text-sky-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (canObracun && tab === 'obracun') {
+    return (
+      <div>
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-slate-900">Radno vrijeme</h1>
+          <p className="mt-1 text-sm text-slate-500">Mjesečni obračun sati, noćnog rada, terena, praznika, godišnjeg i bolovanja</p>
+        </div>
+        {tabs}
+        <ObracunSatiPanel canEdit={canAccess('radnici', 'edit')} />
+      </div>
+    );
   }
 
   return (
@@ -130,6 +170,8 @@ export function RadnoVrijemeView() {
           Zabilježi sate
         </button>
       </div>
+
+      {tabs}
 
       {error && (
         <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
@@ -208,6 +250,9 @@ export function RadnoVrijemeView() {
                   </td>
                   <td className="px-5 py-3.5 text-right">
                     <Badge variant="blue">{rv.sati.toFixed(1)}h</Badge>
+                    {Number(rv.nocni_sati) > 0 && (
+                      <div className="mt-1 text-xs text-indigo-600">noćni {Number(rv.nocni_sati).toFixed(1)}h</div>
+                    )}
                   </td>
                   <td className="px-5 py-3.5 text-sm text-slate-500">{rv.napomena ?? '—'}</td>
                   <td className="px-5 py-3.5">
@@ -300,6 +345,17 @@ export function RadnoVrijemeView() {
               />
             </Field>
           </div>
+          {imaNocniStupac && (
+            <Field label="Od toga noćni sati">
+              <TextInput
+                type="number"
+                step="0.5"
+                min="0"
+                value={form.nocni_sati}
+                onChange={(e) => setForm({ ...form, nocni_sati: e.target.value })}
+              />
+            </Field>
+          )}
           <Field label="Napomena">
             <Textarea
               rows={2}

@@ -8,23 +8,37 @@ Filtri obuhvaćaju pretragu, višestruki odabir gradilišta, status, regiju, inv
 
 ## Prijava i korisnička prava
 
-Prijava koristi Supabase Auth s e-mailom i lozinkom. Samostalne registracije ostaju na čekanju dok ih administrator ne odobri i dodijeli prava pregleda/uređivanja po modulu. RLS štiti tablice i privatni bucket `nalozi-foto`; migracija `supabase/migrations/20261016150000_auth_permissions.sql` mora biti primijenjena prije uključivanja aplikacije za korisnike.
+Prijava koristi Supabase Auth s e-mailom i lozinkom. Svaki korisnik pripada jednoj tvrtki. Novi računi otvaraju se pozivnicom administratora; javna registracija nije dopuštena. RLS odvaja poslovne podatke i privatne datoteke tvrtki te zadržava prava pregleda/uređivanja po modulima.
 
 Za sigurno pokretanje:
 
-1. Primijenite sve Supabase migracije redom.
-2. U aplikaciji napravite račun za osobu koja će biti prvi administrator.
-3. U Supabase SQL Editoru postavite taj račun kao administratora (zamijenite e-mail stvarnom adresom):
+1. Prije multi-company migracije provjerite postoji li početni vlasnički račun `ivan.pericak@gmail.com`. Na novoj instalaciji prvo ga izradite kroz Supabase Auth.
+2. Primijenite migracije redom, uključujući multi-company migraciju, uz sigurnosnu kopiju i staging provjeru.
+3. Ako početni račun još nije odobren/administrator, vlasnik baze može mu postaviti prava:
 
    ```sql
    UPDATE public.app_profiles
    SET approved = true, is_admin = true
-   WHERE email = 'admin@tvrtka.hr';
+   WHERE email = 'ivan.pericak@gmail.com';
    ```
 
-4. Prijavite se tim računom i otvorite **Korisnici i prava** kako biste odobrili ostale korisnike i dodijelili prava.
+4. Deployajte funkcije za upravljanje tvrtkama/pozivnicama i obavijesti. Vlasnik otvara tvrtke na ekranu **Tvrtke**; njihovi administratori pozivaju korisnike i dodjeljuju prava u **Korisnici i prava**.
 
-Prvi admin se namjerno ne bira automatski: javna registracija ne može sama sebi dodijeliti administratorski pristup.
+Detaljan plan, prijenos postojećih podataka, konfiguracija pozivnica i provjere opisani su u [Multi-company vodiču](docs/MULTI_COMPANY.md). Broj djelatnika i korisničkih računa po tvrtki nije aplikacijski ograničen.
+
+### Portal djelatnika
+
+Nakon migracije `supabase/migrations/20261021110000_worker_portal.sql` svaki odobreni korisnik koji nije administrator ni označen kao **Voditelj** (u **Korisnici i prava**) nakon prijave vidi samo Portal djelatnika — i na webu i na mobitelu: moje radne naloge, raspored ekipa i vozila, moje radno vrijeme i moje dokumente. ERP moduli (fakture, ponude, troškovi, vozila, administracija, tvrtke…) su mu skriveni u sučelju i blokirani RLS-om; od modula smije samo čitati alat i strojeve radi odabira na nalogu. Migracija postojeće uredske račune bez povezanog djelatnika, koji imaju neko pravo, automatski označava kao voditelje.
+
+Tab **Raspored** u portalu prikazuje kopiju dnevnog rasporeda (vozila, vrijeme polaska, gradilišta i ekipe) koju ured pošalje na kartici **Pošalji raspored** u Dnevnom rasporedu (vidljiva korisnicima s pravom uređivanja rasporeda; prikazuje pregled kakav vide radnici i status slanja; migracija `supabase/migrations/20261021120000_raspored_objave.sql`). Promjene rasporeda nakon slanja radnici ne vide dok se raspored ne pošalje ponovno.
+
+### Obračun sati
+
+Portal djelatnika računa ukupne i noćne sate iz aktualnog početka i završetka smjene, istim izračunom kao troškove naloga, uključujući prijelaz preko ponoći. Noćni sati zato su vidljivi i prije odobrenja naloga; nezavršena smjena još se ne zbraja. Zadani noćni interval je 22:00–06:00 (postavke noćnog rada). Noćni sati su dio ukupno odrađenih sati, ne dodatni sati.
+
+U **Radno vrijeme → Obračun sati** (potrebno pravo pregleda modula Radnici; za izmjene pravo uređivanja) vidi se mjesečni obračun po radniku: redovni rad, noćni rad, teren, praznik, godišnji i bolovanje. Kvačicom se radniku odobrava pravo na pojedinu kategoriju; obračunavaju se samo odobrene kategorije, po cijenama upisanima kod radnika. Noćni rad i teren bez odobrenja ne upisuju se ni u trošak gradilišta (vrijedi za naloge zaključene nakon promjene). Godišnji, bolovanje i dodatne slobodne dane upisuje ured; broje se radni dani (pon–pet), godišnji ne uključuje državne praznike, a državni praznik na radni dan kad radnik nije radio računa se automatski. U Portalu djelatnika radnik u kartici **Vrijeme** vidi samo sate/dane odobrenih kategorija, bez iznosa. Potrebna je migracija `supabase/migrations/20261021130000_obracun_sati.sql` (postojećim radnicima odobrava kategorije za koje već imaju upisanu cijenu); provjera izračuna: `npm run test:obracun`.
+
+Kartica **Vrijeme** u Portalu djelatnika prikazuje povijest po mjesecima (tekući i do 24 prethodna). U **Obračun sati** stupac „Portal: Vrijeme” određuje vidi li pojedini radnik tu karticu (gumbi „Uključi svima” / „Isključi svima”); kad je isključena, kartica se ne prikazuje, a RPC-ovi `get_my_radno_vrijeme` i `get_my_obracun_podaci` ne vraćaju podatke. Potrebna je migracija `supabase/migrations/20261021150000_portal_vrijeme_vidljivost.sql` (nakon `20261021140000`); postojećim radnicima kartica ostaje uključena.
 
 ## Mobilna aplikacija za radne naloge
 

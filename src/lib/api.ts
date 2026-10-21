@@ -1,5 +1,8 @@
 ﻿import { supabase } from './supabase';
 import { nocniInterval } from './postavke';
+import { minuteSmjene, nocniIzNapomene, type ObracunPrava } from './obracunSati';
+import { requireCompany } from './company';
+import { fetchAllRows } from './pagination';
 import type {
   VoziloDokument,
   OdsustvoVrsta,
@@ -217,10 +220,11 @@ export async function fetchGradilisteBoardLayout(): Promise<GradilisteBoardLayou
 export async function saveGradilisteBoardLayout(layout: GradilisteBoardLayout) {
   const { error } = await supabase.from('gradiliste_board_layout').upsert({
     id: true,
+    company_id: requireCompany().id,
     columns: layout.columns,
     sort_modes: layout.sortModes,
     updated_at: new Date().toISOString(),
-  }, { onConflict: 'id' });
+  }, { onConflict: 'company_id,id' });
   if (error) throwGradilisteBoardMigrationError(error);
 }
 
@@ -247,12 +251,12 @@ export async function deleteGradiliste(id: string) {
 }
 
 export async function fetchRadnici(): Promise<Radnik[]> {
-  const { data, error } = await supabase
+  return fetchAllRows<Radnik>((from, to) => supabase
     .from('radnici')
     .select('*')
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return data ?? [];
+    .order('created_at', { ascending: false })
+    .order('id')
+    .range(from, to));
 }
 
 export async function createRadnik(r: Omit<Radnik, 'id' | 'created_at' | 'updated_at'>) {
@@ -606,6 +610,50 @@ export async function deleteRaspored(id: string) {
 
 // ===== DNEVNI RASPORED (po vozilima) =====
 
+export interface RasporedObjavaVozilo {
+  naziv: string;
+  registracija: string;
+  vrijeme: string | null;
+  gradilista: Array<{ naziv: string; ostalo: boolean }>;
+  radnici: Array<{ id: string; ime: string }>;
+}
+
+export interface RasporedObjava {
+  id: string;
+  datum: string;
+  poslano_at: string;
+  podaci: { vozila: RasporedObjavaVozilo[] };
+}
+
+const rasporedObjaveMigration = (error: { message?: string; code?: string }) =>
+  error.code === '42P01' || error.code === 'PGRST205' || /raspored_objave/i.test(error.message ?? '')
+    ? new Error('Pokreni migraciju 20261021120000_raspored_objave.sql u Supabaseu.')
+    : error;
+
+export async function sendRasporedObjava(input: { companyId: string; userId: string; datum: string; vozila: RasporedObjavaVozilo[] }) {
+  const { error } = await supabase.from('raspored_objave').upsert({
+    company_id: input.companyId,
+    datum: input.datum,
+    podaci: { vozila: input.vozila },
+    poslano_at: new Date().toISOString(),
+    poslao: input.userId,
+  }, { onConflict: 'company_id,datum' });
+  if (error) throw rasporedObjaveMigration(error);
+}
+
+export async function fetchRasporedObjava(datum: string): Promise<RasporedObjava | null> {
+  const { data, error } = await supabase.from('raspored_objave').select('id,datum,poslano_at,podaci').eq('datum', datum).maybeSingle();
+  if (error) throw rasporedObjaveMigration(error);
+  return data as RasporedObjava | null;
+}
+
+export async function fetchRasporedObjave(odDatum: string): Promise<RasporedObjava[]> {
+  const { data, error } = await supabase.from('raspored_objave').select('id,datum,poslano_at,podaci')
+    .gte('datum', odDatum).order('datum').limit(31);
+  if (error) throw rasporedObjaveMigration(error);
+  return (data ?? []) as RasporedObjava[];
+}
+
 export async function fetchDnevniRaspored(datum: string) {
   const [sites, workers] = await Promise.all([
     supabase.from('dnevni_raspored_gradilista').select('*').eq('datum', datum).order('created_at'),
@@ -877,12 +925,51 @@ export async function fetchRadnoVrijeme(): Promise<RadnoVrijeme[]> {
   return (data ?? []) as RadnoVrijeme[];
 }
 
+export interface ObracunRadnoVrijemeRow {
+  radnik_id: string;
+  datum: string;
+  sati: number;
+  nocni_sati: number;
+  teren: boolean;
+}
+
+// Sati za mjesečni obračun; prije migracije obracun_sati noćni sati čitaju se iz napomene.
+export async function fetchObracunRadnoVrijeme(od: string, doo: string): Promise<ObracunRadnoVrijemeRow[]> {
+  const query = (cols: string) =>
+    supabase.from('radno_vrijeme').select(cols).gte('datum', od).lte('datum', doo);
+  let res = await query('radnik_id, datum, sati, napomena, nocni_sati, nalog:nalog_id ( teren )');
+  if (res.error && /nocni_sati/i.test(res.error.message)) {
+    res = await query('radnik_id, datum, sati, napomena, nalog:nalog_id ( teren )');
+  }
+  if (res.error) throw res.error;
+  type Row = { radnik_id: string; datum: string; sati: number; napomena: string | null; nocni_sati?: number | null; nalog: { teren: boolean | null } | null };
+  return ((res.data ?? []) as unknown as Row[]).map((r) => ({
+    radnik_id: r.radnik_id,
+    datum: r.datum,
+    sati: Number(r.sati) || 0,
+    nocni_sati: r.nocni_sati !== undefined && r.nocni_sati !== null ? Number(r.nocni_sati) : nocniIzNapomene(r.napomena),
+    teren: Boolean(r.nalog?.teren),
+  }));
+}
+
+export async function fetchOdsustvaRaspon(od: string, doo: string): Promise<RadnikOdsustvo[]> {
+  const { data, error } = await supabase
+    .from('radnici_odsustva')
+    .select('*')
+    .lte('datum_od', doo)
+    .gte('datum_do', od)
+    .order('datum_od');
+  if (error) throw error;
+  return (data ?? []) as RadnikOdsustvo[];
+}
+
 export async function createRadnoVrijeme(rv: {
   radnik_id: string;
   gradiliste_id: string | null;
   datum: string;
   sati: number;
   napomena: string | null;
+  nocni_sati?: number;
 }) {
   const { data, error } = await supabase.from('radno_vrijeme').insert(rv).select().single();
   if (error) throw error;
@@ -946,20 +1033,10 @@ async function fetchNalogRadniciImena(nalogIds: string[]): Promise<Map<string, R
 }
 
 export async function generateNalogBroj(): Promise<string> {
-  const { data, error } = await supabase
-    .from('radni_nalozi')
-    .select('broj')
-    .order('broj', { ascending: false })
-    .limit(1);
-  if (error) throw error;
-
   const year = new Date().getFullYear();
-  if (!data || data.length === 0) return `RN-${year}-001`;
-
-  const last = data[0].broj as string;
-  const parts = last.split('-');
-  const num = parseInt(parts[parts.length - 1]) || 0;
-  return `RN-${year}-${String(num + 1).padStart(3, '0')}`;
+  const { data, error } = await supabase.rpc('next_company_number', { p_kind: 'nalog', p_year: year });
+  if (error) throw error;
+  return `RN-${year}-${String(data).padStart(3, '0')}`;
 }
 
 export async function createRadniNalog(input: {
@@ -1000,6 +1077,12 @@ export async function createRadniNalog(input: {
     const rows = input.radnik_ids.map((rid) => ({ nalog_id: data.id, radnik_id: rid }));
     const { error: e2 } = await supabase.from('radni_nalozi_radnici').insert(rows);
     if (e2) throw e2;
+  }
+  // Jedini djelatnik na nalogu automatski je i poslovođa.
+  if (input.radnik_ids.length === 1) {
+    const { error: leaderError } = await supabase.from('radni_nalozi').update({ poslovodja_id: input.radnik_ids[0] }).eq('id', data.id);
+    if (leaderError) throw leaderError;
+    data.poslovodja_id = input.radnik_ids[0];
   }
 
   // Materijal i alat upisan na gradilištu ulazi u prvi idući nalog tog gradilišta.
@@ -1063,7 +1146,8 @@ export async function updateRadniNalog(
       .eq('id', id)
       .single();
     if (leaderError) throw leaderError;
-    if (!leader.poslovodja_id || !input.radnik_ids.includes(leader.poslovodja_id)) {
+    const autoLeader = input.radnik_ids.length === 1;
+    if (!autoLeader && (!leader.poslovodja_id || !input.radnik_ids.includes(leader.poslovodja_id))) {
       throw new Error('Prije zaključivanja odaberi dodijeljenog poslovođu u detaljima naloga.');
     }
     if (leader.mobile_status === 'u_tijeku' || leader.mobile_status === 'predan' || leader.mobile_status === 'odobren') {
@@ -1116,6 +1200,12 @@ export async function updateRadniNalog(
     if (e2) throw e2;
   }
 
+  // Jedini djelatnik na nalogu automatski je i poslovođa.
+  if (input.radnik_ids.length === 1) {
+    const { error: leaderError } = await supabase.from('radni_nalozi').update({ poslovodja_id: input.radnik_ids[0] }).eq('id', id);
+    if (leaderError) throw leaderError;
+  }
+
   if (input.zakljucen === false) {
     const { error: resetError } = await supabase
       .from('radni_nalozi_radnici')
@@ -1147,12 +1237,6 @@ export async function notifyLockedNalogWorkers(nalogId: string) {
     throw new Error(`Nalog je zaključan; push je poslan na ${receipt.sent} uređaja, a ${receipt.failed} uređaja nije primilo obavijest.${details}`);
   }
 }
-
-const toMinutes = (t: string | null) => {
-  if (!t) return null;
-  const [h, m] = t.split(':').map(Number);
-  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
-};
 
 // Završen nalog upisuje sate radnika i kilometre vozila u troškove gradilišta; inače se upisi uklanjaju.
 export async function syncNalogTroskovi(nalogId: string) {
@@ -1207,35 +1291,40 @@ export async function syncNalogTroskovi(nalogId: string) {
 
   await clean();
 
-  const { data: radnici, error: rError } = await supabase
-    .from('radni_nalozi_radnici')
-    .select('radnik_id, vrijeme_od, vrijeme_do, radnik:radnik_id ( ime, prezime, cijena_sata, nocni_dodatak, teren_dnevnica )')
-    .eq('nalog_id', nalogId);
+  const radniciSelect = (prava: boolean) =>
+    supabase
+      .from('radni_nalozi_radnici')
+      .select(`radnik_id, vrijeme_od, vrijeme_do, radnik:radnik_id ( ime, prezime, cijena_sata, nocni_dodatak, teren_dnevnica${prava ? ', pravo_nocni, pravo_teren' : ''} )`)
+      .eq('nalog_id', nalogId);
+  let radniciRes = await radniciSelect(true);
+  // Prije migracije obracun_sati stupci prava ne postoje; tada svi zadržavaju dosadašnji obračun.
+  const imaPrava = !(radniciRes.error && /pravo_/i.test(radniciRes.error.message));
+  if (!imaPrava) radniciRes = await radniciSelect(false);
+  const { data: radnici, error: rError } = radniciRes;
   if (rError) throw rError;
 
   type RR = {
     radnik_id: string;
     vrijeme_od: string | null;
     vrijeme_do: string | null;
-    radnik: { ime: string; prezime: string; cijena_sata: number; nocni_dodatak: number | null; teren_dnevnica: number | null } | null;
+    radnik: {
+      ime: string;
+      prezime: string;
+      cijena_sata: number;
+      nocni_dodatak: number | null;
+      teren_dnevnica: number | null;
+      pravo_nocni?: boolean | null;
+      pravo_teren?: boolean | null;
+    } | null;
   };
-  const sati: { radnik_id: string; gradiliste_id: string | null; datum: string; sati: number; napomena: string | null; nalog_id: string }[] = [];
+  const sati: { radnik_id: string; gradiliste_id: string | null; datum: string; sati: number; napomena: string | null; nalog_id: string; nocni_sati?: number }[] = [];
   const dodatni: { gradiliste_id: string | null; kategorija: 'place' | 'oprema'; opis: string; iznos: number; datum: string; nalog_id: string }[] = [];
   const round2 = (n: number) => Math.round(n * 100) / 100;
 
   for (const r of (radnici ?? []) as unknown as RR[]) {
     const ime = r.radnik ? `${r.radnik.ime} ${r.radnik.prezime}` : 'Radnik';
-    const od = toMinutes(r.vrijeme_od);
-    const doo = toMinutes(r.vrijeme_do);
-    if (od !== null && doo !== null) {
-      const diff = doo >= od ? doo - od : doo + 1440 - od;
-      let nocne = 0;
-      const { nocOd, danOd } = nocniInterval();
-      for (let m = od; m < od + diff; m++) {
-        const t = m % 1440;
-        const night = nocOd > danOd ? t >= nocOd || t < danOd : t >= nocOd && t < danOd;
-        if (night) nocne++;
-      }
+    if (r.vrijeme_od && r.vrijeme_do) {
+      const { ukupno: diff, nocne } = minuteSmjene(r.vrijeme_od, r.vrijeme_do, nocniInterval());
       if (diff > 0) {
         const napomene = [
           bezTroska ? `Ostalo: ${nalog.naslov ?? nalog.broj} (bez troška)` : null,
@@ -1248,10 +1337,12 @@ export async function syncNalogTroskovi(nalogId: string) {
           sati: round2(diff / 60),
           napomena: napomene.length > 0 ? napomene.join(' · ') : null,
           nalog_id: nalogId,
+          ...(imaPrava ? { nocni_sati: round2(nocne / 60) } : {}),
         });
         const dodatak = Number(r.radnik?.nocni_dodatak ?? 0);
         const satnica = Number(r.radnik?.cijena_sata ?? 0);
-        if (!bezTroska && nocne > 0 && dodatak > 0 && satnica > 0) {
+        const pravoNocni = !imaPrava || r.radnik?.pravo_nocni !== false;
+        if (!bezTroska && pravoNocni && nocne > 0 && dodatak > 0 && satnica > 0) {
           dodatni.push({
             gradiliste_id: nalog.gradiliste_id,
             kategorija: 'place',
@@ -1264,7 +1355,8 @@ export async function syncNalogTroskovi(nalogId: string) {
       }
     }
     const dnevnica = Number(r.radnik?.teren_dnevnica ?? 0);
-    if (!bezTroska && nalog.teren && dnevnica > 0) {
+    const pravoTeren = !imaPrava || r.radnik?.pravo_teren !== false;
+    if (!bezTroska && pravoTeren && nalog.teren && dnevnica > 0) {
       dodatni.push({
         gradiliste_id: nalog.gradiliste_id,
         kategorija: 'place',
@@ -1522,6 +1614,75 @@ export async function fetchMobileWorkerDisplayName(): Promise<string | null> {
   const { data, error } = await supabase.rpc('get_mobile_worker_display_name');
   if (error) throw error;
   return data;
+}
+
+export interface MojeRadnoVrijeme {
+  izvor: 'nalog' | 'evidencija';
+  nalog_id: string | null;
+  nalog_broj: string | null;
+  gradiliste_naziv: string | null;
+  datum: string;
+  vrijeme_od: string | null;
+  vrijeme_do: string | null;
+  sati: number | null;
+  napomena: string | null;
+  nocni_sati?: number | null;
+  teren?: boolean | null;
+}
+
+export async function fetchMojeRadnoVrijeme(od: string | null, doo: string | null): Promise<MojeRadnoVrijeme[]> {
+  const { data, error } = await supabase.rpc('get_my_radno_vrijeme', { p_od: od, p_do: doo });
+  if (error) {
+    if (/get_my_radno_vrijeme/i.test(error.message)) {
+      throw new Error('Pokreni migraciju 20261021110000_worker_portal.sql u Supabaseu.');
+    }
+    throw error;
+  }
+  const interval = nocniInterval();
+  return ((data ?? []) as MojeRadnoVrijeme[]).map((row) => {
+    // Nalog prikazuje aktualnu smjenu, ne evidenciju koja nastaje tek nakon odobrenja.
+    if (row.izvor === 'nalog') {
+      const smjena = row.vrijeme_od && row.vrijeme_do
+        ? minuteSmjene(row.vrijeme_od, row.vrijeme_do, interval)
+        : null;
+      return {
+        ...row,
+        sati: smjena ? Math.round(smjena.ukupno / 60 * 100) / 100 : null,
+        nocni_sati: smjena ? Math.round(smjena.nocne / 60 * 100) / 100 : 0,
+      };
+    }
+    return {
+      ...row,
+      sati: row.sati === null ? null : Number(row.sati),
+      nocni_sati: row.nocni_sati == null ? nocniIzNapomene(row.napomena) : Number(row.nocni_sati),
+    };
+  });
+}
+
+export interface MojiObracunPodaci {
+  prava: ObracunPrava | null;
+  odsustva: { id: string; vrsta: OdsustvoVrsta; datum_od: string; datum_do: string; napomena: string | null }[];
+}
+
+/** Vraća null dok migracija 20261021130000_obracun_sati.sql nije pokrenuta. */
+export async function fetchMojiObracunPodaci(od: string, doo: string): Promise<MojiObracunPodaci | null> {
+  const { data, error } = await supabase.rpc('get_my_obracun_podaci', { p_od: od, p_do: doo });
+  if (error) {
+    if (/get_my_obracun_podaci|radnici_odsustva|pravo_/i.test(error.message)) return null;
+    throw error;
+  }
+  const result = (data ?? {}) as Partial<MojiObracunPodaci>;
+  return { prava: result.prava ?? null, odsustva: result.odsustva ?? [] };
+}
+
+/** Smije li djelatnik vidjeti karticu "Vrijeme" u Portalu djelatnika; prije migracije 20261021150000 uvijek true. */
+export async function fetchMojPortalVrijeme(): Promise<boolean> {
+  const { data, error } = await supabase.rpc('get_my_portal_vrijeme');
+  if (error) {
+    if (/get_my_portal_vrijeme|portal_vrijeme/i.test(error.message)) return true;
+    throw error;
+  }
+  return data !== false;
 }
 
 export async function startMobileWorkerTime(nalogId: string, radnikId: string, reviewedSections: string[]) {

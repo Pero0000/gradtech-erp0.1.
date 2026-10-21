@@ -1,9 +1,10 @@
-﻿import { useCallback, useEffect, useState } from 'react';
-import { CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, GripVertical, Hammer, Package, Plus, Trash2, Truck, X } from 'lucide-react';
-import type { DnevniRasporedGradiliste, DnevniRasporedOstalo, DnevniRasporedRadnik, Gradiliste, GradilisteRegija, GradilisteZadatak, NalogPrioritet, NalogStatus, Radnik, Rok, Vozilo } from '@/types';
+﻿import { useCallback, useEffect, useRef, useState } from 'react';
+import { CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, GripVertical, Hammer, Package, Plus, Send, Trash2, Truck, X } from 'lucide-react';
+import type { DnevniRasporedGradiliste, DnevniRasporedOstalo, DnevniRasporedRadnik, Gradiliste, GradilisteRegija, GradilisteZadatak, NalogPrioritet, NalogStatus, Radnik, RadnikOdsustvo, Rok, Vozilo } from '@/types';
 import { nextDeadline } from '@/lib/rokovi';
 import { Modal } from '@/components/ui/Modal';
 import { NalogIzvrsenje } from './NalogIzvrsenje';
+import { RasporedVozilaPreview } from '@/components/mobile/WorkerPortalTabs';
 import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import type { GradilisteStavka } from '@/lib/api';
 import {
@@ -33,8 +34,11 @@ import {
   assignRasporedRadnik,
   fetchDnevniRaspored,
   fetchGradilista,
+  fetchGradilisteBoardLayout,
+  saveGradilisteBoardLayout,
   fetchRokovi,
   fetchRadnici,
+  fetchOdsustvaRaspon,
   fetchVozila,
   moveRasporedGradiliste,
   moveRasporedRadnik,
@@ -43,7 +47,12 @@ import {
   updateRasporedVrijemeVozila,
   addRasporedTekst,
   updateRasporedTekst,
+  fetchRasporedObjava,
+  sendRasporedObjava,
+  type RasporedObjava,
+  type RasporedObjavaVozilo,
 } from '@/lib/api';
+import { useAuth } from '@/auth/useAuth';
 
 type DragPayload =
   | { type: 'gradiliste'; id: string; assignmentId?: string }
@@ -75,8 +84,6 @@ interface NalogForm {
 type Category = 'arhiva' | 'aktivna' | 'planirana' | 'ponude';
 
 const columnLabels = ['dm gradilišta', 'dm intervencije', 'ostala gradilišta'];
-const columnsStorageKey = 'gradilista-board-columns-v1';
-const sortModesStorageKey = 'gradilista-board-sort-modes-v1';
 const categories: { key: Category; label: string; statuses: Gradiliste['status'][] }[] = [
   { key: 'arhiva', label: 'Arhiva', statuses: ['zavrseno'] },
   { key: 'aktivna', label: 'Aktivna', statuses: ['aktivno', 'pauzirano'] },
@@ -92,18 +99,6 @@ const regionInfo: Record<GradilisteRegija, { label: string; badge: string }> = {
 };
 const minSiteSlots = 5;
 const defaultWorkerSlots = 5;
-
-function readSortModes(): SortMode[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(sortModesStorageKey) ?? 'null');
-    if (Array.isArray(parsed) && parsed.length === 3) {
-      return parsed.map((mode): SortMode => mode === 'datum_pocetka' || mode === 'datum_zavrsetka' ? mode : 'manual');
-    }
-  } catch {
-    // Use the default order.
-  }
-  return ['manual', 'manual', 'manual'];
-}
 
 function formatShortDate(value: string) {
   return new Date(value).toLocaleDateString('hr-HR');
@@ -123,21 +118,13 @@ function formatDate(d: string) {
   });
 }
 
-function readColumns(items: Gradiliste[]): string[][] {
-  let saved: string[][] = [[], [], []];
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(columnsStorageKey) ?? 'null');
-    if (Array.isArray(parsed) && parsed.length === 3) {
-      saved = parsed.map((column) => Array.isArray(column) ? column.filter((id): id is string => typeof id === 'string') : []);
-    }
-  } catch {
-    // Fall back to an automatic layout.
-  }
-
+// Raspored stupaca dijeli se s pregledom Gradilišta preko tablice gradiliste_board_layout.
+function reconcileColumns(items: Gradiliste[], saved: string[][]): string[][] {
   const valid = new Set(items.map((item) => item.id));
   const assigned = new Set<string>();
   const columns: string[][] = [[], [], []];
   saved.forEach((column, index) => {
+    if (index > 2) return;
     for (const id of column) {
       if (valid.has(id) && !assigned.has(id)) {
         columns[index].push(id);
@@ -153,11 +140,14 @@ function readColumns(items: Gradiliste[]): string[][] {
   return columns;
 }
 
-function WorkerCount({ count }: { count: number }) {
+function WorkerCount({ count, kind = 'radnik' }: { count: number; kind?: 'radnik' | 'gradiliste' }) {
   if (count === 0) return null;
+  const title = kind === 'gradiliste'
+    ? (count > 1 ? `Gradilište je na rasporedu ${count} puta (više vozila/naloga)` : 'Gradilište je na rasporedu 1 put')
+    : (count > 1 ? `Radnik je raspoređen na ${count} gradilišta/auta` : 'Raspoređen na 1 gradilište/auto');
   return (
     <span
-      title={count > 1 ? `Radnik je raspoređen na ${count} gradilišta/auta` : 'Raspoređen na 1 gradilište/auto'}
+      title={title}
       className={`inline-flex h-5 min-w-5 flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${count > 1 ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}
     >
       {count}
@@ -195,8 +185,14 @@ export function RasporedView() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [copyingSchedule, setCopyingSchedule] = useState(false);
+  const { profile, canAccess } = useAuth();
+  const [objava, setObjava] = useState<RasporedObjava | null>(null);
+  const [sendingSchedule, setSendingSchedule] = useState(false);
+  const [rasporedTab, setRasporedTab] = useState<'slaganje' | 'posalji'>('slaganje');
+  const canSendSchedule = canAccess('raspored', 'edit');
   const [dropTarget, setDropTarget] = useState<string | null>(null);
-  const [, setColumnsVersion] = useState(0);
+  const [savedColumns, setSavedColumns] = useState<string[][]>([[], [], []]);
+  const layoutSaveQueue = useRef<Promise<void>>(Promise.resolve());
   const [ostalo, setOstalo] = useState<DnevniRasporedOstalo[]>([]);
   const [nalogForm, setNalogForm] = useState<NalogForm | null>(null);
   const [nalogSaving, setNalogSaving] = useState(false);
@@ -208,8 +204,9 @@ export function RasporedView() {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [lockedNalozi, setLockedNalozi] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useState<Category>('aktivna');
-  const [sortModes, setSortModes] = useState<SortMode[]>(() => readSortModes());
+  const [sortModes, setSortModes] = useState<SortMode[]>(['manual', 'manual', 'manual']);
   const [rokovi, setRokovi] = useState<Rok[]>([]);
+  const [odsustvaDana, setOdsustvaDana] = useState<RadnikOdsustvo[]>([]);
   const [nalogZadaci, setNalogZadaciList] = useState<GradilisteZadatak[]>([]);
   const formGradilisteId = nalogForm?.gradiliste_id ?? '';
   const formNalogId = nalogForm?.nalogId;
@@ -267,15 +264,19 @@ export function RasporedView() {
       cancelled = true;
     };
   }, [formGradilisteId, formNalogId]);
+  const persistLayout = (columns: string[][], modes: SortMode[]) => {
+    const save = layoutSaveQueue.current
+      .catch(() => undefined)
+      .then(() => saveGradilisteBoardLayout({ columns, sortModes: modes }));
+    layoutSaveQueue.current = save;
+    save.catch((e: unknown) => setError(errMsg(e, 'Greška pri spremanju redoslijeda gradilišta')));
+  };
+
   const changeSortMode = (columnIndex: number, mode: SortMode) => {
     const next = [...sortModes];
     next[columnIndex] = mode;
     setSortModes(next);
-    try {
-      window.localStorage.setItem(sortModesStorageKey, JSON.stringify(next));
-    } catch {
-      // Sorting still works for this session.
-    }
+    persistLayout(reconcileColumns(gradilista, savedColumns), next);
   };
 
   const loadDay = useCallback(async (date: string) => {
@@ -306,15 +307,40 @@ export function RasporedView() {
     void loadOstalo();
   }, [loadOstalo]);
 
+  // Godišnji/bolovanje iz Obračuna sati; bez prava na modul Radnici upozorenja se jednostavno ne prikazuju.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchGradilista(), fetchRadnici(), fetchVozila(), fetchRokovi().catch(() => [] as Rok[])])
-      .then(([nextGradilista, nextRadnici, nextVozila, nextRokovi]) => {
+    fetchOdsustvaRaspon(selectedDate, selectedDate)
+      .then((list) => {
+        if (!cancelled) setOdsustvaDana(list.filter((o) => o.vrsta === 'godisnji' || o.vrsta === 'bolovanje'));
+      })
+      .catch(() => {
+        if (!cancelled) setOdsustvaDana([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDate]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      fetchGradilista(),
+      fetchRadnici(),
+      fetchVozila(),
+      fetchRokovi().catch(() => [] as Rok[]),
+      fetchGradilisteBoardLayout().catch(() => null),
+    ])
+      .then(([nextGradilista, nextRadnici, nextVozila, nextRokovi, layout]) => {
         if (cancelled) return;
         setGradilista(nextGradilista);
         setRadnici(nextRadnici);
         setVozila(nextVozila.filter((v) => v.u_rasporedu !== false));
         setRokovi(nextRokovi);
+        if (layout) {
+          setSavedColumns(layout.columns);
+          setSortModes(layout.sortModes);
+        }
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
@@ -328,6 +354,19 @@ export function RasporedView() {
   }, []);
 
   useEffect(() => {
+    const timer = window.setInterval(() => {
+      fetchGradilisteBoardLayout()
+        .then((layout) => {
+          if (!layout) return;
+          setSavedColumns((current) => JSON.stringify(current) === JSON.stringify(layout.columns) ? current : layout.columns);
+          setSortModes((current) => JSON.stringify(current) === JSON.stringify(layout.sortModes) ? current : layout.sortModes);
+        })
+        .catch(() => undefined);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     setError(null);
     loadDay(selectedDate).catch((e: unknown) => {
@@ -337,6 +376,62 @@ export function RasporedView() {
       cancelled = true;
     };
   }, [selectedDate, loadDay]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setObjava(null);
+    fetchRasporedObjava(selectedDate)
+      .then((data) => { if (!cancelled) setObjava(data); })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDate]);
+
+  // Kopija rasporeda vozila koju radnici vide u Portalu djelatnika (tab Raspored).
+  const buildObjavaVozila = (): RasporedObjavaVozilo[] => [...vozila]
+    .sort((a, b) => b.broj_mjesta - a.broj_mjesta || a.registracija.localeCompare(b.registracija))
+    .map((vozilo) => {
+      const carSites = siteAssignments.filter((a) => a.vozilo_id === vozilo.id);
+      const carWorkers = workerAssignments.filter((a) => a.vozilo_id === vozilo.id);
+      return {
+        naziv: [vozilo.marka, vozilo.model].filter(Boolean).join(' '),
+        registracija: vozilo.registracija,
+        vrijeme: carSites.find((a) => a.vrijeme)?.vrijeme ?? null,
+        gradilista: carSites.map((a) => ({
+          naziv: a.gradiliste_id ? gradilista.find((g) => g.id === a.gradiliste_id)?.naziv ?? 'Nepoznato gradilište' : a.tekst ?? '',
+          ostalo: !a.gradiliste_id,
+        })).filter((site) => site.naziv),
+        radnici: carWorkers.map((a) => {
+          const r = radnici.find((item) => item.id === a.radnik_id);
+          return { id: a.radnik_id, ime: r ? `${r.prezime} ${r.ime}` : 'Nepoznat radnik' };
+        }),
+      };
+    })
+    .filter((vozilo) => vozilo.gradilista.length > 0 || vozilo.radnici.length > 0);
+
+  const objavaVozila = buildObjavaVozila();
+  const objavaZastarjela = objava !== null && JSON.stringify(objava.podaci?.vozila ?? []) !== JSON.stringify(objavaVozila);
+
+  const sendSchedule = async () => {
+    if (!profile) return;
+    if (objavaVozila.length === 0) {
+      setError('Raspored za odabrani dan je prazan.');
+      return;
+    }
+    setSendingSchedule(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await sendRasporedObjava({ companyId: profile.company_id, userId: profile.id, datum: selectedDate, vozila: objavaVozila });
+      setObjava(await fetchRasporedObjava(selectedDate));
+      setNotice(`Raspored za ${formatDate(selectedDate)} poslan je radnicima.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Raspored nije poslan.');
+    } finally {
+      setSendingSchedule(false);
+    }
+  };
 
   const run = async (action: () => Promise<void>) => {
     setError(null);
@@ -632,16 +727,17 @@ export function RasporedView() {
 
   const placeSite = (gradilisteId: string, columnIndex: number, beforeId?: string) => {
     if (gradilisteId === beforeId) return;
-    const next = readColumns(gradilista).map((column) => column.filter((id) => id !== gradilisteId));
+    const next = reconcileColumns(gradilista, savedColumns).map((column) => column.filter((id) => id !== gradilisteId));
     const at = beforeId ? next[columnIndex].indexOf(beforeId) : -1;
     next[columnIndex].splice(at < 0 ? next[columnIndex].length : at, 0, gradilisteId);
-    try {
-      window.localStorage.setItem(columnsStorageKey, JSON.stringify(next));
-    } catch {
-      // Redoslijed vrijedi samo do osvježavanja stranice.
+    let nextModes = sortModes;
+    if (beforeId && sortModes[columnIndex] !== 'manual') {
+      nextModes = [...sortModes];
+      nextModes[columnIndex] = 'manual';
+      setSortModes(nextModes);
     }
-    if (beforeId && sortModes[columnIndex] !== 'manual') changeSortMode(columnIndex, 'manual');
-    setColumnsVersion((v) => v + 1);
+    setSavedColumns(next);
+    persistLayout(next, nextModes);
   };
 
   const dropOnColumn = (event: React.DragEvent, columnIndex: number, beforeId?: string) => {
@@ -724,12 +820,30 @@ export function RasporedView() {
 
   const categoryStatuses = categories.find((c) => c.key === activeCategory)?.statuses ?? [];
   const sites = gradilista.filter((g) => categoryStatuses.includes(g.status));
-  const columns = readColumns(gradilista).map((column) =>
+  const columns = reconcileColumns(gradilista, savedColumns).map((column) =>
     column.filter((id) => sites.some((site) => site.id === id)));
   const workers = radnici.filter((r) => (r.status === 'aktivan' || workerAssignments.some((a) => a.radnik_id === r.id))
     && !ostalo.some((o) => o.radnik_id === r.id));
   const vehicleOf = (voziloId: string) => vozila.find((v) => v.id === voziloId);
   const workerCount = (radnikId: string) => workerAssignments.filter((a) => a.radnik_id === radnikId).length;
+  const siteCount = (gradilisteId: string) => siteAssignments.filter((a) => a.gradiliste_id === gradilisteId).length;
+  const odsustvoOf = (radnikId: string) => odsustvaDana.find((o) => o.radnik_id === radnikId);
+  const odsustvoLabel = (o: RadnikOdsustvo) => (o.vrsta === 'bolovanje' ? 'Bolovanje' : 'Godišnji');
+  const odsutniRadnici = [...new Set(odsustvaDana.map((o) => o.radnik_id))]
+    .map((id) => ({ radnik: radnici.find((r) => r.id === id), odsustvo: odsustvoOf(id)!, rasporeden: workerAssignments.some((a) => a.radnik_id === id) }))
+    .filter((x): x is { radnik: Radnik; odsustvo: RadnikOdsustvo; rasporeden: boolean } => Boolean(x.radnik));
+  const odsustvoBadge = (radnikId: string) => {
+    const o = odsustvoOf(radnikId);
+    if (!o) return null;
+    return (
+      <span
+        title={`${odsustvoLabel(o)} ${new Date(`${o.datum_od}T00:00:00`).toLocaleDateString('hr-HR')} – ${new Date(`${o.datum_do}T00:00:00`).toLocaleDateString('hr-HR')}`}
+        className={`flex-shrink-0 rounded px-1 text-[9px] font-bold uppercase ${o.vrsta === 'bolovanje' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-800'}`}
+      >
+        {o.vrsta === 'bolovanje' ? 'BOL' : 'GO'}
+      </span>
+    );
+  };
 
   return (
     <div>
@@ -786,12 +900,99 @@ export function RasporedView() {
             <ClipboardList className="h-4 w-4" />
             {copyingSchedule ? 'Kopiranje…' : 'Kopiraj zadnji raspored'}
           </button>
+          {canSendSchedule && objava && (
+            <button
+              type="button"
+              onClick={() => setRasporedTab('posalji')}
+              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${objavaZastarjela ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}
+            >
+              {objavaZastarjela ? 'Promijenjeno nakon slanja' : 'Poslano radnicima'}
+            </button>
+          )}
         </div>
       </div>
 
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
       {notice && <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div>}
 
+      {odsutniRadnici.length > 0 && (
+        <div role="alert" className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-semibold">
+            Upozorenje: {new Date(`${selectedDate}T00:00:00`).toLocaleDateString('hr-HR')} nisu dostupni:
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {odsutniRadnici.map(({ radnik, odsustvo, rasporeden }) => (
+              <li key={radnik.id}>
+                <span className="font-medium">{radnik.prezime} {radnik.ime}</span> – {odsustvoLabel(odsustvo).toLowerCase()} ({new Date(`${odsustvo.datum_od}T00:00:00`).toLocaleDateString('hr-HR')} – {new Date(`${odsustvo.datum_do}T00:00:00`).toLocaleDateString('hr-HR')})
+                {rasporeden && <span className="ml-1 font-bold text-red-700">· raspoređen je na vozilo!</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {canSendSchedule && (
+        <div className="mb-4 flex gap-1 border-b border-slate-200" role="tablist" aria-label="Dnevni raspored">
+          {([['slaganje', 'Slaganje rasporeda'], ['posalji', 'Pošalji raspored']] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={rasporedTab === key}
+              onClick={() => setRasporedTab(key)}
+              className={`-mb-px inline-flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-semibold ${rasporedTab === key ? 'border-sky-600 text-sky-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+            >
+              {key === 'posalji' && <Send className="h-4 w-4" />}
+              {label}
+              {key === 'posalji' && objavaZastarjela && <span className="h-2 w-2 rounded-full bg-amber-500" aria-label="Promijenjeno nakon slanja" />}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {canSendSchedule && rasporedTab === 'posalji' ? (
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
+          <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5">
+            <div>
+              <h2 className="text-lg font-semibold capitalize text-slate-900">Raspored za {formatDate(selectedDate)}</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Radnici u Portalu djelatnika (kartica „Raspored”) dobivaju kopiju rasporeda vozila, gradilišta i ekipe kakva je prikazana desno. Dan biraš strelicama ili datumom gore.
+              </p>
+            </div>
+            <div className={`rounded-lg border px-4 py-3 text-sm ${!objava ? 'border-slate-200 bg-slate-50 text-slate-600' : objavaZastarjela ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+              {!objava
+                ? 'Raspored za ovaj dan još nije poslan radnicima.'
+                : `${objavaZastarjela ? 'Raspored je promijenjen nakon slanja — radnici još vide staru verziju. ' : 'Radnici vide ovaj raspored. '}Poslano ${new Date(objava.poslano_at).toLocaleString('hr-HR', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}.`}
+            </div>
+            <dl className="grid grid-cols-3 gap-3 text-center">
+              {[
+                { label: 'vozila', value: objavaVozila.length },
+                { label: 'gradilišta', value: objavaVozila.reduce((sum, v) => sum + v.gradilista.length, 0) },
+                { label: 'radnika', value: new Set(objavaVozila.flatMap((v) => v.radnici.map((r) => r.id))).size },
+              ].map((stat) => (
+                <div key={stat.label} className="rounded-lg bg-slate-50 px-3 py-2">
+                  <dd className="text-xl font-bold text-slate-900">{stat.value}</dd>
+                  <dt className="text-xs text-slate-500">{stat.label}</dt>
+                </div>
+              ))}
+            </dl>
+            <button
+              type="button"
+              onClick={() => void sendSchedule()}
+              disabled={sendingSchedule || objavaVozila.length === 0}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-3 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Send className="h-4 w-4" />
+              {sendingSchedule ? 'Slanje…' : objava ? 'Pošalji ponovno' : 'Pošalji raspored'}
+            </button>
+            <p className="text-xs text-slate-500">Vozila bez gradilišta i radnika se ne šalju. Push obavijest o poslanom rasporedu bit će dodana kad se uključi Firebase konfiguracija.</p>
+          </section>
+          <section aria-label="Pregled kako radnici vide raspored" className="rounded-[2rem] border-8 border-slate-800 bg-slate-100 p-3 shadow-lg">
+            <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">Pregled u Portalu djelatnika</p>
+            <RasporedVozilaPreview vozila={objavaVozila} />
+          </section>
+        </div>
+      ) : (
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(620px,1.35fr)_minmax(0,1.9fr)_minmax(190px,0.4fr)]">
         {/* Gradilišta */}
         <div>
@@ -868,9 +1069,12 @@ export function RasporedView() {
                         }}
                         onDrop={(e) => dropOnColumn(e, index, g.id)}
                         title={g.naziv}
-                        className={`cursor-grab rounded-lg border bg-white p-2 shadow-sm hover:border-sky-300 active:cursor-grabbing ${dropTarget === `site-${g.id}` ? 'border-sky-400 ring-2 ring-sky-400' : 'border-slate-200'}`}
+                        className={`cursor-grab rounded-lg border bg-white p-2 shadow-sm hover:border-sky-300 active:cursor-grabbing ${dropTarget === `site-${g.id}` ? 'border-sky-400 ring-2 ring-sky-400' : siteCount(g.id) > 1 ? 'border-red-200' : siteCount(g.id) === 1 ? 'border-emerald-200' : 'border-slate-200'}`}
                       >
-                        <p className="break-words text-[13px] font-semibold leading-tight text-slate-900">{g.naziv}</p>
+                        <div className="flex items-start justify-between gap-1">
+                          <p className={`break-words text-[13px] font-semibold leading-tight ${siteCount(g.id) > 1 ? 'text-red-600' : siteCount(g.id) === 1 ? 'text-emerald-700' : 'text-slate-900'}`}>{g.naziv}</p>
+                          <WorkerCount kind="gradiliste" count={siteCount(g.id)} />
+                        </div>
                         {siteAssignments.some((assignment) => assignment.gradiliste_id === g.id) && (
                           <p className="mt-1 text-[10px] font-medium text-sky-700">
                             Već na rasporedu · dodaj i na drugo vozilo
@@ -989,8 +1193,9 @@ export function RasporedView() {
                                   />
                                 </div>
                               ) : (
-                                <span className="min-w-0 flex-1 break-words text-[13px] font-medium leading-tight text-blue-800">{g?.naziv ?? 'Nepoznato gradilište'}</span>
+                                <span className={`min-w-0 flex-1 break-words text-[13px] font-medium leading-tight ${a.gradiliste_id && siteCount(a.gradiliste_id) > 1 ? 'text-red-600' : 'text-blue-800'}`}>{g?.naziv ?? 'Nepoznato gradilište'}</span>
                               )}
+                              {a.gradiliste_id && <WorkerCount kind="gradiliste" count={siteCount(a.gradiliste_id)} />}
                               <button
                                 type="button"
                                 onClick={() => void run(() => removeRasporedGradiliste(a.id))}
@@ -1093,8 +1298,9 @@ export function RasporedView() {
                             }}
                             className={`flex h-6 items-center justify-between gap-1 border-b border-slate-100 ${vehicleLocked ? 'cursor-not-allowed' : 'cursor-grab'}`}
                           >
-                            <span className={`truncate text-[13px] font-medium ${workerCount(a.radnik_id) > 1 ? 'text-red-600' : 'text-emerald-700'}`}>{r ? `${r.prezime} ${r.ime}` : 'Nepoznat radnik'}</span>
+                            <span className={`truncate text-[13px] font-medium ${odsustvoOf(a.radnik_id) || workerCount(a.radnik_id) > 1 ? 'text-red-600' : 'text-emerald-700'}`}>{r ? `${r.prezime} ${r.ime}` : 'Nepoznat radnik'}</span>
                             <span className="flex flex-shrink-0 items-center gap-1">
+                              {odsustvoBadge(a.radnik_id)}
                               <WorkerCount count={workerCount(a.radnik_id)} />
                               <button
                                 type="button"
@@ -1158,6 +1364,7 @@ export function RasporedView() {
                     <p className="truncate text-xs font-medium text-slate-800">{r.prezime} {r.ime}</p>
                     {cars && <p className={`truncate text-[10px] ${assignments.length > 1 ? 'text-red-600' : 'text-emerald-700'}`}>{cars}</p>}
                   </div>
+                  {odsustvoBadge(r.id)}
                   <WorkerCount count={assignments.length} />
                 </div>
               );
@@ -1225,6 +1432,7 @@ export function RasporedView() {
         </aside>
         </div>
       </div>
+      )}
 
       <Modal
         wide
@@ -1534,6 +1742,9 @@ export function RasporedView() {
                     />
                     <span className="text-sm text-slate-700">
                       {r.ime} {r.prezime} <span className="text-slate-400">— {r.uloga}</span>
+                      {odsustvoOf(r.id) && (
+                        <span className="ml-2 text-xs font-semibold text-red-600">{odsustvoLabel(odsustvoOf(r.id)!)}</span>
+                      )}
                     </span>
                   </label>
                 ))}

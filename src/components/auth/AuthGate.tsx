@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { Fragment, useState, type FormEvent, type ReactNode } from 'react';
 import { Building2, LogOut } from 'lucide-react';
 import { useAuth } from '@/auth/useAuth';
 import { supabase } from '@/lib/supabase';
@@ -46,7 +46,7 @@ function PasswordRecoveryForm({ onSave }: { onSave: (password: string) => Promis
 }
 
 function AuthForm() {
-  const [mode, setMode] = useState<'login' | 'signup' | 'reset'>('login');
+  const [mode, setMode] = useState<'login' | 'reset'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState<string | null>(null);
@@ -62,16 +62,6 @@ function AuthForm() {
       if (mode === 'login') {
         const { error: authError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
         if (authError) throw authError;
-      } else if (mode === 'signup') {
-        const { error: authError } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: { emailRedirectTo: window.location.origin },
-        });
-        if (authError) throw authError;
-        setMessage('Registracija je zaprimljena. Administrator mora odobriti račun prije pristupa podacima.');
-        setMode('login');
-        setPassword('');
       } else {
         const { error: authError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
           redirectTo: window.location.origin,
@@ -86,7 +76,7 @@ function AuthForm() {
     }
   };
 
-  const title = mode === 'login' ? 'Prijava u aplikaciju' : mode === 'signup' ? 'Izrada korisničkog računa' : 'Promjena lozinke';
+  const title = mode === 'login' ? 'Prijava u aplikaciju' : 'Promjena lozinke';
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8">
       <form onSubmit={submit} className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
@@ -101,18 +91,17 @@ function AuthForm() {
         {mode !== 'reset' && (
           <label className="mb-4 block text-sm font-medium text-slate-700">
             Lozinka
-            <input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100" />
-            {mode === 'signup' && <span className="mt-1 block text-xs text-slate-500">Najmanje 8 znakova.</span>}
+            <input type="password" autoComplete="current-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100" />
           </label>
         )}
         {error && <p role="alert" className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
         {message && <p role="status" className="mb-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
         <button type="submit" disabled={busy} className="w-full rounded-lg bg-sky-600 px-4 py-2.5 font-semibold text-white hover:bg-sky-700 disabled:cursor-wait disabled:opacity-60">
-          {busy ? 'Molimo pričekajte…' : mode === 'login' ? 'Prijavi se' : mode === 'signup' ? 'Registriraj se' : 'Pošalji poveznicu'}
+          {busy ? 'Molimo pričekajte…' : mode === 'login' ? 'Prijavi se' : 'Pošalji poveznicu'}
         </button>
         <div className="mt-4 flex flex-wrap justify-between gap-2 text-sm">
           {mode !== 'login' && <button type="button" onClick={() => { setMode('login'); setError(null); setMessage(null); }} className="text-sky-700 hover:underline">Prijava</button>}
-          {mode === 'login' && <button type="button" onClick={() => { setMode('signup'); setError(null); setMessage(null); }} className="text-sky-700 hover:underline">Izradi račun</button>}
+          {mode === 'login' && <span className="text-xs text-slate-500">Za novi račun zatražite pozivnicu administratora tvrtke.</span>}
           {mode === 'login' && <button type="button" onClick={() => { setMode('reset'); setError(null); setMessage(null); }} className="text-slate-600 hover:underline">Zaboravljena lozinka?</button>}
         </div>
       </form>
@@ -121,7 +110,7 @@ function AuthForm() {
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {
-  const { session, profile, loading, accessError, recoveryMode, updatePassword, signOut } = useAuth();
+  const { session, profile, company, loading, accessError, recoveryMode, updatePassword, signOut } = useAuth();
   const [signOutError, setSignOutError] = useState<string | null>(null);
   if (recoveryMode) return <PasswordRecoveryForm onSave={updatePassword} />;
   if (loading) return <div className="flex min-h-screen items-center justify-center text-sm text-slate-500">Provjera prijave…</div>;
@@ -150,5 +139,5 @@ export function AuthGate({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  return <>{children}</>;
+  return <Fragment key={`${profile.id}:${company?.id}`}>{children}</Fragment>;
 }

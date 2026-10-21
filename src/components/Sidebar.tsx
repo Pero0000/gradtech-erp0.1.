@@ -44,7 +44,8 @@ export type View =
   | 'obavijesti'
   | 'asistent'
   | 'postavke'
-  | 'korisnici';
+  | 'korisnici'
+  | 'tvrtke';
 
 interface SidebarProps {
   current: View;
@@ -111,6 +112,7 @@ const navSections: {
     items: [
       { view: 'postavke', label: 'Postavke', icon: Settings },
       { view: 'korisnici', label: 'Korisnici i prava', icon: UserCog },
+      { view: 'tvrtke', label: 'Tvrtke', icon: Building2 },
     ],
   },
 ];
@@ -126,7 +128,7 @@ const countMap: Partial<Record<View, keyof SidebarProps['counts']>> = {
 };
 
 export function Sidebar({ current, onNavigate, mobileOpen, onMobileClose, counts }: SidebarProps) {
-  const { canAccess, isAdmin, profile, signOut } = useAuth();
+  const { canAccess, isAdmin, isPlatformOwner, company, profile, signOut } = useAuth();
   const [signOutError, setSignOutError] = useState<string | null>(null);
   return (
     <>
@@ -138,13 +140,15 @@ export function Sidebar({ current, onNavigate, mobileOpen, onMobileClose, counts
         </div>
         <div>
           <p className="text-sm font-bold text-slate-900 leading-tight">GradTech</p>
-          <p className="text-xs text-slate-500">Upravljanje firmom</p>
+          <p className="text-xs text-slate-500">{company?.naziv}</p>
         </div>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         {navSections.map((section) => {
-          const items = section.items.filter((item) => item.view === 'korisnici'
+          const items = section.items.filter((item) => item.view === 'tvrtke'
+            ? isPlatformOwner
+            : item.view === 'korisnici'
             ? isAdmin
             : (() => {
               const module = moduleForView(item.view);

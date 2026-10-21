@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { companyStorage } from '@/lib/company';
 import {
   FileBarChart,
   Building2,
@@ -60,10 +61,10 @@ function daysUntil(d: string): number {
 export function RekapitulacijaView() {
   const [tab, setTab] = useState<'pregled' | 'financije'>('pregled');
   const [satnica, setSatnica] = useState(() => {
-    const saved = Number(localStorage.getItem('tm_univerzalna_satnica'));
+    const saved = Number(companyStorage.getItem('tm_univerzalna_satnica'));
     return saved > 0 ? saved : 18;
   });
-  const [nettoPoRadnicima, setNettoPoRadnicima] = useState(() => localStorage.getItem('tm_netto_po_radnicima') === '1');
+  const [nettoPoRadnicima, setNettoPoRadnicima] = useState(() => companyStorage.getItem('tm_netto_po_radnicima') === '1');
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [troskovi, setTroskovi] = useState<Trosak[]>([]);
@@ -140,11 +141,11 @@ export function RekapitulacijaView() {
   const setUniversalRate = (value: number) => {
     const next = Math.max(0, value);
     setSatnica(next);
-    localStorage.setItem('tm_univerzalna_satnica', String(next));
+    companyStorage.setItem('tm_univerzalna_satnica', String(next));
   };
   const setNettoMode = (value: boolean) => {
     setNettoPoRadnicima(value);
-    localStorage.setItem('tm_netto_po_radnicima', value ? '1' : '0');
+    companyStorage.setItem('tm_netto_po_radnicima', value ? '1' : '0');
   };
 
   const ukupnoFakture = fakture.reduce((sum, f) => sum + iznosFakture(f), 0);

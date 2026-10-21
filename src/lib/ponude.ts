@@ -87,9 +87,8 @@ export async function fetchSvePonudeStavke(): Promise<PonudaStavka[]> {
 
 export async function createPonuda(p: PonudaInput): Promise<Ponuda> {
   const godina = new Date(p.datum).getFullYear();
-  const { data: last, error: e1 } = await supabase.from('ponude').select('redni_broj').eq('godina', godina).order('redni_broj', { ascending: false }).limit(1);
+  const { data: redni_broj, error: e1 } = await supabase.rpc('next_company_number', { p_kind: 'ponuda', p_year: godina });
   if (e1) fail(e1);
-  const redni_broj = ((last?.[0] as { redni_broj: number } | undefined)?.redni_broj ?? 0) + 1;
   const { data, error } = await supabase.from('ponude').insert({ ...p, godina, redni_broj }).select().single();
   if (error) fail(error);
   return data as Ponuda;

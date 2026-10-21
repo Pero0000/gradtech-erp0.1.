@@ -1,3 +1,5 @@
+import { companyStorage, requireCompany } from './company';
+
 export type ObavijestTip =
   | 'radnik_lijecnicki'
   | 'radnik_zastita'
@@ -50,9 +52,10 @@ export function defaultPostavke(): Postavke {
 }
 
 export function loadPostavke(): Postavke {
+  requireCompany();
   const base = defaultPostavke();
   try {
-    const saved = JSON.parse(localStorage.getItem(KEY) ?? 'null') as Partial<Postavke> | null;
+    const saved = JSON.parse(companyStorage.getItem(KEY) ?? 'null') as Partial<Postavke> | null;
     if (!saved) return base;
     return { ...base, ...saved, obavijesti: { ...base.obavijesti, ...(saved.obavijesti ?? {}) } };
   } catch {
@@ -61,7 +64,7 @@ export function loadPostavke(): Postavke {
 }
 
 export function savePostavke(p: Postavke) {
-  localStorage.setItem(KEY, JSON.stringify(p));
+  companyStorage.setItem(KEY, JSON.stringify(p));
 }
 
 // Početak noćnog rada i dnevnog rada u minutama od ponoći (koristi se u obračunu noćnih sati)

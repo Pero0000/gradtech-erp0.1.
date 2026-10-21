@@ -21,6 +21,7 @@ import { ObavijestiView } from '@/components/views/ObavijestiView';
 import { PostavkeView } from '@/components/views/PostavkeView';
 import { AsistentView } from '@/components/views/AsistentView';
 import { KorisniciView } from '@/components/views/KorisniciView';
+import { TvrtkeView } from '@/components/views/TvrtkeView';
 import { loadObavijesti, sendPushNotifications } from '@/lib/obavijesti';
 import { loadPostavke } from '@/lib/postavke';
 import {
@@ -36,7 +37,7 @@ import { MODULES, moduleForView } from '@/auth/permissions';
 import { MobileWorkOrdersView } from '@/components/mobile/MobileWorkOrdersView';
 
 function App() {
-  const { canAccess, isAdmin, profile, signOut } = useAuth();
+  const { canAccess, isAdmin, isPlatformOwner, isWorker, company, profile, signOut } = useAuth();
   const [view, setView] = useState<View>('dashboard');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [focusNalogId, setFocusNalogId] = useState<string | null>(null);
@@ -52,10 +53,12 @@ function App() {
 
   useEffect(() => {
     if (!profile?.approved || !canAccess('obavijesti')) return;
+    let active = true;
     const refresh = async () => {
       try {
         const postavke = loadPostavke();
         const list = await loadObavijesti(postavke);
+        if (!active) return;
         setCounts((previous) => ({ ...previous, obavijesti: list.filter((o) => o.level !== 'upcoming').length }));
         if (postavke.push) sendPushNotifications(list);
       } catch {
@@ -64,7 +67,10 @@ function App() {
     };
     void refresh();
     const timer = window.setInterval(() => void refresh(), 30 * 60 * 1000);
-    return () => window.clearInterval(timer);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, [view, profile?.approved, canAccess]);
 
   useEffect(() => {
@@ -83,19 +89,22 @@ function App() {
 
   useEffect(() => {
     if (view === 'korisnici' && !isAdmin) setView('dashboard');
+    if (view === 'tvrtke' && !isPlatformOwner) setView('dashboard');
     const module = moduleForView(view);
     if (module && !canAccess(module)) {
       const firstAvailable = MODULES.find((item) => canAccess(item.id));
       if (firstAvailable) setView(firstAvailable.id);
+      else if (isPlatformOwner) setView('tvrtke');
     }
-  }, [view, isAdmin, canAccess]);
+  }, [view, isAdmin, isPlatformOwner, canAccess]);
 
-  if (Capacitor.isNativePlatform() && profile?.radnik_id && !isAdmin) {
+  // Radnici (nisu admin/voditelj) uvijek dobivaju Portal djelatnika — i na webu i na mobitelu.
+  if (isWorker || (Capacitor.isNativePlatform() && profile?.radnik_id && !isAdmin)) {
     return <MobileWorkOrdersView />;
   }
 
   const navigate = (nextView: View) => {
-    if (nextView === 'korisnici' ? isAdmin : (() => {
+    if (nextView === 'tvrtke' ? isPlatformOwner : nextView === 'korisnici' ? isAdmin : (() => {
       const module = moduleForView(nextView);
       return module !== null && canAccess(module);
     })()) {
@@ -106,9 +115,9 @@ function App() {
   };
 
   const module = moduleForView(view);
-  const viewAuthorized = view === 'korisnici' ? isAdmin : module !== null && canAccess(module);
+  const viewAuthorized = view === 'tvrtke' ? isPlatformOwner : view === 'korisnici' ? isAdmin : module !== null && canAccess(module);
 
-  if (!isAdmin && !MODULES.some((module) => canAccess(module.id))) {
+  if (!isAdmin && !isPlatformOwner && !MODULES.some((module) => canAccess(module.id))) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
         <div className="max-w-lg rounded-xl border border-amber-200 bg-white p-6 shadow-sm">
@@ -126,7 +135,7 @@ function App() {
       <main className="min-h-0 min-w-0 flex-1 overflow-auto">
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4 lg:hidden">
           <div>
-            <p className="text-sm font-bold text-slate-900">GradTech</p>
+            <p className="text-sm font-bold text-slate-900">GradTech · {company?.naziv}</p>
             <p className="text-xs text-slate-500">{MODULES.find((module) => module.id === view)?.label ?? 'Aplikacija'}</p>
           </div>
           <button type="button" onClick={() => setMobileNavOpen((open) => !open)} aria-label={mobileNavOpen ? 'Zatvori navigaciju' : 'Otvori navigaciju'} aria-expanded={mobileNavOpen} className="rounded-lg p-2 text-slate-700 hover:bg-slate-100">
@@ -141,6 +150,7 @@ function App() {
             </p>
           )}
           {viewAuthorized && view === 'dashboard' && <Dashboard onNavigate={navigate} />}
+          {viewAuthorized && view === 'tvrtke' && <TvrtkeView />}
           {viewAuthorized && view === 'gradilista' && <GradilistaView onOpenNalog={(id) => { setFocusNalogId(id); setView('radni_nalozi'); }} />}
           {viewAuthorized && view === 'investitori' && <InvestitoriView />}
           {viewAuthorized && view === 'objekti' && <ObjektiView />}

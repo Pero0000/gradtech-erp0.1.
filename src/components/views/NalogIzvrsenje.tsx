@@ -333,6 +333,12 @@ export function NalogIzvrsenje({
       setTeren(Boolean(izv.value.teren));
       setPoslovodja(izv.value.poslovodja_id ?? null);
       setVozac(izv.value.vozac_id ?? null);
+      // Jedini djelatnik na nalogu automatski postaje poslovođa.
+      if (!izv.value.poslovodja_id && vr.status === 'fulfilled' && vr.value.length === 1) {
+        const only = vr.value[0].radnik_id;
+        setPoslovodja(only);
+        void setNalogPoslovodja(nalog.id, only).catch(() => undefined);
+      }
     } else setError(errText(izv.reason, 'Greška pri učitavanju.') + hint + ' Za napomene pokreni i 20261015250000_nalog_napomena.sql.');
     if (st.status === 'fulfilled') setStavke(st.value);
     else setError((e) => e ?? errText(st.reason, 'Greška pri učitavanju materijala i alata.') + hint2);

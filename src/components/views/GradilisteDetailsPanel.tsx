@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { companyStorage } from '@/lib/company';
 import {
   Calendar,
   ChevronDown,
@@ -117,27 +118,27 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const [vtrDocumentUrls, setVtrDocumentUrls] = useState<Record<string, string>>({});
   const [openCostGroups, setOpenCostGroups] = useState<Set<string>>(new Set());
   const [satnica, setSatnicaState] = useState<number>(() => {
-    const saved = Number(localStorage.getItem('tm_univerzalna_satnica'));
+    const saved = Number(companyStorage.getItem('tm_univerzalna_satnica'));
     return saved > 0 ? saved : 18;
   });
-  const [showWorkers, setShowWorkersState] = useState(() => localStorage.getItem('tm_netto_po_radnicima') === '1');
-  const [showTeren, setShowTerenState] = useState(() => localStorage.getItem('tm_prikaz_teren') !== '0');
-  const [showNight, setShowNightState] = useState(() => localStorage.getItem('tm_prikaz_nocna') !== '0');
+  const [showWorkers, setShowWorkersState] = useState(() => companyStorage.getItem('tm_netto_po_radnicima') === '1');
+  const [showTeren, setShowTerenState] = useState(() => companyStorage.getItem('tm_prikaz_teren') !== '0');
+  const [showNight, setShowNightState] = useState(() => companyStorage.getItem('tm_prikaz_nocna') !== '0');
   const setSatnica = (value: number) => {
     setSatnicaState(value);
-    localStorage.setItem('tm_univerzalna_satnica', String(value));
+    companyStorage.setItem('tm_univerzalna_satnica', String(value));
   };
   const setShowWorkers = (value: boolean) => {
     setShowWorkersState(value);
-    localStorage.setItem('tm_netto_po_radnicima', value ? '1' : '0');
+    companyStorage.setItem('tm_netto_po_radnicima', value ? '1' : '0');
   };
   const setShowTeren = (value: boolean) => {
     setShowTerenState(value);
-    localStorage.setItem('tm_prikaz_teren', value ? '1' : '0');
+    companyStorage.setItem('tm_prikaz_teren', value ? '1' : '0');
   };
   const setShowNight = (value: boolean) => {
     setShowNightState(value);
-    localStorage.setItem('tm_prikaz_nocna', value ? '1' : '0');
+    companyStorage.setItem('tm_prikaz_nocna', value ? '1' : '0');
   };
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

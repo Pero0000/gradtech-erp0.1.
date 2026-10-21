@@ -192,6 +192,12 @@ export interface DnevniRasporedRadnik {
                                                                   cijena_godisnji?: number;
                                                                   cijena_bolovanje?: number;
                                                                   cijena_put_sat?: number;
+                                                                  pravo_nocni?: boolean;
+                                                                  pravo_teren?: boolean;
+                                                                  pravo_praznik?: boolean;
+                                                                  pravo_godisnji?: boolean;
+                                                                  pravo_bolovanje?: boolean;
+                                                                  portal_vrijeme?: boolean;
                                                                   bonusi?: RadnikBonus[];
                                                                     created_at: string;
                                                                       updated_at: string;
@@ -283,6 +289,7 @@ export interface DnevniRasporedRadnik {
                                                                                                                                                 datum: string;
                                                                                                                                                   sati: number;
                                                                                                                                                     nalog_id?: string | null;
+                                                                                                                                                    nocni_sati?: number | null;
                                                                                                                                                     napomena: string | null;
                                                                                                                                                       created_at: string;
                                                                                                                                                         radnici?: Pick<Radnik, 'id' | 'ime' | 'prezime' | 'uloga' | 'cijena_sata'> | null;

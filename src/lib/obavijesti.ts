@@ -1,4 +1,5 @@
 import type { Faktura, Gradiliste, Radnik, Rok, Vozilo, VoziloDokument, RadnikDokument } from '@/types';
+import { companyStorage } from './company';
 import {
   fetchFakture,
   fetchGradilista,
@@ -182,7 +183,7 @@ export function sendPushNotifications(list: Obavijest[]) {
   const today = todayISO();
   let sent: Record<string, string> = {};
   try {
-    sent = JSON.parse(localStorage.getItem(SENT_KEY) ?? '{}') as Record<string, string>;
+    sent = JSON.parse(companyStorage.getItem(SENT_KEY) ?? '{}') as Record<string, string>;
   } catch {
     sent = {};
   }
@@ -193,5 +194,5 @@ export function sendPushNotifications(list: Obavijest[]) {
   if (fresh.length > 5) new Notification('Još obavijesti', { body: `Ukupno ${fresh.length} novih obavijesti.`, tag: 'tm-more' });
   const next: Record<string, string> = {};
   list.forEach((o) => { next[o.id] = sent[o.id] === today || fresh.includes(o) ? today : sent[o.id]; });
-  localStorage.setItem(SENT_KEY, JSON.stringify(Object.fromEntries(Object.entries(next).filter(([, v]) => v))));
+  companyStorage.setItem(SENT_KEY, JSON.stringify(Object.fromEntries(Object.entries(next).filter(([, v]) => v))));
 }

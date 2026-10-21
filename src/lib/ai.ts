@@ -11,12 +11,13 @@ import {
 } from '@/lib/api';
 import { loadObavijesti } from '@/lib/obavijesti';
 import { loadPostavke } from '@/lib/postavke';
+import { companyStorage } from './company';
 
 const KEY_STORAGE = 'tm_gemini_key';
 export const MODEL = 'gemini-3-flash-preview';
 
-export const getAiKey = () => localStorage.getItem(KEY_STORAGE) ?? '';
-export const setAiKey = (key: string) => (key ? localStorage.setItem(KEY_STORAGE, key) : localStorage.removeItem(KEY_STORAGE));
+export const getAiKey = () => companyStorage.getItem(KEY_STORAGE) ?? '';
+export const setAiKey = (key: string) => (key ? companyStorage.setItem(KEY_STORAGE, key) : companyStorage.removeItem(KEY_STORAGE));
 
 export interface ChatMessage {
   role: 'user' | 'model';

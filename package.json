@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
+    "test:company": "node --test tests/company.test.mjs",
+    "test:obracun": "node --test tests/obracun.test.mjs",
     "cap:sync": "npm run build && cap sync",
     "cap:android": "cap open android",
     "cap:ios": "cap open ios"

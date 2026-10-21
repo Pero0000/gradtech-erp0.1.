@@ -80,12 +80,12 @@ Deno.serve(async (request) => {
       auth: { persistSession: false, autoRefreshToken: false },
     });
     const [{ data: profile, error: profileError }, { data: permission, error: permissionError }] = await Promise.all([
-      serviceClient.from('app_profiles').select('approved,is_admin').eq('id', callerData.user.id).single(),
+      callerClient.from('app_profiles').select('approved,is_admin,company_id').eq('id', callerData.user.id).single(),
       callerClient.rpc('app_has_module_permission', { p_module: 'radni_nalozi', p_action: 'edit' }),
     ]);
     if (profileError) throw profileError;
     if (permissionError) throw permissionError;
-    if (!profile.approved || (!profile.is_admin && permission !== true)) {
+    if (!profile.approved || permission !== true) {
       return jsonResponse({ error: 'You cannot distribute work orders.' }, 403);
     }
 
@@ -99,6 +99,7 @@ Deno.serve(async (request) => {
       .from('radni_nalozi')
       .select('id,broj,naslov,zakljucen_at,mobile_status,radni_nalozi_radnici(radnik_id)')
       .eq('id', nalogId)
+      .eq('company_id', profile.company_id)
       .single();
     if (nalogError) throw nalogError;
     if (!nalog.zakljucen_at || nalog.mobile_status !== 'dodijeljen') {
@@ -111,6 +112,7 @@ Deno.serve(async (request) => {
       .from('app_profiles')
       .select('id,radnik_id')
       .eq('approved', true)
+      .eq('company_id', profile.company_id)
       .in('radnik_id', workerIds);
     if (workersError) throw workersError;
     const userIds = (profiles ?? []).map((worker) => worker.id);
@@ -119,6 +121,7 @@ Deno.serve(async (request) => {
     const { data: devices, error: devicesError } = await serviceClient
       .from('app_push_tokens')
       .select('user_id,token,platform')
+      .eq('company_id', profile.company_id)
       .in('user_id', userIds);
     if (devicesError) throw devicesError;
     if (!devices?.length) return jsonResponse({ sent: 0, failed: 0, reason: 'no_registered_devices' });

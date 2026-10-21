@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { companyStorage, requireCompany } from './company';
 
 export interface PonudaPostavke {
   izvodac: string;
@@ -18,7 +19,7 @@ export interface PonudaPostavke {
 }
 
 export const defaultPonudaPostavke: PonudaPostavke = {
-  izvodac: 'Tm-color d.o.o.',
+  izvodac: '',
   adresa: '',
   oib: '',
   mjesto: '',
@@ -42,35 +43,42 @@ export const defaultPonudaPostavke: PonudaPostavke = {
 const KEY = 'tm_ponude_postavke';
 
 export function loadPonudaPostavke(): PonudaPostavke {
+  const company = requireCompany();
+  const defaults = { ...defaultPonudaPostavke, izvodac: company.naziv, oib: company.oib, adresa: company.adresa };
   try {
-    const raw = localStorage.getItem(KEY);
-    return raw ? { ...defaultPonudaPostavke, ...(JSON.parse(raw) as Partial<PonudaPostavke>) } : defaultPonudaPostavke;
+    const raw = companyStorage.getItem(KEY);
+    return raw ? { ...defaults, ...(JSON.parse(raw) as Partial<PonudaPostavke>) } : defaults;
   } catch {
-    return defaultPonudaPostavke;
+    return defaults;
   }
 }
 
 export function savePonudaPostavke(p: PonudaPostavke) {
-  localStorage.setItem(KEY, JSON.stringify(p));
+  companyStorage.setItem(KEY, JSON.stringify(p));
 }
 
 // Povlači postavke iz baze u lokalnu kopiju; ako ih u bazi nema, postojeće lokalne se prenose u bazu
 export async function syncPonudaPostavke(): Promise<PonudaPostavke> {
+  const company = requireCompany();
   const { data, error } = await supabase.from('ponude_postavke').select('podaci').eq('id', 1).maybeSingle();
   if (error) throw new Error(`${error.message} — pokreni migraciju 20261015420000_ponude_postavke.sql u Supabaseu.`);
+  if (requireCompany().id !== company.id) throw new Error('Tvrtka prijavljenog korisnika se promijenila. Ponovno otvorite ponude.');
   const remote = data?.podaci as Partial<PonudaPostavke> | undefined;
   if (remote && Object.keys(remote).length > 0) {
-    const merged = { ...defaultPonudaPostavke, ...remote };
-    localStorage.setItem(KEY, JSON.stringify(merged));
+    const merged = { ...defaultPonudaPostavke, izvodac: company.naziv, oib: company.oib, adresa: company.adresa, ...remote };
+    companyStorage.setItem(KEY, JSON.stringify(merged));
     return merged;
   }
   const local = loadPonudaPostavke();
-  if (localStorage.getItem(KEY)) await saveRemote(local);
+  if (companyStorage.getItem(KEY)) await saveRemote(local);
   return local;
 }
 
 async function saveRemote(p: PonudaPostavke) {
-  const { error } = await supabase.from('ponude_postavke').upsert({ id: 1, podaci: p, updated_at: new Date().toISOString() });
+  const { error } = await supabase.from('ponude_postavke').upsert(
+    { id: 1, company_id: requireCompany().id, podaci: p, updated_at: new Date().toISOString() },
+    { onConflict: 'company_id,id' },
+  );
   if (error) throw new Error(`${error.message} — pokreni migraciju 20261015420000_ponude_postavke.sql u Supabaseu.`);
 }
 

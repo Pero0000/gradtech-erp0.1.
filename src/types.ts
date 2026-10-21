@@ -343,8 +343,14 @@ zadatak_id?: string | null;
   gotovo_at: string | null;
   rok?: string | null;
   nalog_id?: string | null;
+  /** Prije migracije 20261021160000 stupac ne postoji pa se tretira kao 'zadatak'. */
+  vrsta?: ZadatakVrsta;
   created_at: string;
 }
+
+export type ZadatakVrsta = 'zadatak' | 'dodatni';
+
+export const zadatakVrsta = (z: Pick<GradilisteZadatak, 'vrsta'>): ZadatakVrsta => (z.vrsta === 'dodatni' ? 'dodatni' : 'zadatak');
 
 export type FakturaStatus = 'izdana' | 'placena' | 'nep placena';
 

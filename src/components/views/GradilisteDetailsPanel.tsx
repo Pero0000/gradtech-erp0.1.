@@ -27,7 +27,9 @@ import type {
   Trosak,
   TrosakKategorija,
   UgovoreniRad,
+  ZadatakVrsta,
 } from '@/types';
+import { zadatakVrsta } from '@/types';
 import {
   createFaktura,
   createGradilisteZadatak,
@@ -59,6 +61,11 @@ import { GradilisteTroskovnik } from '@/components/views/GradilisteTroskovnik';
 import { Modal } from '@/components/ui/Modal';
 import { Field, Select, TextInput, Textarea } from '@/components/ui/Field';
 import { fetchPonude, fetchSvePonudeStavke, ponudaBroj, ponudaUkupno, updatePonuda, type Ponuda, type PonudaStavka } from '@/lib/ponude';
+
+const ZADATAK_SEKCIJE: { vrsta: ZadatakVrsta; naslov: string; prazno: string; placeholder: string }[] = [
+  { vrsta: 'zadatak', naslov: 'Radni zadaci', prazno: 'Nema radnih zadataka.', placeholder: 'Novi zadatak…' },
+  { vrsta: 'dodatni', naslov: 'Dodatni radovi', prazno: 'Nema dodatnih radova.', placeholder: 'Novi dodatni rad…' },
+];
 
 interface GradilisteDetailsPanelProps {
   gradiliste: Gradiliste;
@@ -243,8 +250,8 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   }, [gradiliste.id, gradiliste.ugovorena_vrijednost, gradiliste.predvidena_marza]);
 
   const [zadaci, setZadaci] = useState<GradilisteZadatak[]>([]);
-  const [newZadatak, setNewZadatak] = useState('');
-  const [newZadatakRok, setNewZadatakRok] = useState('');
+  const [newZadatak, setNewZadatak] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
+  const [newZadatakRok, setNewZadatakRok] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
   const [editingZadatakId, setEditingZadatakId] = useState<string | null>(null);
   const [editingZadatakText, setEditingZadatakText] = useState('');
 
@@ -268,12 +275,13 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     onRokoviChange?.();
   };
 
-  const addZadatak = async () => {
-    if (!newZadatak.trim()) return;
+  const addZadatak = async (vrsta: ZadatakVrsta) => {
+    const naziv = newZadatak[vrsta].trim();
+    if (!naziv) return;
     try {
-      await createGradilisteZadatak(gradiliste.id, newZadatak.trim(), newZadatakRok);
-      setNewZadatak('');
-      setNewZadatakRok('');
+      await createGradilisteZadatak(gradiliste.id, naziv, newZadatakRok[vrsta], vrsta);
+      setNewZadatak((prev) => ({ ...prev, [vrsta]: '' }));
+      setNewZadatakRok((prev) => ({ ...prev, [vrsta]: '' }));
       await afterZadatakChange();
     } catch (reason) {
       setError(errText(reason, 'Greška pri spremanju zadatka.'));
@@ -954,7 +962,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                         </div>
                         <span className={`flex-shrink-0 font-medium ${late ? 'text-red-600' : 'text-slate-600'}`}>{date(item.datum)}</span>
                         {item.zadatak_id ? (
-                          <span className="flex-shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">Zadatak</span>
+                          <span className="flex-shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{item.opis === 'Dodatni rad' ? 'Dodatni rad' : 'Zadatak'}</span>
                         ) : (
                           <>
                             <button type="button" onClick={() => openDeadlineEditor(item)} className="flex-shrink-0 text-slate-400 hover:text-sky-600" aria-label="Uredi rok">
@@ -972,10 +980,13 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               )}
             </Section>
 
-            <Section title={`Radni zadaci (${zadaci.filter((z) => z.gotovo).length}/${zadaci.length})`} icon={<ClipboardList className="h-4 w-4" />}>
-              {zadaci.length === 0 && <p className="mb-2 text-xs text-slate-400">Nema radnih zadataka.</p>}
+            {ZADATAK_SEKCIJE.map((sekcija) => {
+              const lista = zadaci.filter((z) => zadatakVrsta(z) === sekcija.vrsta);
+              return (
+            <Section key={sekcija.vrsta} title={`${sekcija.naslov} (${lista.filter((z) => z.gotovo).length}/${lista.length})`} icon={<ClipboardList className="h-4 w-4" />}>
+              {lista.length === 0 && <p className="mb-2 text-xs text-slate-400">{sekcija.prazno}</p>}
               <div className="space-y-1.5">
-                {zadaci.map((z) => (
+                {lista.map((z) => (
                   <div
                     key={z.id}
                     className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs transition-colors ${z.gotovo ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'}`}
@@ -1020,23 +1031,23 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               </div>
               <div className="mt-2 flex items-center gap-2">
                 <input
-                  value={newZadatak}
-                  onChange={(event) => setNewZadatak(event.target.value)}
-                  onKeyDown={(event) => { if (event.key === 'Enter') void addZadatak(); }}
-                  placeholder="Novi zadatak…"
+                  value={newZadatak[sekcija.vrsta]}
+                  onChange={(event) => setNewZadatak((prev) => ({ ...prev, [sekcija.vrsta]: event.target.value }))}
+                  onKeyDown={(event) => { if (event.key === 'Enter') void addZadatak(sekcija.vrsta); }}
+                  placeholder={sekcija.placeholder}
                   className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs"
                 />
                 <input
                   type="date"
-                  value={newZadatakRok}
-                  onChange={(event) => setNewZadatakRok(event.target.value)}
+                  value={newZadatakRok[sekcija.vrsta]}
+                  onChange={(event) => setNewZadatakRok((prev) => ({ ...prev, [sekcija.vrsta]: event.target.value }))}
                   title="Rok izvršenja (neobavezno)"
                   className="w-[8rem] flex-shrink-0 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                 />
                 <button
                   type="button"
-                  onClick={() => void addZadatak()}
-                  disabled={!newZadatak.trim()}
+                  onClick={() => void addZadatak(sekcija.vrsta)}
+                  disabled={!newZadatak[sekcija.vrsta].trim()}
                   className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50"
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -1044,6 +1055,8 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                 </button>
               </div>
             </Section>
+              );
+            })}
 
             <GradilisteMaterijalDokumenti gradilisteId={gradiliste.id} />
 

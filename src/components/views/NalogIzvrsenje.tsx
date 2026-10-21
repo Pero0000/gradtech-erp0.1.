@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Camera, Check, ChevronDown, Clock, FileText, Gauge, Hammer, History, Package, Plus, Trash2, ListChecks, Wrench } from 'lucide-react';
-import type { GradilisteZadatak, Oprema, RadniNalog } from '@/types';
+import type { GradilisteZadatak, Oprema, RadniNalog, ZadatakVrsta } from '@/types';
+import { zadatakVrsta } from '@/types';
 import {
   addNalogStavka,
   addNalogAlatFromInventory,
@@ -307,7 +308,7 @@ export function NalogIzvrsenje({
   const docRef = useRef<HTMLInputElement>(null);
   const [vremena, setVremena] = useState<NalogRadnikVrijeme[]>([]);
   const [zadaci, setZadaci] = useState<GradilisteZadatak[]>([]);
-  const [newZadatak, setNewZadatak] = useState('');
+  const [newZadatak, setNewZadatak] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
   const [foto, setFoto] = useState<NalogFoto[]>([]);
   const [audit, setAudit] = useState<MobileWorkOrderAuditEntry[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -462,13 +463,13 @@ export function NalogIzvrsenje({
     if (row) void guard(() => saveNalogRadnikVrijeme(nalog.id, radnikId, row.vrijeme_od, row.vrijeme_do), 'Greška pri spremanju vremena.');
   };
 
-  const addZadatak = () => {
-    const naziv = newZadatak.trim();
+  const addZadatak = (vrsta: ZadatakVrsta) => {
+    const naziv = newZadatak[vrsta].trim();
     if (!naziv) return;
     const gradilisteId = nalog.gradiliste_id ?? null;
     void guard(async () => {
-      await addNalogZadatak(nalog.id, gradilisteId, naziv);
-      setNewZadatak('');
+      await addNalogZadatak(nalog.id, gradilisteId, naziv, vrsta);
+      setNewZadatak((prev) => ({ ...prev, [vrsta]: '' }));
       setZadaci(await fetchNalogZadaci(nalog.id));
     }, 'Greška pri dodavanju zadatka.');
   };
@@ -591,38 +592,41 @@ export function NalogIzvrsenje({
         />
         {!napomena.trim() && <p className="text-sm font-medium text-amber-900">Napomena nije upisana.</p>}
       </div>
-      <div className={hideZadaci ? 'hidden' : undefined}>
+      {([['zadatak', 'Radni zadaci', 'Nema zadataka na ovom nalogu.', 'Novi radni zadatak'], ['dodatni', 'Dodatni radovi', 'Nema dodatnih radova na ovom nalogu.', 'Novi dodatni rad']] as const).map(([vrsta, naslov, prazno, placeholder]) => {
+        const lista = zadaci.filter((z) => zadatakVrsta(z) === vrsta);
+        return (
+      <div key={vrsta} className={hideZadaci ? 'hidden' : undefined}>
         <SectionTitle icon={<ListChecks className="h-4 w-4" />}>
-          Radni zadaci ({zadaci.filter((z) => z.gotovo).length}/{zadaci.length})
+          {naslov} ({lista.filter((z) => z.gotovo).length}/{lista.length})
         </SectionTitle>
         <div className="space-y-1.5">
-          {zadaci.map((z) => (
+          {lista.map((z) => (
             <div key={z.id} className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-sm ${z.gotovo ? 'border-emerald-200 bg-emerald-50' : 'border-slate-100'}`}>
               <input type="checkbox" checked={z.gotovo} onChange={() => toggleZadatak(z)} className="h-4 w-4 rounded border-slate-300" />
               <span className={`flex-1 ${z.gotovo ? 'text-emerald-800 line-through' : 'text-slate-800'}`}>{z.naziv}</span>
-              <button onClick={() => removeZadatak(z.id)} className="text-slate-300 hover:text-red-600" aria-label="Obriši zadatak">
+              <button onClick={() => removeZadatak(z.id)} className="text-slate-300 hover:text-red-600" aria-label="Obriši">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
           ))}
-          {zadaci.length === 0 && <p className="text-xs text-slate-400">Nema zadataka na ovom nalogu.</p>}
+          {lista.length === 0 && <p className="text-xs text-slate-400">{prazno}</p>}
         </div>
-        {(
-          <div className="mt-2 flex gap-2">
-            <input
-              value={newZadatak}
-              onChange={(e) => setNewZadatak(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') addZadatak(); }}
-              placeholder="Novi radni zadatak"
-              className={`${inputCls} flex-1`}
-            />
-            <button onClick={addZadatak} disabled={!newZadatak.trim()} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">
-              <Plus className="h-4 w-4" />
-              Dodaj
-            </button>
-          </div>
-        )}
+        <div className="mt-2 flex gap-2">
+          <input
+            value={newZadatak[vrsta]}
+            onChange={(e) => setNewZadatak((prev) => ({ ...prev, [vrsta]: e.target.value }))}
+            onKeyDown={(e) => { if (e.key === 'Enter') addZadatak(vrsta); }}
+            placeholder={placeholder}
+            className={`${inputCls} flex-1`}
+          />
+          <button onClick={() => addZadatak(vrsta)} disabled={!newZadatak[vrsta].trim()} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">
+            <Plus className="h-4 w-4" />
+            Dodaj
+          </button>
+        </div>
       </div>
+        );
+      })}
 
       <div>
         <SectionTitle icon={<Clock className="h-4 w-4" />}>Radno vrijeme radnika</SectionTitle>

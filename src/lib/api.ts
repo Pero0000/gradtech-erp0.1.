@@ -13,6 +13,7 @@ import type {
   RadnikDokumentVrsta,
   DnevniRasporedGradiliste,
   GradilisteZadatak,
+  ZadatakVrsta,
   DnevniRasporedOstalo,
   DnevniRasporedRadnik,
   Gradiliste,
@@ -1841,17 +1842,17 @@ export async function fetchNalogZadaci(nalogId: string): Promise<GradilisteZadat
   return (data ?? []) as GradilisteZadatak[];
 }
 
-export async function addNalogZadatak(nalogId: string, gradilisteId: string | null, naziv: string) {
+export async function addNalogZadatak(nalogId: string, gradilisteId: string | null, naziv: string, vrsta: ZadatakVrsta = 'zadatak') {
   const { data, error } = await supabase
     .from('gradiliste_zadaci')
-    .insert({ nalog_id: nalogId, gradiliste_id: gradilisteId, naziv })
+    .insert({ nalog_id: nalogId, gradiliste_id: gradilisteId, naziv, ...vrstaPolje(vrsta) })
     .select()
     .single();
   if (error) {
     if (!gradilisteId && String(error.message ?? '').includes('gradiliste_id')) {
       throw new Error('Pokreni migraciju 20261019110000_zadaci_bez_gradilista.sql u Supabase SQL editoru.');
     }
-    throw error;
+    throw dodatniMigracijaError(error);
   }
   return data as GradilisteZadatak;
 }
@@ -2246,6 +2247,14 @@ export async function setNalogZadaci(nalogId: string, gradilisteId: string | nul
   if (error) throw error;
 }
 
+// Stupac "vrsta" šalje se samo za dodatne radove, da radni zadaci rade i prije migracije 20261021160000.
+const vrstaPolje = (vrsta: ZadatakVrsta) => (vrsta === 'dodatni' ? { vrsta } : {});
+
+const dodatniMigracijaError = (error: { message?: string }) =>
+  /vrsta/i.test(String(error.message ?? ''))
+    ? new Error('Pokreni migraciju 20261021160000_dodatni_radovi.sql u Supabase SQL editoru.')
+    : error;
+
 async function syncZadatakRok(z: GradilisteZadatak) {
   if (!z.rok || !z.gradiliste_id) {
     const { error } = await supabase.from('rokovi').delete().eq('zadatak_id', z.id);
@@ -2258,18 +2267,18 @@ async function syncZadatakRok(z: GradilisteZadatak) {
   if ((data ?? []).length === 0) {
     const { error: insertError } = await supabase
       .from('rokovi')
-      .insert({ ...payload, gradiliste_id: z.gradiliste_id, zadatak_id: z.id, opis: 'Radni zadatak' });
+      .insert({ ...payload, gradiliste_id: z.gradiliste_id, zadatak_id: z.id, opis: z.vrsta === 'dodatni' ? 'Dodatni rad' : 'Radni zadatak' });
     if (insertError) throw insertError;
   }
 }
 
-export async function createGradilisteZadatak(gradilisteId: string, naziv: string, rok?: string | null) {
+export async function createGradilisteZadatak(gradilisteId: string, naziv: string, rok?: string | null, vrsta: ZadatakVrsta = 'zadatak') {
   const { data, error } = await supabase
     .from('gradiliste_zadaci')
-    .insert({ gradiliste_id: gradilisteId, naziv, rok: rok || null })
+    .insert({ gradiliste_id: gradilisteId, naziv, rok: rok || null, ...vrstaPolje(vrsta) })
     .select()
     .single();
-  if (error) throw error;
+  if (error) throw dodatniMigracijaError(error);
   await syncZadatakRok(data as GradilisteZadatak);
   return data as GradilisteZadatak;
 }

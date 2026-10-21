@@ -1,6 +1,7 @@
 ﻿import { useCallback, useEffect, useRef, useState } from 'react';
 import { CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, GripVertical, Hammer, Package, Plus, Send, Trash2, Truck, X } from 'lucide-react';
-import type { DnevniRasporedGradiliste, DnevniRasporedOstalo, DnevniRasporedRadnik, Gradiliste, GradilisteRegija, GradilisteZadatak, NalogPrioritet, NalogStatus, Radnik, RadnikOdsustvo, Rok, Vozilo } from '@/types';
+import type { DnevniRasporedGradiliste, DnevniRasporedOstalo, DnevniRasporedRadnik, Gradiliste, GradilisteRegija, GradilisteZadatak, NalogPrioritet, NalogStatus, Radnik, RadnikOdsustvo, Rok, Vozilo, ZadatakVrsta } from '@/types';
+import { zadatakVrsta } from '@/types';
 import { nextDeadline } from '@/lib/rokovi';
 import { Modal } from '@/components/ui/Modal';
 import { NalogIzvrsenje } from './NalogIzvrsenje';
@@ -61,6 +62,27 @@ type DragPayload =
 
 type SortMode = 'manual' | 'datum_pocetka' | 'datum_zavrsetka';
 
+const prazniNoviZadaci: Record<ZadatakVrsta, string> = { zadatak: '', dodatni: '' };
+
+const ZADATAK_SEKCIJE_NALOGA: { vrsta: ZadatakVrsta; naslov: string; praznoGradiliste: string; praznoNalog: string; novi: string; placeholder: string }[] = [
+  {
+    vrsta: 'zadatak',
+    naslov: 'Radni zadaci za ovaj nalog',
+    praznoGradiliste: 'Nema otvorenih radnih zadataka za ovo gradilište.',
+    praznoNalog: 'Upiši radne zadatke za ovaj nalog.',
+    novi: 'Novi radni zadatak',
+    placeholder: 'Npr. bojanje hodnika 1. kat',
+  },
+  {
+    vrsta: 'dodatni',
+    naslov: 'Dodatni radovi za ovaj nalog',
+    praznoGradiliste: 'Nema otvorenih dodatnih radova za ovo gradilište.',
+    praznoNalog: 'Upiši dodatne radove za ovaj nalog.',
+    novi: 'Novi dodatni rad',
+    placeholder: 'Npr. dodatno gletanje stubišta',
+  },
+];
+
 interface NalogForm {
   fresh?: boolean;
   nalogId?: string;
@@ -77,7 +99,7 @@ interface NalogForm {
   radnik_ids: string[];
   radnik_options: string[];
   zadatak_ids: string[];
-  novi_zadaci: string[];
+  novi_zadaci: { naziv: string; vrsta: ZadatakVrsta }[];
   stavka_ids: string[];
   nove_stavke: { tip: 'materijal' | 'alat'; naziv: string }[];
 }
@@ -200,7 +222,7 @@ export function RasporedView() {
   const [nalogStavkeLoading, setNalogStavkeLoading] = useState(false);
   const [noviMaterijal, setNoviMaterijal] = useState('');
   const [noviAlat, setNoviAlat] = useState('');
-  const [noviZadatak, setNoviZadatak] = useState('');
+  const [noviZadatak, setNoviZadatak] = useState<Record<ZadatakVrsta, string>>(prazniNoviZadaci);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [lockedNalozi, setLockedNalozi] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useState<Category>('aktivna');
@@ -566,7 +588,7 @@ export function RasporedView() {
       });
       setNoviMaterijal('');
       setNoviAlat('');
-      setNoviZadatak('');
+      setNoviZadatak(prazniNoviZadaci);
     } catch (e) {
       setError(errMsg(e, 'Greška pri učitavanju naloga'));
     }
@@ -577,14 +599,14 @@ export function RasporedView() {
     setConfirmDiscard(false);
     setNoviMaterijal('');
     setNoviAlat('');
-    setNoviZadatak('');
+    setNoviZadatak(prazniNoviZadaci);
   };
 
-  const addDraftZadatak = () => {
-    const naziv = noviZadatak.trim();
+  const addDraftZadatak = (vrsta: ZadatakVrsta) => {
+    const naziv = noviZadatak[vrsta].trim();
     if (!naziv) return;
-    setNalogForm((current) => current ? { ...current, novi_zadaci: [...current.novi_zadaci, naziv] } : current);
-    setNoviZadatak('');
+    setNalogForm((current) => current ? { ...current, novi_zadaci: [...current.novi_zadaci, { naziv, vrsta }] } : current);
+    setNoviZadatak((prev) => ({ ...prev, [vrsta]: '' }));
   };
 
   const addDraftStavka = (tip: 'materijal' | 'alat') => {
@@ -637,10 +659,14 @@ export function RasporedView() {
             await deleteGradilisteZadatak(z.id);
           }
         }
-        for (const naziv of [...nalogForm.novi_zadaci, noviZadatak.trim()].filter(Boolean)) {
-          await addNalogZadatak(nalogId, nalogForm.gradiliste_id || null, naziv);
+        const unfinished = (['zadatak', 'dodatni'] as const)
+          .filter((vrsta) => noviZadatak[vrsta].trim())
+          .map((vrsta) => ({ naziv: noviZadatak[vrsta].trim(), vrsta }));
+        for (const z of [...nalogForm.novi_zadaci, ...unfinished]) {
+          await addNalogZadatak(nalogId, nalogForm.gradiliste_id || null, z.naziv, z.vrsta);
         }
         setNalogForm((current) => current ? { ...current, novi_zadaci: [] } : current);
+        setNoviZadatak(prazniNoviZadaci);
       } catch (reason) {
         const message = errMsg(reason, 'Zadaci nisu spremljeni.');
         setError(message.includes('migracij') ? message : `${message} Pokreni migracije 20261015220000_zadaci_nalog_veza.sql i 20261019110000_zadaci_bez_gradilista.sql.`);
@@ -1558,13 +1584,17 @@ export function RasporedView() {
             </Field>
             </div>
             <div className="space-y-4">
-            <div>
-              <p className="mb-2 text-sm font-medium text-slate-700">Radni zadaci za ovaj nalog</p>
-              {visibleZadaci.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">{nalogForm.gradiliste_id ? 'Nema otvorenih radnih zadataka za ovo gradilište.' : 'Upiši radne zadatke za ovaj nalog.'}</p>
+            {ZADATAK_SEKCIJE_NALOGA.map((sekcija) => {
+              const lista = visibleZadaci.filter((z) => zadatakVrsta(z) === sekcija.vrsta);
+              const noviUSekciji = nalogForm.novi_zadaci.map((z, index) => ({ ...z, index })).filter((z) => z.vrsta === sekcija.vrsta);
+              return (
+            <div key={sekcija.vrsta}>
+              <p className="mb-2 text-sm font-medium text-slate-700">{sekcija.naslov}</p>
+              {lista.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">{nalogForm.gradiliste_id ? sekcija.praznoGradiliste : sekcija.praznoNalog}</p>
               ) : (
                 <div className="max-h-40 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
-                  {visibleZadaci.map((z) => (
+                  {lista.map((z) => (
                     <label key={z.id} className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50">
                       <input
                         type="checkbox"
@@ -1592,12 +1622,12 @@ export function RasporedView() {
               )}
               <div className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
-                  <ClipboardList className="h-3.5 w-3.5 text-slate-500" /> Novi radni zadatak
+                  <ClipboardList className="h-3.5 w-3.5 text-slate-500" /> {sekcija.novi}
                 </p>
-                {nalogForm.novi_zadaci.length > 0 && (
+                {noviUSekciji.length > 0 && (
                   <div className="space-y-1.5">
-                    {nalogForm.novi_zadaci.map((naziv, index) => (
-                      <div key={`zadatak-${index}`} className="flex min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs">
+                    {noviUSekciji.map(({ naziv, index }) => (
+                      <div key={`${sekcija.vrsta}-${index}`} className="flex min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs">
                         <span className="min-w-0 flex-1 break-words text-slate-700">{naziv}</span>
                         <button
                           type="button"
@@ -1613,29 +1643,31 @@ export function RasporedView() {
                 )}
                 <div className="flex min-w-0 gap-2">
                   <input
-                    value={noviZadatak}
-                    onChange={(event) => setNoviZadatak(event.target.value)}
+                    value={noviZadatak[sekcija.vrsta]}
+                    onChange={(event) => setNoviZadatak((prev) => ({ ...prev, [sekcija.vrsta]: event.target.value }))}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {
                         event.preventDefault();
-                        addDraftZadatak();
+                        addDraftZadatak(sekcija.vrsta);
                       }
                     }}
-                    placeholder="Npr. bojanje hodnika 1. kat"
+                    placeholder={sekcija.placeholder}
                     className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs"
                   />
                   <button
                     type="button"
-                    onClick={addDraftZadatak}
-                    disabled={!noviZadatak.trim()}
+                    onClick={() => addDraftZadatak(sekcija.vrsta)}
+                    disabled={!noviZadatak[sekcija.vrsta].trim()}
                     className="inline-flex flex-shrink-0 items-center justify-center rounded-lg bg-sky-600 px-2.5 text-white hover:bg-sky-700 disabled:opacity-40"
-                    aria-label="Dodaj radni zadatak"
+                    aria-label={sekcija.novi}
                   >
                     <Plus className="h-4 w-4" />
                   </button>
                 </div>
               </div>
             </div>
+              );
+            })}
             <div>
               <p className="mb-2 text-sm font-medium text-slate-700">Materijal i alat za ovaj nalog</p>
               {nalogStavkeLoading ? (

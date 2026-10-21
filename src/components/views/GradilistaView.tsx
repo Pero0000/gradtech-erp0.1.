@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type DragEvent } from 'react';
 import { Building2, Plus, Pencil, Trash2, Calendar, GripVertical, AlertTriangle } from 'lucide-react';
-import type { Gradiliste, GradilisteRegija, GradilisteStatus, Investitor, Objekt, Rok } from '@/types';
+import type { Gradiliste, GradilisteRegija, GradilisteStatus, Investitor, Objekt, Rok, ZadatakVrsta } from '@/types';
 import {
   fetchRokovi,
   fetchGradilista,
@@ -161,9 +161,9 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
   const [investorMode, setInvestorMode] = useState<'manual' | 'select'>('manual');
   const [newObjectName, setNewObjectName] = useState('');
   const [objectMode, setObjectMode] = useState<'manual' | 'select'>('manual');
-  const [newZadaci, setNewZadaci] = useState<{ naziv: string; rok: string }[]>([]);
-  const [zadatakNaziv, setZadatakNaziv] = useState('');
-  const [zadatakRok, setZadatakRok] = useState('');
+  const [newZadaci, setNewZadaci] = useState<{ naziv: string; rok: string; vrsta: ZadatakVrsta }[]>([]);
+  const [zadatakNaziv, setZadatakNaziv] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
+  const [zadatakRok, setZadatakRok] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
   const [archiveFilter, setArchiveFilter] = useState(emptyArchiveFilter);
   const [archiveSort, setArchiveSort] = useState<{ key: ArchiveSortKey; asc: boolean }>({ key: 'datum_zavrsetka', asc: false });
 
@@ -344,17 +344,17 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
     setNewObjectName('');
     setObjectMode('manual');
     setNewZadaci([]);
-    setZadatakNaziv('');
-    setZadatakRok('');
+    setZadatakNaziv({ zadatak: '', dodatni: '' });
+    setZadatakRok({ zadatak: '', dodatni: '' });
     setModalOpen(true);
   };
 
-  const addNewZadatak = () => {
-    const naziv = zadatakNaziv.trim();
+  const addNewZadatak = (vrsta: ZadatakVrsta) => {
+    const naziv = zadatakNaziv[vrsta].trim();
     if (!naziv) return;
-    setNewZadaci((prev) => [...prev, { naziv, rok: zadatakRok }]);
-    setZadatakNaziv('');
-    setZadatakRok('');
+    setNewZadaci((prev) => [...prev, { naziv, rok: zadatakRok[vrsta], vrsta }]);
+    setZadatakNaziv((prev) => ({ ...prev, [vrsta]: '' }));
+    setZadatakRok((prev) => ({ ...prev, [vrsta]: '' }));
   };
 
   const openEdit = (g: Gradiliste) => {
@@ -431,8 +431,10 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
         ? await updateGradiliste(editing.id, payload)
         : await createGradiliste(payload);
       if (!editing) {
-        const pending = zadatakNaziv.trim() ? [...newZadaci, { naziv: zadatakNaziv.trim(), rok: zadatakRok }] : newZadaci;
-        for (const z of pending) await createGradilisteZadatak(savedGradiliste.id, z.naziv, z.rok || null);
+        const unfinished = (['zadatak', 'dodatni'] as const)
+          .filter((vrsta) => zadatakNaziv[vrsta].trim())
+          .map((vrsta) => ({ naziv: zadatakNaziv[vrsta].trim(), rok: zadatakRok[vrsta], vrsta }));
+        for (const z of [...newZadaci, ...unfinished]) await createGradilisteZadatak(savedGradiliste.id, z.naziv, z.rok || null, z.vrsta);
       }
       const nextColumns = columnIds.map((column) => column.filter((id) => id !== savedGradiliste.id));
       nextColumns[Number(targetColumn)].push(savedGradiliste.id);
@@ -1160,12 +1162,14 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
               placeholder="Napomena uz gradilište…"
             />
           </Field>
-          {!editing && (
-            <div className="md:col-span-2">
-              <p className="mb-1 text-sm font-medium text-slate-700">Radni zadaci</p>
-              {newZadaci.length > 0 && (
+          {!editing && ([['zadatak', 'Radni zadaci', 'Novi radni zadatak…'], ['dodatni', 'Dodatni radovi', 'Novi dodatni rad…']] as const).map(([vrsta, naslov, placeholder]) => {
+            const lista = newZadaci.map((z, index) => ({ z, index })).filter(({ z }) => z.vrsta === vrsta);
+            return (
+            <div key={vrsta} className="md:col-span-2">
+              <p className="mb-1 text-sm font-medium text-slate-700">{naslov}</p>
+              {lista.length > 0 && (
                 <div className="mb-2 grid gap-1.5 md:grid-cols-2">
-                  {newZadaci.map((z, index) => (
+                  {lista.map(({ z, index }) => (
                     <div key={`${z.naziv}-${index}`} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
                       <span className="min-w-0 flex-1 truncate">{z.naziv}</span>
                       {z.rok && <span className="text-xs text-slate-500">{new Date(`${z.rok}T00:00:00`).toLocaleDateString('hr-HR')}</span>}
@@ -1173,7 +1177,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                         type="button"
                         onClick={() => setNewZadaci((prev) => prev.filter((_, i) => i !== index))}
                         className="text-slate-300 hover:text-red-600"
-                        aria-label="Ukloni zadatak"
+                        aria-label="Ukloni"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -1184,19 +1188,19 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
               <div className="flex flex-wrap items-center gap-2">
                 <div className="min-w-[12rem] flex-1">
                   <TextInput
-                    value={zadatakNaziv}
-                    onChange={(e) => setZadatakNaziv(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addNewZadatak(); } }}
-                    placeholder="Novi radni zadatak…"
+                    value={zadatakNaziv[vrsta]}
+                    onChange={(e) => setZadatakNaziv((prev) => ({ ...prev, [vrsta]: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addNewZadatak(vrsta); } }}
+                    placeholder={placeholder}
                   />
                 </div>
                 <div className="w-40">
-                  <TextInput type="date" value={zadatakRok} onChange={(e) => setZadatakRok(e.target.value)} title="Rok (neobavezno)" />
+                  <TextInput type="date" value={zadatakRok[vrsta]} onChange={(e) => setZadatakRok((prev) => ({ ...prev, [vrsta]: e.target.value }))} title="Rok (neobavezno)" />
                 </div>
                 <button
                   type="button"
-                  onClick={addNewZadatak}
-                  disabled={!zadatakNaziv.trim()}
+                  onClick={() => addNewZadatak(vrsta)}
+                  disabled={!zadatakNaziv[vrsta].trim()}
                   className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -1204,7 +1208,8 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                 </button>
               </div>
             </div>
-          )}
+            );
+          })}
         </div>
       </Modal>
 

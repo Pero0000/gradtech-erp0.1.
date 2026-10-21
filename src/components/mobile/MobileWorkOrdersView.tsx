@@ -33,7 +33,8 @@ import {
   type NalogStavka,
 } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
-import type { GradilisteZadatak, Oprema } from '@/types';
+import type { GradilisteZadatak, Oprema, ZadatakVrsta } from '@/types';
+import { zadatakVrsta } from '@/types';
 import { WorkerDocumentsTab, WorkerScheduleTab, WorkerTimeTab, type WorkerPortalTab } from '@/components/mobile/WorkerPortalTabs';
 
 const portalTabs: Array<{ id: WorkerPortalTab; label: string; title: string; icon: React.ReactNode }> = [
@@ -46,11 +47,12 @@ const portalTabs: Array<{ id: WorkerPortalTab; label: string; title: string; ico
 // Pregled koji poslovođa potvrđuje pri pokretanju vremena (zahtjev RPC-a mobile_start_worker_time).
 const reviewSectionIds = ['upute', 'zadaci', 'materijal', 'alat', 'dokumenti'];
 
-type PrepKey = 'napomena' | 'zadaci' | 'materijal_na' | 'alat_na' | 'dokumenti';
-type SectionKey = 'poslovi' | 'foto' | 'materijal' | 'alat' | 'strojevi';
+type PrepKey = 'napomena' | 'zadaci' | 'dodatni' | 'materijal_na' | 'alat_na' | 'dokumenti';
+type SectionKey = 'poslovi' | 'dodatni' | 'foto' | 'materijal' | 'alat' | 'strojevi';
 
 const sectionLabels: Record<SectionKey, string> = {
   poslovi: 'Poslovi',
+  dodatni: 'Dodatni radovi',
   foto: 'Fotografije',
   materijal: 'Materijal',
   alat: 'Alat',
@@ -180,7 +182,7 @@ export function MobileWorkOrdersView() {
   const [notice, setNotice] = useState<string | null>(null);
   const [newMaterial, setNewMaterial] = useState('');
   const [newTool, setNewTool] = useState('');
-  const [newTask, setNewTask] = useState('');
+  const [newTask, setNewTask] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
   const [teamTimeDrafts, setTeamTimeDrafts] = useState<Record<string, { vrijemeOd: string; vrijemeDo: string }>>({});
 
   const [photoQueue, setPhotoQueue] = useState<PhotoUpload[]>([]);
@@ -501,14 +503,14 @@ export function MobileWorkOrdersView() {
     });
   };
 
-  const addTask = async () => {
-    if (!selected || !details || !newTask.trim()) return;
+  const addTask = async (vrsta: ZadatakVrsta) => {
+    if (vrsta !== 'dodatni' || !selected || !details || !newTask[vrsta].trim()) return;
     const gradilisteId = details.gradilisteId;
-    const name = newTask.trim();
+    const name = newTask[vrsta].trim();
     await runAction(async () => {
-      await addNalogZadatak(selected.id, gradilisteId, name);
-      setNewTask('');
-    }, 'Radni zadatak je dodan.');
+      await addNalogZadatak(selected.id, gradilisteId, name, vrsta);
+      setNewTask((prev) => ({ ...prev, [vrsta]: '' }));
+    }, vrsta === 'dodatni' ? 'Dodatni rad je dodan.' : 'Radni zadatak je dodan.');
   };
 
   const toggleItem = async (item: NalogStavka, field: 'gotovo' | 'uzeto' = 'gotovo') => {
@@ -599,10 +601,13 @@ export function MobileWorkOrdersView() {
   const alatStavke = details?.stavke.filter((item) => item.tip === 'alat') ?? [];
   const strojStavke = details?.stavke.filter((item) => item.tip === 'stroj') ?? [];
   const hasNapomena = Boolean(details?.napomena?.trim());
+  const radniZadaci = details?.zadaci.filter((task) => zadatakVrsta(task) === 'zadatak') ?? [];
+  const dodatniRadovi = details?.zadaci.filter((task) => zadatakVrsta(task) === 'dodatni') ?? [];
   const kmPocetakValue = numberOrNull(report.kmPocetak);
   const prepChecks = [
     { label: 'Napomena pročitana', ok: !hasNapomena || prep.includes('napomena') },
     { label: 'Radni zadaci pregledani', ok: prep.includes('zadaci') },
+    { label: 'Dodatni radovi pregledani', ok: prep.includes('dodatni') },
     {
       label: 'Materijal preuzet',
       ok: materijalStavke.length ? materijalStavke.every((item) => item.uzeto) : prep.includes('materijal_na'),
@@ -621,7 +626,8 @@ export function MobileWorkOrdersView() {
   const potvrdaOf = (key: string): 'da' | 'na' | null =>
     potvrde.includes(key) ? 'da' : potvrde.includes(`${key}:na`) ? 'na' : null;
   const finishChecks = [
-    ...(Object.keys(sectionLabels) as SectionKey[]).map((key) => ({
+    // Potvrda dodatnih radova traži se kad ih nalog ima (isto pravilo kao mobile_submit_nalog).
+    ...(Object.keys(sectionLabels) as SectionKey[]).filter((key) => key !== 'dodatni' || dodatniRadovi.length > 0).map((key) => ({
       label: sectionLabels[key],
       ok: potvrdaOf(key) !== null && (key !== 'foto' || selectedPhotoQueue.length === 0),
     })),
@@ -735,34 +741,39 @@ export function MobileWorkOrdersView() {
                       </label>
                     </WorkOrderPanel>
 
-                    <WorkOrderPanel title="Radni zadaci" icon={<ListChecks className="h-5 w-5" />} tone="emerald" summary={`${details.zadaci.length} zadataka`}>
-                      {details.zadaci.length ? (
+                    {([
+                      { vrsta: 'zadatak' as const, title: 'Radni zadaci', list: radniZadaci, prepKey: 'zadaci' as const, canAdd: false, unit: 'zadataka', empty: 'Nema upisanih zadataka.', placeholder: 'Dodaj radni zadatak', confirm: 'Pregledao/la sam radne zadatke.' },
+                      { vrsta: 'dodatni' as const, title: 'Dodatni radovi', list: dodatniRadovi, prepKey: 'dodatni' as const, canAdd: true, unit: 'radova', empty: 'Nema upisanih dodatnih radova.', placeholder: 'Dodaj dodatni rad', confirm: 'Pregledao/la sam dodatne radove.' },
+                    ]).map((sekcija) => (
+                    <WorkOrderPanel key={sekcija.vrsta} title={sekcija.title} icon={<ListChecks className="h-5 w-5" />} tone="emerald" summary={`${sekcija.list.length} ${sekcija.unit}`}>
+                      {sekcija.list.length ? (
                         <ul className="space-y-2">
-                          {details.zadaci.map((task) => (
+                          {sekcija.list.map((task) => (
                             <li key={task.id} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-base font-semibold text-slate-900">{task.naziv}</li>
                           ))}
                         </ul>
-                      ) : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Nema upisanih zadataka.</p>}
-                      <div className="flex gap-2">
+                      ) : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">{sekcija.empty}</p>}
+                      {sekcija.canAdd && (<div className="flex gap-2">
                         <input
-                          value={newTask}
-                          onChange={(event) => setNewTask(event.target.value)}
+                          value={newTask[sekcija.vrsta]}
+                          onChange={(event) => setNewTask((prev) => ({ ...prev, [sekcija.vrsta]: event.target.value }))}
                           onKeyDown={(event) => {
                             if (event.key === 'Enter') {
                               event.preventDefault();
-                              void addTask();
+                              void addTask(sekcija.vrsta);
                             }
                           }}
-                          placeholder="Dodaj radni zadatak"
+                          placeholder={sekcija.placeholder}
                           disabled={working}
                           className="min-h-12 min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 placeholder:text-slate-400"
                         />
-                        <button type="button" onClick={() => void addTask()} disabled={working || !newTask.trim()} className="inline-flex min-h-12 w-12 items-center justify-center rounded-xl bg-indigo-600 text-white disabled:opacity-40" aria-label="Dodaj radni zadatak">
+                        <button type="button" onClick={() => void addTask(sekcija.vrsta)} disabled={working || !newTask[sekcija.vrsta].trim()} className="inline-flex min-h-12 w-12 items-center justify-center rounded-xl bg-indigo-600 text-white disabled:opacity-40" aria-label={sekcija.placeholder}>
                           <Plus className="h-5 w-5" />
                         </button>
-                      </div>
-                      <CheckField checked={prep.includes('zadaci')} onChange={(checked) => togglePrep('zadaci', checked)} label="Pregledao/la sam radne zadatke." />
+                      </div>)}
+                      <CheckField checked={prep.includes(sekcija.prepKey)} onChange={(checked) => togglePrep(sekcija.prepKey, checked)} label={sekcija.confirm} />
                     </WorkOrderPanel>
+                    ))}
 
                     <WorkOrderPanel
                       title="Materijal"
@@ -864,18 +875,23 @@ export function MobileWorkOrdersView() {
                   <>
                     <StepHeader step={2} title="Rad na gradilištu" text="Za svaki dio odaberi „Potvrđujem” ili „Nije primjenjivo”." />
                     {!isLeader && (
-                      <p className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm leading-6 text-sky-900">Možeš dopunjavati poslove, fotografije, materijal, alat i strojeve. Potvrde i zaključivanje naloga radi poslovođa.</p>
+                      <p className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm leading-6 text-sky-900">Možeš označavati obavljene poslove i dopisivati dodatne radove, fotografije, materijal, alat i strojeve. Potvrde i zaključivanje naloga radi poslovođa.</p>
                     )}
 
+                    {([
+                      { vrsta: 'zadatak' as const, key: 'poslovi' as const, title: 'Poslovi', canAdd: false, list: radniZadaci, empty: 'Nema upisanih poslova.', placeholder: 'Dodaj posao' },
+                      { vrsta: 'dodatni' as const, key: 'dodatni' as const, title: 'Dodatni radovi', canAdd: true, list: dodatniRadovi, empty: 'Nema upisanih dodatnih radova.', placeholder: 'Dodaj dodatni rad' },
+                    ]).map((sekcija) => (
                     <WorkOrderPanel
-                      title="Poslovi"
+                      key={sekcija.key}
+                      title={sekcija.title}
                       icon={<ListChecks className="h-5 w-5" />}
                       tone="emerald"
-                      summary={`${details.zadaci.filter((task) => task.gotovo).length} / ${details.zadaci.length} obavljeno`}
+                      summary={`${sekcija.list.filter((task) => task.gotovo).length} / ${sekcija.list.length} obavljeno`}
                     >
                       <p className="text-sm text-slate-500">Označi posao nakon što ga završiš.</p>
                       <div className="space-y-3">
-                        {details.zadaci.length ? details.zadaci.map((task) => (
+                        {sekcija.list.length ? sekcija.list.map((task) => (
                           <label key={task.id} className={`flex min-h-[5.5rem] items-start gap-4 rounded-2xl border p-4 ${task.gotovo ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200 bg-slate-50/60'}`}>
                             <input type="checkbox" checked={task.gotovo} onChange={() => void toggleTask(task)} disabled={working} className="mt-0.5 h-7 w-7 shrink-0 rounded-md border-2 border-slate-300 accent-emerald-600" />
                             <span className="min-w-0 flex-1">
@@ -883,28 +899,29 @@ export function MobileWorkOrdersView() {
                               {task.gotovo_at && <span className="mt-1 block text-sm text-emerald-700">Završeno · {new Date(task.gotovo_at).toLocaleTimeString('hr-HR', { hour: '2-digit', minute: '2-digit' })}</span>}
                             </span>
                           </label>
-                        )) : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Nema upisanih poslova.</p>}
-                        <div className="flex gap-2">
+                        )) : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">{sekcija.empty}</p>}
+                        {sekcija.canAdd && (<div className="flex gap-2">
                           <input
-                            value={newTask}
-                            onChange={(event) => setNewTask(event.target.value)}
+                            value={newTask[sekcija.vrsta]}
+                            onChange={(event) => setNewTask((prev) => ({ ...prev, [sekcija.vrsta]: event.target.value }))}
                             onKeyDown={(event) => {
                               if (event.key === 'Enter') {
                                 event.preventDefault();
-                                void addTask();
+                                void addTask(sekcija.vrsta);
                               }
                             }}
-                            placeholder="Dodaj posao"
+                            placeholder={sekcija.placeholder}
                             disabled={working}
                             className="min-h-12 min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 placeholder:text-slate-400"
                           />
-                          <button type="button" onClick={() => void addTask()} disabled={working || !newTask.trim()} className="inline-flex min-h-12 w-12 items-center justify-center rounded-xl bg-indigo-600 text-white disabled:opacity-40" aria-label="Dodaj posao">
+                          <button type="button" onClick={() => void addTask(sekcija.vrsta)} disabled={working || !newTask[sekcija.vrsta].trim()} className="inline-flex min-h-12 w-12 items-center justify-center rounded-xl bg-indigo-600 text-white disabled:opacity-40" aria-label={sekcija.placeholder}>
                             <Plus className="h-5 w-5" />
                           </button>
-                        </div>
+                        </div>)}
                       </div>
-                      <SectionConfirm value={potvrdaOf('poslovi')} onChange={(value) => void setPotvrda('poslovi', value)} disabled={working || !isLeader} />
+                      <SectionConfirm value={potvrdaOf(sekcija.key)} onChange={(value) => void setPotvrda(sekcija.key, value)} disabled={working || !isLeader} />
                     </WorkOrderPanel>
+                    ))}
 
                     <WorkOrderPanel title="Fotografije izvedenog rada" icon={<Camera className="h-5 w-5" />} tone="rose" summary={`${details.foto.length} fotografija`}>
                       {details.foto.length > 0 && (

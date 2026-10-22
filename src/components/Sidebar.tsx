@@ -51,6 +51,10 @@ interface SidebarProps {
   current: View;
   onNavigate: (view: View) => void;
   mobileOpen: boolean;
+  desktopHidden?: boolean;
+  desktopOverlay?: boolean;
+  onDesktopEnter?: () => void;
+  onDesktopLeave?: () => void;
   onMobileClose: () => void;
   counts: {
     gradilista: number;
@@ -127,13 +131,26 @@ const countMap: Partial<Record<View, keyof SidebarProps['counts']>> = {
   obavijesti: 'obavijesti',
 };
 
-export function Sidebar({ current, onNavigate, mobileOpen, onMobileClose, counts }: SidebarProps) {
+export function Sidebar({ current, onNavigate, mobileOpen, desktopHidden = false, desktopOverlay = false, onDesktopEnter, onDesktopLeave, onMobileClose, counts }: SidebarProps) {
   const { canAccess, isAdmin, isPlatformOwner, company, profile, signOut } = useAuth();
   const [signOutError, setSignOutError] = useState<string | null>(null);
+  const sidebarClassName = mobileOpen
+    ? 'fixed inset-y-0 left-0 z-50 flex w-72 shadow-xl'
+    : desktopOverlay
+      ? desktopHidden
+        ? 'hidden'
+        : 'fixed inset-y-0 left-0 z-50 flex w-64 shadow-xl'
+      : desktopHidden
+        ? 'hidden lg:hidden 2xl:relative 2xl:flex 2xl:w-64 2xl:shadow-none'
+        : 'hidden lg:sticky lg:top-0 lg:flex lg:w-64 lg:shadow-none';
   return (
     <>
     {mobileOpen && <button type="button" aria-label="Zatvori navigaciju" onClick={onMobileClose} className="fixed inset-0 z-40 bg-slate-950/40 lg:hidden" />}
-    <aside className={`h-dvh flex-shrink-0 flex-col border-r border-slate-200 bg-white ${mobileOpen ? 'fixed inset-y-0 left-0 z-50 flex w-72 shadow-xl' : 'hidden'} lg:sticky lg:top-0 lg:flex lg:w-64 lg:shadow-none`}>
+    <aside
+      onMouseEnter={desktopOverlay ? onDesktopEnter : undefined}
+      onMouseLeave={desktopOverlay ? onDesktopLeave : undefined}
+      className={`h-dvh flex-shrink-0 flex-col border-r border-slate-200 bg-white ${sidebarClassName}`}
+    >
       <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-200">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-600 text-white">
           <Building2 className="h-6 w-6" />

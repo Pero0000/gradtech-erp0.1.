@@ -873,24 +873,24 @@ export function RasporedView() {
 
   return (
     <div>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
-        <div>
+      <div className="mb-5 flex flex-col gap-4 2xl:flex-row 2xl:items-center 2xl:justify-between">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold text-slate-900">Dnevni raspored</h1>
-          <p className="mt-1 text-sm text-slate-500">Gradilište možeš dodati na više vozila. Radnika s vozila na kojem je nalog zaključan povuci s popisa zaposlenika na drugo vozilo da ga tamo dodaš bez micanja s prvog.</p>
+          <p className="mt-1 max-w-4xl text-sm text-slate-500">Gradilište možeš dodati na više vozila. Radnika s vozila na kojem je nalog zaključan povuci s popisa zaposlenika na drugo vozilo da ga tamo dodaš bez micanja s prvog.</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 flex-wrap items-center justify-center gap-2 sm:gap-3 2xl:justify-end">
           <button
             type="button"
             onClick={() => changeDay(-1)}
             aria-label="Prethodni dan"
-            className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-50"
+            className="flex-shrink-0 rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-50"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
-          <div className="min-w-[250px] text-center">
+          <div className="min-w-0 flex-1 text-center sm:flex-none sm:min-w-[250px]">
             <div className="flex items-center justify-center gap-2">
-              <CalendarDays className="h-5 w-5 text-sky-600" />
-              <span className="text-base font-semibold capitalize text-slate-900">{formatDate(selectedDate)}</span>
+              <CalendarDays className="h-5 w-5 flex-shrink-0 text-sky-600" />
+              <span className="text-sm font-semibold capitalize text-slate-900 sm:text-base">{formatDate(selectedDate)}</span>
             </div>
             <div className="mt-1 flex items-center justify-center gap-2">
               <label className="text-xs text-slate-500" htmlFor="raspored-date">Odaberi datum:</label>
@@ -913,7 +913,7 @@ export function RasporedView() {
             type="button"
             onClick={() => changeDay(1)}
             aria-label="Sljedeći dan"
-            className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-50"
+            className="flex-shrink-0 rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-50"
           >
             <ChevronRight className="h-5 w-5" />
           </button>
@@ -921,9 +921,9 @@ export function RasporedView() {
             type="button"
             onClick={() => void copyLatestSchedule()}
             disabled={copyingSchedule}
-            className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-white px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-50 disabled:cursor-wait disabled:opacity-60"
+            className="inline-flex min-w-0 items-center gap-2 rounded-lg border border-sky-200 bg-white px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-50 disabled:cursor-wait disabled:opacity-60"
           >
-            <ClipboardList className="h-4 w-4" />
+            <ClipboardList className="h-4 w-4 flex-shrink-0" />
             {copyingSchedule ? 'Kopiranje…' : 'Kopiraj zadnji raspored'}
           </button>
           {canSendSchedule && objava && (
@@ -958,7 +958,7 @@ export function RasporedView() {
       )}
 
       {canSendSchedule && (
-        <div className="mb-4 flex gap-1 border-b border-slate-200" role="tablist" aria-label="Dnevni raspored">
+        <div className="mb-4 flex flex-wrap gap-1 border-b border-slate-200" role="tablist" aria-label="Dnevni raspored">
           {([['slaganje', 'Slaganje rasporeda'], ['posalji', 'Pošalji raspored']] as const).map(([key, label]) => (
             <button
               key={key}
@@ -966,7 +966,7 @@ export function RasporedView() {
               role="tab"
               aria-selected={rasporedTab === key}
               onClick={() => setRasporedTab(key)}
-              className={`-mb-px inline-flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-semibold ${rasporedTab === key ? 'border-sky-600 text-sky-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+              className={`-mb-px inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-semibold sm:px-4 ${rasporedTab === key ? 'border-sky-600 text-sky-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
             >
               {key === 'posalji' && <Send className="h-4 w-4" />}
               {label}
@@ -977,8 +977,8 @@ export function RasporedView() {
       )}
 
       {canSendSchedule && rasporedTab === 'posalji' ? (
-        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
-          <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5">
+        <div className="grid min-w-0 items-start gap-6 2xl:grid-cols-[minmax(0,1fr)_minmax(280px,380px)]">
+          <section className="min-w-0 space-y-4 rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
             <div>
               <h2 className="text-lg font-semibold capitalize text-slate-900">Raspored za {formatDate(selectedDate)}</h2>
               <p className="mt-1 text-sm text-slate-500">
@@ -1013,13 +1013,13 @@ export function RasporedView() {
             </button>
             <p className="text-xs text-slate-500">Vozila bez gradilišta i radnika se ne šalju. Push obavijest o poslanom rasporedu bit će dodana kad se uključi Firebase konfiguracija.</p>
           </section>
-          <section aria-label="Pregled kako radnici vide raspored" className="rounded-[2rem] border-8 border-slate-800 bg-slate-100 p-3 shadow-lg">
+          <section aria-label="Pregled kako radnici vide raspored" className="mx-auto w-full max-w-md rounded-[2rem] border-8 border-slate-800 bg-slate-100 p-3 shadow-lg 2xl:max-w-none">
             <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">Pregled u Portalu djelatnika</p>
             <RasporedVozilaPreview vozila={objavaVozila} />
           </section>
         </div>
       ) : (
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(620px,1.35fr)_minmax(0,1.9fr)_minmax(190px,0.4fr)]">
+      <div className="grid min-w-0 items-start gap-4 2xl:grid-cols-[minmax(620px,1.35fr)_minmax(0,1.9fr)_minmax(190px,0.4fr)]">
         {/* Gradilišta */}
         <div>
           <div className="mb-2 flex flex-wrap gap-1" role="tablist" aria-label="Kategorije gradilišta">
@@ -1041,7 +1041,7 @@ export function RasporedView() {
               );
             })}
           </div>
-          <div className="grid grid-cols-3 items-start gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-2">
+          <div className="grid grid-cols-1 items-start gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-2 xl:grid-cols-3">
             {columns.map((column, index) => {
               const mode = sortModes[index] ?? 'manual';
               const items = column
@@ -1148,7 +1148,7 @@ export function RasporedView() {
             Nema vozila. Dodajte vozila na tabu Vozila i ona će se pojaviti ovdje kao auti.
           </div>
         ) : (
-          <div className="grid grid-cols-3 items-start gap-4">
+          <div className="grid grid-cols-1 items-start gap-4 2xl:grid-cols-2">
             {[...vozila].sort((a, b) => b.broj_mjesta - a.broj_mjesta || a.registracija.localeCompare(b.registracija)).map((vozilo) => {
               const carSites = siteAssignments.filter((a) => a.vozilo_id === vozilo.id);
               const carWorkers = workerAssignments.filter((a) => a.vozilo_id === vozilo.id);
@@ -1358,7 +1358,7 @@ export function RasporedView() {
           </div>
         )}
 
-        <div className="space-y-3 xl:sticky xl:top-0">
+        <div className="min-w-0 space-y-3">
         {/* Radnici */}
         <aside
           onDragOver={(e) => allowDrop(e, 'panel-radnici')}

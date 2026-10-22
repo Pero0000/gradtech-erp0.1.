@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Menu, X } from 'lucide-react';
 import { Sidebar, type View } from '@/components/Sidebar';
@@ -40,6 +40,9 @@ function App() {
   const { canAccess, isAdmin, isPlatformOwner, isWorker, company, profile, signOut } = useAuth();
   const [view, setView] = useState<View>('dashboard');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [scheduleSidebarVisible, setScheduleSidebarVisible] = useState(false);
+  const [hasHoverPointer, setHasHoverPointer] = useState(false);
+  const scheduleSidebarCloseTimer = useRef<number | null>(null);
   const [focusNalogId, setFocusNalogId] = useState<string | null>(null);
   const [counts, setCounts] = useState({
     gradilista: 0,
@@ -50,6 +53,14 @@ function App() {
     radni_nalozi: 0,
     obavijesti: 0,
   });
+
+  useEffect(() => {
+    const hoverQuery = window.matchMedia('(hover: hover)');
+    const updateHoverPointer = () => setHasHoverPointer(hoverQuery.matches);
+    updateHoverPointer();
+    hoverQuery.addEventListener('change', updateHoverPointer);
+    return () => hoverQuery.removeEventListener('change', updateHoverPointer);
+  }, []);
 
   useEffect(() => {
     if (!profile?.approved || !canAccess('obavijesti')) return;
@@ -88,6 +99,7 @@ function App() {
   }, [view, profile?.approved, canAccess]);
 
   useEffect(() => {
+    if (view !== 'raspored') setScheduleSidebarVisible(false);
     if (view === 'korisnici' && !isAdmin) setView('dashboard');
     if (view === 'tvrtke' && !isPlatformOwner) setView('dashboard');
     const module = moduleForView(view);
@@ -97,6 +109,22 @@ function App() {
       else if (isPlatformOwner) setView('tvrtke');
     }
   }, [view, isAdmin, isPlatformOwner, canAccess]);
+
+  const openScheduleSidebar = () => {
+    if (scheduleSidebarCloseTimer.current !== null) {
+      window.clearTimeout(scheduleSidebarCloseTimer.current);
+      scheduleSidebarCloseTimer.current = null;
+    }
+    setScheduleSidebarVisible(true);
+  };
+
+  const closeScheduleSidebarSoon = () => {
+    if (scheduleSidebarCloseTimer.current !== null) window.clearTimeout(scheduleSidebarCloseTimer.current);
+    scheduleSidebarCloseTimer.current = window.setTimeout(() => {
+      setScheduleSidebarVisible(false);
+      scheduleSidebarCloseTimer.current = null;
+    }, 180);
+  };
 
   // Radnici (nisu admin/voditelj) uvijek dobivaju Portal djelatnika — i na webu i na mobitelu.
   if (isWorker || (Capacitor.isNativePlatform() && profile?.radnik_id && !isAdmin)) {
@@ -131,14 +159,34 @@ function App() {
 
   return (
     <div className="flex h-dvh min-w-0 bg-slate-50">
-      <Sidebar current={view} onNavigate={navigate} mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} counts={counts} />
+      <Sidebar
+        current={view}
+        onNavigate={navigate}
+        mobileOpen={mobileNavOpen && !(view === 'raspored' && hasHoverPointer)}
+        desktopHidden={view === 'raspored' && !scheduleSidebarVisible}
+        desktopOverlay={view === 'raspored'}
+        onDesktopEnter={openScheduleSidebar}
+        onDesktopLeave={closeScheduleSidebarSoon}
+        onMobileClose={() => setMobileNavOpen(false)}
+        counts={counts}
+      />
+      {view === 'raspored' && hasHoverPointer && (
+        <button
+          type="button"
+          aria-label="Otvori izbornik"
+          onMouseEnter={openScheduleSidebar}
+          onMouseLeave={closeScheduleSidebarSoon}
+          onFocus={openScheduleSidebar}
+          className="fixed inset-y-0 left-0 z-[60] w-3 cursor-pointer"
+        />
+      )}
       <main className="min-h-0 min-w-0 flex-1 overflow-auto">
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4 lg:hidden">
           <div>
             <p className="text-sm font-bold text-slate-900">GradTech · {company?.naziv}</p>
             <p className="text-xs text-slate-500">{MODULES.find((module) => module.id === view)?.label ?? 'Aplikacija'}</p>
           </div>
-          <button type="button" onClick={() => setMobileNavOpen((open) => !open)} aria-label={mobileNavOpen ? 'Zatvori navigaciju' : 'Otvori navigaciju'} aria-expanded={mobileNavOpen} className="rounded-lg p-2 text-slate-700 hover:bg-slate-100">
+          <button type="button" onClick={() => setMobileNavOpen((open) => !open)} aria-label={mobileNavOpen ? 'Zatvori navigaciju' : 'Otvori navigaciju'} aria-expanded={mobileNavOpen} className={`rounded-lg p-2 text-slate-700 hover:bg-slate-100 ${view === 'raspored' ? '[@media(hover:hover)]:hidden' : ''}`}>
             {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
         </header>
@@ -161,7 +209,9 @@ function App() {
           {viewAuthorized && view === 'vozila' && <VozilaView />}
           {viewAuthorized && view === 'alat' && <OpremaView kategorija="alat" />}
           {viewAuthorized && view === 'strojevi' && <OpremaView kategorija="stroj" />}
-          {viewAuthorized && view === 'raspored' && <RasporedView />}
+          {viewAuthorized && view === 'raspored' && (
+            <RasporedView />
+          )}
           {viewAuthorized && view === 'troskovi' && <TroskoviView />}
           {viewAuthorized && view === 'fakture' && <FaktureView />}
           {viewAuthorized && view === 'radno_vrijeme' && <RadnoVrijemeView />}

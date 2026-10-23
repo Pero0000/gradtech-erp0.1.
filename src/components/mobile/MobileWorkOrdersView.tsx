@@ -691,7 +691,7 @@ export function MobileWorkOrdersView() {
                   {selected.gradiliste_naziv && <p className="mt-1 text-sm font-medium text-sky-800">{selected.gradiliste_naziv}</p>}
                 </div>
                 <span className="shrink-0 rounded-full bg-sky-100 px-2.5 py-1 text-xs font-bold text-sky-800">
-                  {selected.mobile_status === 'dodijeljen' ? 'Čeka poslovođu' : selected.mobile_status === 'u_tijeku' ? 'U tijeku' : selected.mobile_status === 'predan' ? 'Čeka odobrenje' : selected.mobile_status === 'odobren' ? 'Odobren' : 'Nalog'}
+                  {selected.mobile_status === 'dodijeljen' ? 'Čeka poslovođu' : selected.mobile_status === 'u_tijeku' ? 'U tijeku' : selected.mobile_status === 'predan' ? 'Čeka odobrenje' : selected.mobile_status === 'odobren' ? 'Odobren' : selected.mobile_status === 'zakljucen_bez_potvrde' ? 'Zaključen bez potvrde' : 'Nalog'}
                 </span>
               </div>
               {selected.opis && <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">{selected.opis}</p>}
@@ -1188,6 +1188,7 @@ export function MobileWorkOrdersView() {
 
                 {selected.mobile_status === 'predan' && <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-900">Nalog je zaključen i čeka završno odobrenje u uredu.</p>}
                 {selected.mobile_status === 'odobren' && <p className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900">Nalog je pregledan i odobren.</p>}
+                {selected.mobile_status === 'zakljucen_bez_potvrde' && <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-900">Nalog je zaključen u uredu bez potvrde djelatnika.</p>}
               </>
             )}
           </section>
@@ -1253,7 +1254,7 @@ export function MobileWorkOrdersView() {
                 <div className="flex items-start justify-between gap-3">
                   <p className="font-mono text-xs font-semibold text-indigo-600">{order.broj}</p>
                   <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${order.mobile_status === 'u_tijeku' ? 'bg-amber-100 text-amber-800' : order.mobile_status === 'odobren' ? 'bg-emerald-100 text-emerald-800' : 'bg-indigo-50 text-indigo-700'}`}>
-                    {order.mobile_status === 'dodijeljen' ? 'Čeka poslovođu' : order.mobile_status === 'u_tijeku' ? 'U tijeku' : order.mobile_status === 'predan' ? 'Na odobrenju' : order.mobile_status === 'odobren' ? 'Odobren' : 'Nalog'}
+                    {order.mobile_status === 'dodijeljen' ? 'Čeka poslovođu' : order.mobile_status === 'u_tijeku' ? 'U tijeku' : order.mobile_status === 'predan' ? 'Na odobrenju' : order.mobile_status === 'odobren' ? 'Odobren' : order.mobile_status === 'zakljucen_bez_potvrde' ? 'Zaključen bez potvrde' : 'Nalog'}
                   </span>
                 </div>
                 <h3 className="mt-2 font-bold text-slate-900">{order.naslov}</h3>

@@ -298,7 +298,7 @@ export interface DnevniRasporedRadnik {
 
                                                                                                                                                           export type NalogStatus = 'otvoren' | 'u_tijeku' | 'zavrsen' | 'otkazan';
                                                                                                                                                           export type NalogPrioritet = 'niski' | 'srednji' | 'visoki' | 'hitno';
-                                                                                                                                                          export type MobileNalogStatus = 'nije_poslan' | 'dodijeljen' | 'u_tijeku' | 'predan' | 'odobren';
+                                                                                                                                                          export type MobileNalogStatus = 'nije_poslan' | 'dodijeljen' | 'u_tijeku' | 'predan' | 'odobren' | 'zakljucen_bez_potvrde';
 
                                                                                                                                                           export interface RadniNalog {
                                                                                                                                                             id: string;

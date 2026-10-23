@@ -1537,19 +1537,23 @@ export async function setNalogTeren(nalogId: string, teren: boolean) {
   await syncNalogTroskovi(nalogId);
 }
 
-export async function setNalogZavrsen(nalogId: string, zavrsen: boolean) {
+export async function setNalogZavrsen(nalogId: string, zavrsen: boolean, bezPotvrdeDjelatnika = false) {
   const { data: nalog, error: fetchError } = await supabase
     .from('radni_nalozi')
     .select('mobile_status')
     .eq('id', nalogId)
     .single();
   if (fetchError) throw fetchError;
-  if (zavrsen && (nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku')) {
+  if (zavrsen && !bezPotvrdeDjelatnika && (nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku')) {
     throw new Error('Djelatnici još rade na nalogu. Zaključivanje je moguće tek nakon što poslovođa preda završni izvještaj.');
   }
   const mobileStatus = nalog.mobile_status === 'predan' || nalog.mobile_status === 'odobren'
     ? (zavrsen ? 'odobren' : 'predan')
-    : nalog.mobile_status;
+    : bezPotvrdeDjelatnika && zavrsen
+      ? 'zakljucen_bez_potvrde'
+      : !zavrsen && nalog.mobile_status === 'zakljucen_bez_potvrde'
+        ? 'u_tijeku'
+        : nalog.mobile_status;
   const { error } = await supabase
     .from('radni_nalozi')
     .update({ status: zavrsen ? 'zavrsen' : 'u_tijeku', mobile_status: mobileStatus })
@@ -1567,7 +1571,7 @@ export interface MobileRadniNalog {
   status: NalogStatus;
   prioritet: NalogPrioritet;
   rok: string | null;
-  mobile_status: 'nije_poslan' | 'dodijeljen' | 'u_tijeku' | 'predan' | 'odobren';
+  mobile_status: 'nije_poslan' | 'dodijeljen' | 'u_tijeku' | 'predan' | 'odobren' | 'zakljucen_bez_potvrde';
   poslovodja_id: string | null;
   mobile_reviewed_sections: string[];
   mobile_started_at: string | null;

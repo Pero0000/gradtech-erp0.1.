@@ -386,8 +386,8 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                     <Badge variant={statusInfo[n.status].variant}>{statusInfo[n.status].label}</Badge>
                   </div>
                   {n.mobile_status && n.mobile_status !== 'nije_poslan' && (
-                    <p className={`mt-1 text-xs font-semibold ${n.mobile_status === 'predan' ? 'text-amber-700' : n.mobile_status === 'odobren' ? 'text-emerald-700' : 'text-sky-700'}`}>
-                      Mobitel: {{ dodijeljen: 'Djelatniku dodijeljen', u_tijeku: 'Djelatnik radi', predan: 'Čeka tvoje odobrenje', odobren: 'Djelatniku odobreno', nije_poslan: '' }[n.mobile_status]}
+                    <p className={`mt-1 text-xs font-semibold ${n.mobile_status === 'predan' || n.mobile_status === 'zakljucen_bez_potvrde' ? 'text-amber-700' : n.mobile_status === 'odobren' ? 'text-emerald-700' : 'text-sky-700'}`}>
+                      Mobitel: {{ dodijeljen: 'Djelatniku dodijeljen', u_tijeku: 'Djelatnik radi', predan: 'Čeka tvoje odobrenje', odobren: 'Djelatniku odobreno', zakljucen_bez_potvrde: 'Zaključen bez potvrde djelatnika', nije_poslan: '' }[n.mobile_status]}
                     </p>
                   )}
                   <p className="mt-1 text-sm font-semibold text-slate-900">{n.naslov}</p>
@@ -469,6 +469,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                   <Badge variant={si.variant}>{si.label}</Badge>
                   <Badge variant={pi.variant}>{pi.label}</Badge>
                   {n.mobile_status === 'predan' && <Badge variant="orange">Čeka odobrenje djelatnikova izvještaja</Badge>}
+                  {n.mobile_status === 'zakljucen_bez_potvrde' && <Badge variant="orange">Djelatnici nisu potvrdili radni nalog</Badge>}
                   {(n.radnici ?? []).length > 0 && (
                     <span className="flex items-center gap-1.5 text-xs text-slate-500">
                       <Users className="h-3.5 w-3.5" />

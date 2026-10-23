@@ -414,22 +414,26 @@ export function NalogIzvrsenje({
     }, 'Greška pri spremanju oznake teren.');
   };
 
-  const toggleZavrsen = (value: boolean) => {
+  const toggleZavrsen = (value: boolean, bezPotvrdeDjelatnika = false) => {
     if (value) {
-      if (nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku') {
+      if (!bezPotvrdeDjelatnika && (nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku')) {
         setError('Djelatnici još rade na nalogu. Zaključivanje je moguće tek nakon što poslovođa preda završni izvještaj.');
         return;
       }
       const radnici = radnikIds ? vremena.filter((v) => radnikIds.includes(v.radnik_id)) : vremena;
-      if (radnici.some((v) => !v.vrijeme_od || !v.vrijeme_do)) {
+      if (!bezPotvrdeDjelatnika && radnici.some((v) => !v.vrijeme_od || !v.vrijeme_do)) {
         setError('Nalog se ne može zaključiti dok nije upisan završetak rada (Do) za sve radnike.');
         return;
       }
       const missing: string[] = [];
       if (km.pocetak === '' || km.kraj === '') missing.push('kilometre');
-      const poruka = missing.length > 0
-        ? `Nije upisano: ${missing.join(', ')}.\n\nKilometri se neće obračunati. Zaključiti nalog svejedno?`
-        : 'Zaključiti radni nalog? Sati i kilometri upisat će se u trošak gradilišta, a neriješeni zadaci, materijal i alat prenose se na idući nalog.';
+      const upozorenje = bezPotvrdeDjelatnika
+        ? 'Djelatnici nisu potvrdili rad ni završni izvještaj. Ova će napomena biti trajno zabilježena na nalogu.'
+        : '';
+      const detalji = missing.length > 0
+        ? `Nije upisano: ${missing.join(', ')}. Kilometri se neće obračunati.`
+        : 'Sati i kilometri upisat će se u trošak gradilišta, a neriješeni zadaci, materijal i alat prenose se na idući nalog.';
+      const poruka = [upozorenje, detalji, 'Zaključiti nalog?'].filter(Boolean).join('\n\n');
       if (!window.confirm(poruka)) return;
     }
     void guard(async () => {
@@ -438,7 +442,7 @@ export function NalogIzvrsenje({
         const kraj = km.kraj === '' ? null : Number(km.kraj);
         await saveNalogIzvrsenje(nalog.id, { km_pocetak: pocetak, km_kraj: kraj, napomena: napomena.trim() || null });
       }
-      await setNalogZavrsen(nalog.id, value);
+      await setNalogZavrsen(nalog.id, value, bezPotvrdeDjelatnika);
       setZavrsen(value);
       onChange?.(value);
     }, 'Greška pri zaključivanju naloga.');
@@ -570,13 +574,31 @@ export function NalogIzvrsenje({
           <div className="flex items-center gap-2 text-sm text-emerald-800">
             <Check className="h-4 w-4" />
             Zaključen
+            {nalog.mobile_status === 'zakljucen_bez_potvrde' && (
+              <span className="rounded bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">Djelatnici nisu potvrdili</span>
+            )}
             <button onClick={() => toggleZavrsen(false)} className="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100">Ponovno otvori</button>
           </div>
         ) : (
-          <button onClick={() => toggleZavrsen(true)} disabled={nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku'} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
-            <Check className="h-4 w-4" />
-            {nalog.mobile_status === 'predan' ? 'Odobri i zaključi nalog' : nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku' ? 'Čeka izvještaj djelatnika' : 'Zaključi radni nalog'}
-          </button>
+          <>
+            <button
+              onClick={() => toggleZavrsen(true)}
+              disabled={nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku'}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Check className="h-4 w-4" />
+              {nalog.mobile_status === 'predan' ? 'Odobri i zaključi nalog' : nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku' ? 'Čeka izvještaj djelatnika' : 'Zaključi radni nalog'}
+            </button>
+            {(nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku') && (
+              <button
+                onClick={() => toggleZavrsen(true, true)}
+                className="ml-2 inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-900 hover:bg-amber-100"
+              >
+                <Check className="h-4 w-4" />
+                Zaključi bez potvrda djelatnika
+              </button>
+            )}
+          </>
         ),
         slot,
       )}

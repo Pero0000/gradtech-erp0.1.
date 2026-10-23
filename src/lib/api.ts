@@ -1537,10 +1537,52 @@ export async function setNalogTeren(nalogId: string, teren: boolean) {
   await syncNalogTroskovi(nalogId);
 }
 
+async function syncZadnjuKilometrazuVozila(voziloId: string) {
+  const { data: assignments, error: assignmentsError } = await supabase
+    .from('dnevni_raspored_gradilista')
+    .select('nalog_id, datum')
+    .eq('vozilo_id', voziloId)
+    .not('nalog_id', 'is', null)
+    .order('datum', { ascending: false });
+  if (assignmentsError) throw assignmentsError;
+
+  const nalogIds = [...new Set((assignments ?? [])
+    .map((assignment) => assignment.nalog_id)
+    .filter((nalogId): nalogId is string => Boolean(nalogId)))];
+  if (nalogIds.length === 0) return;
+
+  const { data: orders, error: ordersError } = await supabase
+    .from('radni_nalozi')
+    .select('id, km_kraj, datum_kreiranja')
+    .in('id', nalogIds)
+    .eq('status', 'zavrsen')
+    .not('km_kraj', 'is', null);
+  if (ordersError) throw ordersError;
+
+  const byId = new Map((orders ?? []).map((order) => [order.id, order]));
+  const latest = (assignments ?? [])
+    .map((assignment) => {
+      const order = assignment.nalog_id ? byId.get(assignment.nalog_id) : null;
+      return order ? { datum: assignment.datum, ...order } : null;
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    .sort((first, second) =>
+      second.datum.localeCompare(first.datum)
+      || second.datum_kreiranja.localeCompare(first.datum_kreiranja),
+    )[0];
+  if (!latest) return;
+
+  const { error: updateError } = await supabase
+    .from('vozila')
+    .update({ kilometraza: Number(latest.km_kraj), updated_at: new Date().toISOString() })
+    .eq('id', voziloId);
+  if (updateError) throw updateError;
+}
+
 export async function setNalogZavrsen(nalogId: string, zavrsen: boolean, bezPotvrdeDjelatnika = false) {
   const { data: nalog, error: fetchError } = await supabase
     .from('radni_nalozi')
-    .select('mobile_status')
+    .select('mobile_status, km_kraj')
     .eq('id', nalogId)
     .single();
   if (fetchError) throw fetchError;
@@ -1559,6 +1601,17 @@ export async function setNalogZavrsen(nalogId: string, zavrsen: boolean, bezPotv
     .update({ status: zavrsen ? 'zavrsen' : 'u_tijeku', mobile_status: mobileStatus })
     .eq('id', nalogId);
   if (error) throw error;
+  if (zavrsen && nalog.km_kraj !== null) {
+    const { data: assignments, error: assignmentsError } = await supabase
+      .from('dnevni_raspored_gradilista')
+      .select('vozilo_id')
+      .eq('nalog_id', nalogId)
+      .not('vozilo_id', 'is', null)
+      .limit(1);
+    if (assignmentsError) throw assignmentsError;
+    const voziloId = assignments?.[0]?.vozilo_id;
+    if (voziloId) await syncZadnjuKilometrazuVozila(voziloId);
+  }
   await syncNalogTroskovi(nalogId);
 }
 

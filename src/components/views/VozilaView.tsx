@@ -439,13 +439,16 @@ export function VozilaView() {
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Kilometraža">
+            <Field label="Kilometraža (km)">
               <TextInput
                 type="number"
+                min="0"
+                step="1"
                 value={form.kilometraza}
                 onChange={(e) => setForm({ ...form, kilometraza: e.target.value })}
                 placeholder="0"
               />
+              <p className="mt-1 text-xs text-slate-500">Pri zaključenju naloga ažurira se prema završnim kilometrima zadnjeg korištenja vozila. Vrijednost možete ručno promijeniti.</p>
             </Field>
             <Field label="Godina proizvodnje">
               <TextInput

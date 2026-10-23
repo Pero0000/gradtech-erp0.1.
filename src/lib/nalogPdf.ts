@@ -115,7 +115,6 @@ export async function downloadNalogPdf(nalog: RadniNalog, gradiliste?: Pick<Grad
         <div class="r">
           ${r('Vozač', vozac ? `${vozac.prezime} ${vozac.ime}` : '')}
           ${r('Vozilo', vozilo ? `${vozilo.marka} ${vozilo.model ?? ''}`.trim() : '')}
-          ${r('Registracija', vozilo?.registracija ?? '')}
           ${r('Poslovođa', poslovodja ? `${poslovodja.prezime} ${poslovodja.ime}` : '')}
           ${r('Polazak km', num(kmStart))}
           ${r('Dolazak km', num(izv?.km_kraj))}

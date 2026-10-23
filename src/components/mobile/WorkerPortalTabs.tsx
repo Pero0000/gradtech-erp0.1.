@@ -107,11 +107,11 @@ export function RasporedVozilaPreview({ vozila, radnikId = null }: { vozila: Ras
       {vozila.map((vozilo, index) => {
         const mine = radnikId !== null && vozilo.radnici.some((r) => r.id === radnikId);
         return (
-          <article key={`${vozilo.registracija}-${index}`} className={`rounded-2xl border-2 p-3 shadow-sm ${mine ? 'border-sky-500 bg-sky-50' : 'border-slate-300 bg-slate-200'}`}>
+          <article key={`${vozilo.naziv}-${index}`} className={`rounded-2xl border-2 p-3 shadow-sm ${mine ? 'border-sky-500 bg-sky-50' : 'border-slate-300 bg-slate-200'}`}>
             <div className="flex items-center gap-2">
               <Truck className="h-5 w-5 shrink-0 text-slate-700" />
               <span className="min-w-0 flex-1 truncate rounded border border-slate-800 bg-amber-200 px-2 py-1 text-center text-sm font-bold uppercase text-slate-900">
-                {[vozilo.naziv, vozilo.registracija].filter(Boolean).join(' ')}
+                {vozilo.naziv || 'Vozilo'}
               </span>
               {mine && <span className="shrink-0 rounded-full bg-sky-700 px-2 py-0.5 text-[10px] font-bold text-white">TVOJE VOZILO</span>}
             </div>

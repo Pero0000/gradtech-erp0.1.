@@ -129,7 +129,7 @@ export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
     const v = voziloById.get(d.vozilo_id);
     const tip = voziloTip(d.vrsta);
     if (!v || !tip) return;
-    push(tip, `vd-${d.id}`, v.registracija, d.naziv, d.datum_do as string, 'vozila');
+    push(tip, `vd-${d.id}`, [v.marka, v.model].filter(Boolean).join(' ') || 'Vozilo', d.naziv, d.datum_do as string, 'vozila');
   });
 
   if (postavke.obavijesti.vozilo_servis.on) {
@@ -142,7 +142,7 @@ export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
         tip: 'vozilo_servis',
         grupa: m.grupa,
         tipLabel: m.label,
-        title: v.registracija,
+        title: [v.marka, v.model].filter(Boolean).join(' ') || 'Vozilo',
         detail: alert.text,
         datum: null,
         days: null,

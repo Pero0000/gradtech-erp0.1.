@@ -1175,8 +1175,8 @@ export function RasporedView() {
                 >
                   <div className="mb-2 flex items-center gap-1.5">
                     <span className="w-20 flex-shrink-0 rounded border border-slate-800 bg-white px-1.5 py-0.5 text-xs text-slate-900">AUTO:</span>
-                    <span className="min-w-0 flex-1 truncate rounded border border-slate-800 bg-amber-200 px-2 py-0.5 text-center text-sm font-bold uppercase text-slate-900" title={[vozilo.marka, vozilo.model, vozilo.registracija].filter(Boolean).join(' ')}>
-                      {[vozilo.marka, vozilo.model, vozilo.registracija].filter(Boolean).join(' ')}
+                    <span className="min-w-0 flex-1 truncate rounded border border-slate-800 bg-amber-200 px-2 py-0.5 text-center text-sm font-bold uppercase text-slate-900" title={[vozilo.marka, vozilo.model].filter(Boolean).join(' ')}>
+                      {[vozilo.marka, vozilo.model].filter(Boolean).join(' ')}
                     </span>
                     {vehicleLocked && <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold text-white">ZAKLJUČANO</span>}
                   </div>
@@ -1255,7 +1255,7 @@ export function RasporedView() {
                                     : openNalog(
                                       a.id,
                                       g ? { gradiliste_id: g.id, naziv: g.naziv } : { gradiliste_id: null, naziv: a.tekst ?? 'Ostalo', bez_troska: true },
-                                      [vozilo.registracija, carTime].filter(Boolean).join(', '),
+                                      [[vozilo.marka, vozilo.model].filter(Boolean).join(' '), carTime].filter(Boolean).join(', '),
                                       carWorkers.map((w) => w.radnik_id),
                                     ))}
                                   title={nalogLocked ? 'Zaključen radni nalog – otvori' : hasNalog ? 'Nacrt radnog naloga – otvori' : a.iz_ostalo ? 'Kreiraj radni nalog (ne ulazi u trošak)' : 'Kreiraj radni nalog'}
@@ -1372,7 +1372,10 @@ export function RasporedView() {
             {workers.map((r) => {
               const assignments = workerAssignments.filter((a) => a.radnik_id === r.id);
               const cars = assignments
-                .map((a) => vehicleOf(a.vozilo_id)?.registracija)
+                .map((a) => {
+                  const vehicle = vehicleOf(a.vozilo_id);
+                  return vehicle ? [vehicle.marka, vehicle.model].filter(Boolean).join(' ') : '';
+                })
                 .filter(Boolean)
                 .join(', ');
               return (

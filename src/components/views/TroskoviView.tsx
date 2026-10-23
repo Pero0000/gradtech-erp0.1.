@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Receipt, Plus, Pencil, Trash2, Euro, Search, ArrowUp, ArrowDown, ArrowUpDown, X } from 'lucide-react';
-import type { Trosak, TrosakKategorija, Gradiliste, Kooperant } from '@/types';
+import type { Trosak, TrosakKategorija, Gradiliste, Kooperant, RadnoVrijeme } from '@/types';
 import {
   fetchTroskovi,
+  fetchRadnoVrijeme,
   fetchKooperanti,
   createTrosak,
   updateTrosak,
@@ -15,6 +16,7 @@ import { Field, TextInput, Select } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ExportMenu } from '@/components/ui/ExportMenu';
+import { companyStorage } from '@/lib/company';
 
 const kategorijaInfo: Record<TrosakKategorija, { variant: 'blue' | 'orange' | 'green' | 'gray' | 'red'; label: string }> = {
   materijal: { variant: 'blue', label: 'Materijal' },
@@ -42,7 +44,8 @@ const barColor: Record<TrosakKategorija, string> = {
 
 type SortKey = 'datum' | 'gradiliste' | 'kategorija' | 'opis' | 'iznos';
 type GroupBy = 'none' | 'gradiliste' | 'kategorija';
-type Row = { type: 'group'; key: string; label: string; sum: number; count: number } | { type: 'item'; t: Trosak };
+type TrosakRed = Trosak & { obracunPlace?: { sati: number; satnica: number } };
+type Row = { type: 'group'; key: string; label: string; sum: number; count: number } | { type: 'item'; t: TrosakRed };
 
 const eur = (v: number) => v.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' });
 
@@ -57,8 +60,14 @@ const emptyForm = {
 
 export function TroskoviView() {
   const [items, setItems] = useState<Trosak[]>([]);
+  const [radnoVrijeme, setRadnoVrijeme] = useState<RadnoVrijeme[]>([]);
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [kooperanti, setKooperanti] = useState<Kooperant[]>([]);
+  const [satnica] = useState(() => {
+    const saved = Number(companyStorage.getItem('tm_univerzalna_satnica'));
+    return saved > 0 ? saved : 18;
+  });
+  const [nettoPoRadnicima] = useState(() => companyStorage.getItem('tm_netto_po_radnicima') === '1');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -79,8 +88,9 @@ export function TroskoviView() {
     setLoading(true);
     setError(null);
     try {
-      const [t, g, k] = await Promise.all([fetchTroskovi(), fetchGradilista(), fetchKooperanti().catch(() => [])]);
+      const [t, rv, g, k] = await Promise.all([fetchTroskovi(), fetchRadnoVrijeme(), fetchGradilista(), fetchKooperanti().catch(() => [])]);
       setItems(t);
+      setRadnoVrijeme(rv);
       setGradilista(g);
       setKooperanti(k);
     } catch (e) {
@@ -149,18 +159,40 @@ export function TroskoviView() {
     }
   };
 
+  const itemsWithPayroll = useMemo<TrosakRed[]>(() => {
+    const payroll = radnoVrijeme.map((entry): TrosakRed => {
+      const sati = Number(entry.sati) || 0;
+      const satnicaZaRadnika = nettoPoRadnicima
+        ? Number(entry.radnici?.cijena_sata ?? satnica)
+        : satnica;
+      const ime = entry.radnici ? `${entry.radnici.ime} ${entry.radnici.prezime}` : 'Nepoznat radnik';
+      return {
+        id: `obracun-place-${entry.id}`,
+        gradiliste_id: entry.gradiliste_id,
+        kategorija: 'place',
+        opis: `Plaća · ${ime} · ${sati.toLocaleString('hr-HR')} h × ${satnicaZaRadnika.toLocaleString('hr-HR')} €/h`,
+        iznos: sati * satnicaZaRadnika,
+        datum: entry.datum,
+        created_at: entry.created_at,
+        gradilista: entry.gradilista,
+        obracunPlace: { sati, satnica: satnicaZaRadnika },
+      };
+    });
+    return [...items, ...payroll];
+  }, [items, radnoVrijeme, nettoPoRadnicima, satnica]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const list = items.filter((t) =>
+    const list = itemsWithPayroll.filter((t) =>
       (!filterGradiliste || t.gradiliste_id === filterGradiliste)
       && (!filterKat || t.kategorija === filterKat)
       && (!od || t.datum >= od)
       && (!doDatuma || t.datum <= doDatuma)
       && (!q || [t.opis, t.gradilista?.naziv, t.kooperanti?.naziv, kategorijaInfo[t.kategorija].label].some((v) => (v ?? '').toLowerCase().includes(q))));
-    const val = (t: Trosak): string | number => {
+    const val = (t: TrosakRed): string | number => {
       if (sortKey === 'datum') return t.datum;
       if (sortKey === 'gradiliste') return t.gradilista?.naziv ?? '';
-      if (sortKey === 'kategorija') return kategorijaInfo[t.kategorija].label;
+      if (sortKey === 'kategorija') return t.obracunPlace ? 'Plaća' : kategorijaInfo[t.kategorija].label;
       if (sortKey === 'opis') return t.opis;
       return t.iznos;
     };
@@ -170,7 +202,7 @@ export function TroskoviView() {
       const y = val(b);
       return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), 'hr')) * dir;
     });
-  }, [items, query, filterGradiliste, filterKat, od, doDatuma, sortKey, sortDir]);
+  }, [itemsWithPayroll, query, filterGradiliste, filterKat, od, doDatuma, sortKey, sortDir]);
 
   const ukupno = filtered.reduce((sum, t) => sum + t.iznos, 0);
 
@@ -246,8 +278,8 @@ export function TroskoviView() {
             columns: [
               { header: 'Datum', kind: 'date', get: (t: Trosak) => t.datum },
               { header: 'Gradilište', get: (t: Trosak) => t.gradilista?.naziv ?? '' },
-              { header: 'Kategorija', get: (t: Trosak) => kategorijaInfo[t.kategorija].label },
-              { header: 'Opis', get: (t: Trosak) => (t.kooperanti?.naziv ? `${t.kooperanti.naziv}: ${t.opis}` : t.opis) },
+              { header: 'Kategorija', get: (t: TrosakRed) => t.obracunPlace ? 'Plaća' : kategorijaInfo[t.kategorija].label },
+              { header: 'Opis', get: (t: TrosakRed) => (t.kooperanti?.naziv ? `${t.kooperanti.naziv}: ${t.opis}` : t.opis) },
               { header: 'Iznos', kind: 'eur', get: (t: Trosak) => t.iznos },
             ],
             totals: { Iznos: ukupno },
@@ -375,27 +407,32 @@ export function TroskoviView() {
                       {t.gradilista?.naziv ?? '—'}
                     </td>
                     <td className="px-5 py-3.5">
-                      <Badge variant={ki.variant}>{ki.label}</Badge>
+                      <Badge variant={t.obracunPlace ? 'green' : ki.variant}>{t.obracunPlace ? 'Plaća' : ki.label}</Badge>
                     </td>
-                    <td className="px-5 py-3.5 text-sm text-slate-700">{t.kooperanti?.naziv ? <strong className="mr-1">{t.kooperanti.naziv}:</strong> : null}{t.opis}</td>
+                    <td className="px-5 py-3.5 text-sm text-slate-700">
+                      {t.kooperanti?.naziv ? <strong className="mr-1">{t.kooperanti.naziv}:</strong> : null}{t.opis}
+                      {t.obracunPlace && <span className="block text-xs text-slate-500">Obračun iz radnih sati</span>}
+                    </td>
                     <td className="px-5 py-3.5 text-right text-sm font-semibold text-slate-900">
                       {t.iznos.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
                     </td>
                     <td className="px-5 py-3.5">
-                      <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => openEdit(t)}
-                          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-600 transition-colors"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => setDeleteId(t.id)}
-                          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600 transition-colors"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
+                      {!t.obracunPlace && (
+                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => openEdit(t)}
+                            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-600 transition-colors"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => setDeleteId(t.id)}
+                            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600 transition-colors"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );

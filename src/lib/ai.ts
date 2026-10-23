@@ -75,7 +75,7 @@ export async function buildSnapshot() {
       troskovi_ukupno: sum(troskovi.filter((t) => t.kooperant_id === k.id), (t) => t.iznos),
     })),
     radnici: radnici.map((r) => ({ ime: `${r.ime} ${r.prezime}`, uloga: r.uloga, status: r.status })),
-    vozila: vozila.map((v) => ({ registracija: v.registracija, status: v.status, kilometraza: v.kilometraza })),
+    vozila: vozila.map((v) => ({ model: [v.marka, v.model].filter(Boolean).join(' '), status: v.status, kilometraza: v.kilometraza })),
     otvorene_obavijesti: obavijesti.map((o) => ({ vrsta: o.tipLabel, stavka: o.title, detalj: o.detail, datum: o.datum, hitnost: o.level })),
   };
 }

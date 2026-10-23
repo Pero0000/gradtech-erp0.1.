@@ -1430,7 +1430,7 @@ async function syncKmGrupa(datum: string, voziloId: string | undefined, nalogId:
   const lista = ((nalozi ?? []) as N[]).filter((n) => !n.bez_troska);
   if (lista.length === 0) return;
 
-  const { data: v } = await supabase.from('vozila').select('registracija, cijena_km').eq('id', voziloId).single();
+  const { data: v } = await supabase.from('vozila').select('marka, model, cijena_km').eq('id', voziloId).single();
   const cijena = Number(v?.cijena_km ?? 0);
   if (cijena <= 0) return;
 
@@ -1447,7 +1447,7 @@ async function syncKmGrupa(datum: string, voziloId: string | undefined, nalogId:
     .map((r) => ({
       gradiliste_id: r.n.gradiliste_id,
       kategorija: 'put' as const,
-      opis: `Kilometri: ${v?.registracija ?? ''} ${r.km} km × ${cijena} €/km`,
+      opis: `Kilometri: ${[v?.marka, v?.model].filter(Boolean).join(' ')} ${r.km} km × ${cijena} €/km`,
       iznos: Math.round(r.km * cijena * 100) / 100,
       datum,
       nalog_id: r.n.id,

@@ -184,9 +184,7 @@ export function VozilaView() {
               title: 'Vozila',
               rows: items,
               columns: [
-                { header: 'Registracija', get: (v: Vozilo) => v.registracija },
-                { header: 'Marka', get: (v: Vozilo) => v.marka },
-                { header: 'Model', get: (v: Vozilo) => v.model ?? '' },
+                { header: 'Vozilo', get: (v: Vozilo) => [v.marka, v.model].filter(Boolean).join(' ') },
                 { header: 'Tip', get: (v: Vozilo) => tipLabel[v.tip] },
                 { header: 'Status', get: (v: Vozilo) => statusBadge[v.status].label },
                 { header: 'Kilometraža', kind: 'num', get: (v: Vozilo) => v.kilometraza },
@@ -234,7 +232,6 @@ export function VozilaView() {
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <th className="px-4 py-3 text-left">Vozilo</th>
-                <th className="px-4 py-3 text-left">Registracija</th>
                 <th className="px-4 py-3 text-left">Tip</th>
                 <th className="px-4 py-3 text-left">Status</th>
                 <th className="px-4 py-3 text-right">Km</th>
@@ -255,7 +252,6 @@ export function VozilaView() {
                 return (
                   <tr key={v.id} className="group hover:bg-slate-50">
                     <td className="px-4 py-3 font-medium text-slate-900">{v.marka} {v.model}</td>
-                    <td className="px-4 py-3 text-slate-600">{v.registracija}</td>
                     <td className="px-4 py-3"><Badge variant="blue">{tipLabel[v.tip]}</Badge></td>
                     <td className="px-4 py-3"><Badge variant={sb.variant}>{sb.label}</Badge></td>
                     <td className="px-4 py-3 text-right text-slate-600">{v.kilometraza ? v.kilometraza.toLocaleString('hr-HR') : '—'}</td>
@@ -300,7 +296,6 @@ export function VozilaView() {
                     </div>
                     <div>
                       <h3 className="font-semibold text-slate-900 leading-tight">{v.marka} {v.model}</h3>
-                      <p className="text-xs font-medium text-slate-500">{v.registracija}</p>
                     </div>
                   </div>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

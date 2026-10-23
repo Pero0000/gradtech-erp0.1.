@@ -691,7 +691,7 @@ export function MobileWorkOrdersView() {
                   {selected.gradiliste_naziv && <p className="mt-1 text-sm font-medium text-sky-800">{selected.gradiliste_naziv}</p>}
                 </div>
                 <span className="shrink-0 rounded-full bg-sky-100 px-2.5 py-1 text-xs font-bold text-sky-800">
-                  {selected.mobile_status === 'dodijeljen' ? 'Dodijeljen' : selected.mobile_status === 'u_tijeku' ? 'U tijeku' : selected.mobile_status === 'predan' ? 'Čeka odobrenje' : selected.mobile_status === 'odobren' ? 'Odobren' : 'Nalog'}
+                  {selected.mobile_status === 'dodijeljen' ? 'Čeka poslovođu' : selected.mobile_status === 'u_tijeku' ? 'U tijeku' : selected.mobile_status === 'predan' ? 'Čeka odobrenje' : selected.mobile_status === 'odobren' ? 'Odobren' : 'Nalog'}
                 </span>
               </div>
               {selected.opis && <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">{selected.opis}</p>}
@@ -715,7 +715,7 @@ export function MobileWorkOrdersView() {
                     </div>
                     <div className="space-y-3 p-4">
                       <p className="whitespace-pre-wrap text-base font-semibold leading-6 text-slate-900">{details.napomena}</p>
-                      {selected.mobile_status === 'dodijeljen' && (
+                      {selected.mobile_status === 'dodijeljen' && isLeader && (
                         <CheckField
                           checked={prep.includes('napomena')}
                           onChange={(checked) => togglePrep('napomena', checked)}
@@ -728,6 +728,8 @@ export function MobileWorkOrdersView() {
 
                 {selected.mobile_status === 'dodijeljen' && (
                   <>
+                    {isLeader ? (
+                      <>
                     <StepHeader step={1} title="Priprema prije polaska" text="Pregledaj nalog, preuzmi materijal i alat te upiši početne kilometre." />
 
                     <WorkOrderPanel title="Vozač" icon={<Gauge className="h-5 w-5" />} tone="sky">
@@ -871,14 +873,41 @@ export function MobileWorkOrdersView() {
 
                     <WorkOrderPanel title="Započni gradilište" icon={<Play className="h-5 w-5" />} tone="emerald">
                       <Checklist items={prepChecks} />
-                      {isLeader ? (
-                        <Button onClick={() => void runAction(startSite, 'Gradilište je započeto. Radno vrijeme ekipe teče od sada.')} disabled={working || !prepReady}>
-                          <Play className="h-5 w-5" /> Započni gradilište
-                        </Button>
-                      ) : (
-                        <p className="rounded-xl bg-sky-50 p-3 text-sm text-sky-900">Gradilište započinje poslovođa nakon što je sve preuzeto.</p>
-                      )}
+                      <Button onClick={() => void runAction(startSite, 'Gradilište je započeto. Radno vrijeme ekipe teče od sada.')} disabled={working || !prepReady}>
+                        <Play className="h-5 w-5" /> Započni gradilište
+                      </Button>
                     </WorkOrderPanel>
+                      </>
+                    ) : (
+                      <>
+                        <StepHeader step={1} title="Uvod u gradilište" text="Pregledaj početne informacije. Radni nalog otključava poslovođa nakon potvrde i pokretanja gradilišta." />
+                        <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+                          Nalog još nije pokrenut. Dok ga poslovođa ne potvrdi, možeš pregledavati uvodne informacije, ali ne možeš unositi ni mijenjati podatke.
+                        </p>
+                        <WorkOrderPanel title="Početne informacije" icon={<ClipboardCheck className="h-5 w-5" />} tone="slate">
+                          <ReviewBlock title="Radni zadaci">
+                            {radniZadaci.length
+                              ? <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">{radniZadaci.map((task) => <li key={task.id}>{task.naziv}</li>)}</ul>
+                              : <p className="text-sm text-slate-500">Nema upisanih radnih zadataka.</p>}
+                          </ReviewBlock>
+                          <ReviewBlock title="Dodatni radovi">
+                            {dodatniRadovi.length
+                              ? <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">{dodatniRadovi.map((task) => <li key={task.id}>{task.naziv}</li>)}</ul>
+                              : <p className="text-sm text-slate-500">Nema upisanih dodatnih radova.</p>}
+                          </ReviewBlock>
+                          <ReviewBlock title="Materijal i alat">
+                            {details.stavke.length
+                              ? <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">{details.stavke.map((item) => <li key={item.id}>{item.naziv}</li>)}</ul>
+                              : <p className="text-sm text-slate-500">Nema unaprijed upisanog materijala ni alata.</p>}
+                          </ReviewBlock>
+                          <ReviewBlock title="Dokumenti">
+                            {details.dokumenti.length
+                              ? details.dokumenti.map((document) => <a key={document.id} href={document.url} target="_blank" rel="noreferrer" className="block min-h-10 py-2 text-sm font-medium text-sky-700 underline">{document.naziv}</a>)
+                              : <p className="text-sm text-slate-500">Nema priloženih dokumenata.</p>}
+                          </ReviewBlock>
+                        </WorkOrderPanel>
+                      </>
+                    )}
                   </>
                 )}
 
@@ -1224,7 +1253,7 @@ export function MobileWorkOrdersView() {
                 <div className="flex items-start justify-between gap-3">
                   <p className="font-mono text-xs font-semibold text-indigo-600">{order.broj}</p>
                   <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${order.mobile_status === 'u_tijeku' ? 'bg-amber-100 text-amber-800' : order.mobile_status === 'odobren' ? 'bg-emerald-100 text-emerald-800' : 'bg-indigo-50 text-indigo-700'}`}>
-                    {order.mobile_status === 'dodijeljen' ? 'Dodijeljen' : order.mobile_status === 'u_tijeku' ? 'U tijeku' : order.mobile_status === 'predan' ? 'Na odobrenju' : order.mobile_status === 'odobren' ? 'Odobren' : 'Nalog'}
+                    {order.mobile_status === 'dodijeljen' ? 'Čeka poslovođu' : order.mobile_status === 'u_tijeku' ? 'U tijeku' : order.mobile_status === 'predan' ? 'Na odobrenju' : order.mobile_status === 'odobren' ? 'Odobren' : 'Nalog'}
                   </span>
                 </div>
                 <h3 className="mt-2 font-bold text-slate-900">{order.naslov}</h3>

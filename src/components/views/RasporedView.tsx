@@ -1013,7 +1013,7 @@ export function RasporedView() {
             </button>
             <p className="text-xs text-slate-500">Vozila bez gradilišta i radnika se ne šalju. Push obavijest o poslanom rasporedu bit će dodana kad se uključi Firebase konfiguracija.</p>
           </section>
-          <section aria-label="Pregled kako radnici vide raspored" className="mx-auto w-full max-w-md rounded-[2rem] border-8 border-slate-800 bg-slate-100 p-3 shadow-lg 2xl:max-w-none">
+          <section aria-label="Pregled kako radnici vide raspored" className="mx-auto w-full max-w-md rounded-[2rem] border-8 border-slate-800 bg-slate-100 p-3 shadow-lg 2xl:max-w-sm">
             <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">Pregled u Portalu djelatnika</p>
             <RasporedVozilaPreview vozila={objavaVozila} />
           </section>
@@ -1148,7 +1148,7 @@ export function RasporedView() {
             Nema vozila. Dodajte vozila na tabu Vozila i ona će se pojaviti ovdje kao auti.
           </div>
         ) : (
-          <div className="grid grid-cols-1 items-start gap-4 2xl:grid-cols-2">
+          <div className="grid grid-cols-3 items-start gap-2">
             {[...vozila].sort((a, b) => b.broj_mjesta - a.broj_mjesta || a.registracija.localeCompare(b.registracija)).map((vozilo) => {
               const carSites = siteAssignments.filter((a) => a.vozilo_id === vozilo.id);
               const carWorkers = workerAssignments.filter((a) => a.vozilo_id === vozilo.id);
@@ -1171,19 +1171,19 @@ export function RasporedView() {
                   }}
                   onDrop={(e) => dropOnVehicle(e, vozilo.id)}
                   title={vehicleLocked ? 'Zaključano zbog potvrđene stavke Ostalo ili zaključenog radnog naloga' : undefined}
-                  className={`min-w-0 rounded-lg border-2 p-3 transition-colors ${vehicleLocked ? 'border-emerald-500 bg-emerald-50/60' : dropTarget === target ? 'border-sky-400 bg-sky-50' : 'border-slate-400 bg-slate-200'}`}
+                  className={`min-w-0 rounded-lg border-2 p-2 transition-colors ${vehicleLocked ? 'border-emerald-500 bg-emerald-50/60' : dropTarget === target ? 'border-sky-400 bg-sky-50' : 'border-slate-400 bg-slate-200'}`}
                 >
                   <div className="mb-2 flex items-center gap-1.5">
-                    <span className="w-20 flex-shrink-0 rounded border border-slate-800 bg-white px-1.5 py-0.5 text-xs text-slate-900">AUTO:</span>
-                    <span className="min-w-0 flex-1 truncate rounded border border-slate-800 bg-amber-200 px-2 py-0.5 text-center text-sm font-bold uppercase text-slate-900" title={[vozilo.marka, vozilo.model].filter(Boolean).join(' ')}>
+                    <span className="w-12 flex-shrink-0 truncate rounded border border-slate-800 bg-white px-1 py-0.5 text-[9px] text-slate-900">AUTO:</span>
+                    <span className="min-w-0 flex-1 truncate rounded border border-slate-800 bg-amber-200 px-1 py-0.5 text-center text-xs font-bold uppercase text-slate-900" title={[vozilo.marka, vozilo.model].filter(Boolean).join(' ')}>
                       {[vozilo.marka, vozilo.model].filter(Boolean).join(' ')}
                     </span>
-                    {vehicleLocked && <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold text-white">ZAKLJUČANO</span>}
+                    {vehicleLocked && <span className="rounded bg-emerald-600 px-1 py-0.5 text-[8px] font-bold text-white">ZAKLJUČANO</span>}
                   </div>
 
                   <div className="mb-2 flex gap-2">
-                    <span className="h-fit w-20 flex-shrink-0 rounded border border-slate-800 bg-white px-1.5 py-0.5 text-[10px] text-slate-900">GRADILIŠTE:</span>
-                    <div className="min-w-0 flex-1 bg-white px-2 py-0.5">
+                    <span className="h-fit w-12 flex-shrink-0 truncate rounded border border-slate-800 bg-white px-1 py-0.5 text-[8px] text-slate-900" title="Gradilište">GRAD.:</span>
+                    <div className="min-w-0 flex-1 bg-white px-1 py-0.5">
                       {carSites.map((a) => {
                         const g = a.gradiliste_id ? gradilista.find((item) => item.id === a.gradiliste_id) : undefined;
                         const isText = !a.gradiliste_id;
@@ -1307,8 +1307,8 @@ export function RasporedView() {
                   </div>
 
                   <div className="flex gap-2">
-                    <span className="h-fit w-20 flex-shrink-0 rounded border border-slate-800 bg-white px-1.5 py-0.5 text-[10px] text-slate-900">RADNICI:</span>
-                    <div className="min-w-0 flex-1 bg-white px-2 py-0.5">
+                    <span className="h-fit w-12 flex-shrink-0 truncate rounded border border-slate-800 bg-white px-1 py-0.5 text-[8px] text-slate-900" title="Radnici">EKIPA:</span>
+                    <div className="min-w-0 flex-1 bg-white px-1 py-0.5">
                       {carWorkers.map((a) => {
                         const r = radnici.find((item) => item.id === a.radnik_id);
                         return (

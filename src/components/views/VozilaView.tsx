@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Truck, Plus, Pencil, Trash2, Gauge, Calendar, Users, Weight, LayoutGrid, Table2 } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Truck, Plus, Pencil, Trash2, Gauge, Calendar, Users, Weight, LayoutGrid, Table2, ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import type { Vozilo, VoziloStatus, VoziloTip, VoziloDokument } from '@/types';
 import { servisAlert, nextServis } from '@/lib/servis';
 import { AlertTriangle } from 'lucide-react';
@@ -24,6 +24,8 @@ const tipLabel: Record<VoziloTip, string> = {
   radno: 'Radno',
   putnicko: 'Putničko',
 };
+
+type SortKey = 'vozilo' | 'tip' | 'status' | 'kilometraza' | 'godina' | 'mjesta' | 'nosivost' | 'masa' | 'enc' | 'servis' | 'napomena';
 
 const emptyForm = {
   registracija: '',
@@ -56,6 +58,8 @@ export function VozilaView() {
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [prikaz, setPrikaz] = useState<'kartice' | 'tablica'>(() => (localStorage.getItem('tm_vozila_prikaz') === 'tablica' ? 'tablica' : 'kartice'));
+  const [sortKey, setSortKey] = useState<SortKey>('vozilo');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const setView = (p: 'kartice' | 'tablica') => {
     setPrikaz(p);
     localStorage.setItem('tm_vozila_prikaz', p);
@@ -161,6 +165,55 @@ export function VozilaView() {
     }
   };
 
+  const sortedItems = useMemo(() => {
+    const value = (vehicle: Vozilo): string | number => {
+      switch (sortKey) {
+        case 'vozilo': return `${vehicle.marka} ${vehicle.model ?? ''}`.trim();
+        case 'tip': return tipLabel[vehicle.tip];
+        case 'status': return statusBadge[vehicle.status].label;
+        case 'kilometraza': return vehicle.kilometraza ?? 0;
+        case 'godina': return vehicle.godina_proizvodnje ?? 0;
+        case 'mjesta': return vehicle.broj_mjesta ?? 0;
+        case 'nosivost': return vehicle.nosivost_kg ?? 0;
+        case 'masa': return vehicle.masa_kg ?? 0;
+        case 'enc': return vehicle.enc_broj ?? '';
+        case 'servis': {
+          const service = nextServis(vehicle, servisi);
+          if (service.datum) return `0:${service.datum}`;
+          if (service.km !== null) return `1:${String(service.km).padStart(12, '0')}`;
+          return '2:';
+        }
+        case 'napomena': return vehicle.napomena ?? '';
+      }
+    };
+    const direction = sortDir === 'asc' ? 1 : -1;
+    return [...items].sort((first, second) => {
+      const firstValue = value(first);
+      const secondValue = value(second);
+      const comparison = typeof firstValue === 'number' && typeof secondValue === 'number'
+        ? firstValue - secondValue
+        : String(firstValue).localeCompare(String(secondValue), 'hr', { numeric: true, sensitivity: 'base' });
+      return comparison * direction;
+    });
+  }, [items, servisi, sortKey, sortDir]);
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir((direction) => direction === 'asc' ? 'desc' : 'asc');
+    else {
+      setSortKey(key);
+      setSortDir(['vozilo', 'tip', 'status', 'enc', 'napomena'].includes(key) ? 'asc' : 'desc');
+    }
+  };
+
+  const SortTh = ({ k, label, right = false }: { k: SortKey; label: string; right?: boolean }) => (
+    <th aria-sort={sortKey === k ? sortDir === 'asc' ? 'ascending' : 'descending' : 'none'} className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 ${right ? 'text-right' : 'text-left'}`}>
+      <button type="button" onClick={() => toggleSort(k)} className={`inline-flex items-center gap-1 hover:text-sky-700 ${sortKey === k ? 'text-sky-700' : ''}`}>
+        {label}
+        {sortKey === k ? (sortDir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-40" />}
+      </button>
+    </th>
+  );
+
   if (loading) {
     return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
   }
@@ -178,11 +231,11 @@ export function VozilaView() {
             <button type="button" onClick={() => setView('tablica')} className={`rounded-md p-2 ${prikaz === 'tablica' ? 'bg-sky-100 text-sky-700' : 'text-slate-500 hover:bg-slate-50'}`} title="Tablica"><Table2 className="h-4 w-4" /></button>
           </div>
           <ExportMenu
-            disabled={items.length === 0}
+            disabled={sortedItems.length === 0}
             build={() => ({
               file: 'Vozila',
               title: 'Vozila',
-              rows: items,
+              rows: sortedItems,
               columns: [
                 { header: 'Vozilo', get: (v: Vozilo) => [v.marka, v.model].filter(Boolean).join(' ') },
                 { header: 'Tip', get: (v: Vozilo) => tipLabel[v.tip] },
@@ -231,20 +284,22 @@ export function VozilaView() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <th className="px-4 py-3 text-left">Vozilo</th>
-                <th className="px-4 py-3 text-left">Tip</th>
-                <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-right">Km</th>
-                <th className="px-4 py-3 text-right">Mjesta</th>
-                <th className="px-4 py-3 text-right">Nosivost</th>
-                <th className="px-4 py-3 text-right">Masa</th>
-                <th className="px-4 py-3 text-left">ENC</th>
-                <th className="px-4 py-3 text-left">Idući servis</th>
+                <SortTh k="vozilo" label="Vozilo" />
+                <SortTh k="tip" label="Tip" />
+                <SortTh k="status" label="Status" />
+                <SortTh k="kilometraza" label="Km" right />
+                <SortTh k="godina" label="Godina" right />
+                <SortTh k="mjesta" label="Mjesta" right />
+                <SortTh k="nosivost" label="Nosivost" right />
+                <SortTh k="masa" label="Masa" right />
+                <SortTh k="enc" label="ENC" />
+                <SortTh k="servis" label="Idući servis" />
+                <SortTh k="napomena" label="Napomena" />
                 <th className="px-4 py-3 text-right">Akcije</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {items.map((v) => {
+              {sortedItems.map((v) => {
                 const sb = statusBadge[v.status];
                 const ns = nextServis(v, servisi);
                 const alert = servisAlert(v, servisi);
@@ -254,7 +309,8 @@ export function VozilaView() {
                     <td className="px-4 py-3 font-medium text-slate-900">{v.marka} {v.model}</td>
                     <td className="px-4 py-3"><Badge variant="blue">{tipLabel[v.tip]}</Badge></td>
                     <td className="px-4 py-3"><Badge variant={sb.variant}>{sb.label}</Badge></td>
-                    <td className="px-4 py-3 text-right text-slate-600">{v.kilometraza ? v.kilometraza.toLocaleString('hr-HR') : '—'}</td>
+                    <td className="px-4 py-3 text-right text-slate-600">{v.kilometraza.toLocaleString('hr-HR')}</td>
+                    <td className="px-4 py-3 text-right text-slate-600">{v.godina_proizvodnje ?? '—'}</td>
                     <td className="px-4 py-3 text-right text-slate-600">{v.broj_mjesta}</td>
                     <td className="px-4 py-3 text-right text-slate-600">{v.nosivost_kg ? `${v.nosivost_kg.toLocaleString('hr-HR')} kg` : '—'}</td>
                     <td className="px-4 py-3 text-right text-slate-600">{v.masa_kg ? `${v.masa_kg.toLocaleString('hr-HR')} kg` : '—'}</td>
@@ -268,6 +324,7 @@ export function VozilaView() {
                         </>
                       ) : '—'}
                     </td>
+                    <td className="max-w-xs truncate px-4 py-3 text-slate-600">{v.napomena || '—'}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => openEdit(v)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-600"><Pencil className="h-4 w-4" /></button>
@@ -282,7 +339,7 @@ export function VozilaView() {
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {items.map((v) => {
+          {sortedItems.map((v) => {
             const sb = statusBadge[v.status];
             return (
               <div

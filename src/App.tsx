@@ -40,9 +40,9 @@ function App() {
   const { canAccess, isAdmin, isPlatformOwner, isWorker, company, profile, signOut } = useAuth();
   const [view, setView] = useState<View>('dashboard');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [scheduleSidebarVisible, setScheduleSidebarVisible] = useState(false);
+  const [hoverSidebarVisible, setHoverSidebarVisible] = useState(false);
   const [hasHoverPointer, setHasHoverPointer] = useState(false);
-  const scheduleSidebarCloseTimer = useRef<number | null>(null);
+  const sidebarCloseTimer = useRef<number | null>(null);
   const [focusNalogId, setFocusNalogId] = useState<string | null>(null);
   const [counts, setCounts] = useState({
     gradilista: 0,
@@ -99,7 +99,7 @@ function App() {
   }, [view, profile?.approved, canAccess]);
 
   useEffect(() => {
-    if (view !== 'raspored') setScheduleSidebarVisible(false);
+    if (view !== 'raspored' && view !== 'gradilista') setHoverSidebarVisible(false);
     if (view === 'korisnici' && !isAdmin) setView('dashboard');
     if (view === 'tvrtke' && !isPlatformOwner) setView('dashboard');
     const module = moduleForView(view);
@@ -110,19 +110,19 @@ function App() {
     }
   }, [view, isAdmin, isPlatformOwner, canAccess]);
 
-  const openScheduleSidebar = () => {
-    if (scheduleSidebarCloseTimer.current !== null) {
-      window.clearTimeout(scheduleSidebarCloseTimer.current);
-      scheduleSidebarCloseTimer.current = null;
+  const openHoverSidebar = () => {
+    if (sidebarCloseTimer.current !== null) {
+      window.clearTimeout(sidebarCloseTimer.current);
+      sidebarCloseTimer.current = null;
     }
-    setScheduleSidebarVisible(true);
+    setHoverSidebarVisible(true);
   };
 
-  const closeScheduleSidebarSoon = () => {
-    if (scheduleSidebarCloseTimer.current !== null) window.clearTimeout(scheduleSidebarCloseTimer.current);
-    scheduleSidebarCloseTimer.current = window.setTimeout(() => {
-      setScheduleSidebarVisible(false);
-      scheduleSidebarCloseTimer.current = null;
+  const closeHoverSidebarSoon = () => {
+    if (sidebarCloseTimer.current !== null) window.clearTimeout(sidebarCloseTimer.current);
+    sidebarCloseTimer.current = window.setTimeout(() => {
+      setHoverSidebarVisible(false);
+      sidebarCloseTimer.current = null;
     }, 180);
   };
 
@@ -144,6 +144,7 @@ function App() {
 
   const module = moduleForView(view);
   const viewAuthorized = view === 'tvrtke' ? isPlatformOwner : view === 'korisnici' ? isAdmin : module !== null && canAccess(module);
+  const autoHideSidebar = view === 'raspored' || view === 'gradilista';
 
   if (!isAdmin && !isPlatformOwner && !MODULES.some((module) => canAccess(module.id))) {
     return (
@@ -162,21 +163,21 @@ function App() {
       <Sidebar
         current={view}
         onNavigate={navigate}
-        mobileOpen={mobileNavOpen && !(view === 'raspored' && hasHoverPointer)}
-        desktopHidden={view === 'raspored' && !scheduleSidebarVisible}
-        desktopOverlay={view === 'raspored'}
-        onDesktopEnter={openScheduleSidebar}
-        onDesktopLeave={closeScheduleSidebarSoon}
+        mobileOpen={mobileNavOpen && !(autoHideSidebar && hasHoverPointer)}
+        desktopHidden={autoHideSidebar && !hoverSidebarVisible}
+        desktopOverlay={autoHideSidebar}
+        onDesktopEnter={openHoverSidebar}
+        onDesktopLeave={closeHoverSidebarSoon}
         onMobileClose={() => setMobileNavOpen(false)}
         counts={counts}
       />
-      {view === 'raspored' && hasHoverPointer && (
+      {autoHideSidebar && hasHoverPointer && (
         <button
           type="button"
           aria-label="Otvori izbornik"
-          onMouseEnter={openScheduleSidebar}
-          onMouseLeave={closeScheduleSidebarSoon}
-          onFocus={openScheduleSidebar}
+          onMouseEnter={openHoverSidebar}
+          onMouseLeave={closeHoverSidebarSoon}
+          onFocus={openHoverSidebar}
           className="fixed inset-y-0 left-0 z-[60] w-3 cursor-pointer"
         />
       )}
@@ -186,7 +187,7 @@ function App() {
             <p className="text-sm font-bold text-slate-900">GradTech · {company?.naziv}</p>
             <p className="text-xs text-slate-500">{MODULES.find((module) => module.id === view)?.label ?? 'Aplikacija'}</p>
           </div>
-          <button type="button" onClick={() => setMobileNavOpen((open) => !open)} aria-label={mobileNavOpen ? 'Zatvori navigaciju' : 'Otvori navigaciju'} aria-expanded={mobileNavOpen} className={`rounded-lg p-2 text-slate-700 hover:bg-slate-100 ${view === 'raspored' ? '[@media(hover:hover)]:hidden' : ''}`}>
+          <button type="button" onClick={() => setMobileNavOpen((open) => !open)} aria-label={mobileNavOpen ? 'Zatvori navigaciju' : 'Otvori navigaciju'} aria-expanded={mobileNavOpen} className={`rounded-lg p-2 text-slate-700 hover:bg-slate-100 ${autoHideSidebar ? '[@media(hover:hover)]:hidden' : ''}`}>
             {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
         </header>

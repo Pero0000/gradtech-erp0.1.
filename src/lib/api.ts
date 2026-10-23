@@ -1874,6 +1874,36 @@ export async function fetchNalogFoto(nalogId: string): Promise<NalogFoto[]> {
   })));
 }
 
+export interface GradilisteRadniNalogFoto extends NalogFoto {
+  nalog_broj: string;
+  nalog_naslov: string | null;
+  created_at: string | null;
+}
+
+export async function fetchGradilisteRadniNalogFoto(gradilisteId: string): Promise<GradilisteRadniNalogFoto[]> {
+  const { data: nalozi, error: naloziError } = await supabase
+    .from('radni_nalozi')
+    .select('id, broj, naslov')
+    .eq('gradiliste_id', gradilisteId);
+  if (naloziError) throw naloziError;
+  if (!nalozi?.length) return [];
+
+  const brojNaloga = new Map(nalozi.map((nalog) => [nalog.id, { broj: nalog.broj, naslov: nalog.naslov }]));
+  const { data, error } = await supabase
+    .from('radni_nalozi_foto')
+    .select('id, nalog_id, putanja, naziv, created_at')
+    .in('nalog_id', nalozi.map((nalog) => nalog.id))
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  return Promise.all((data ?? []).map(async (foto) => ({
+    ...foto,
+    nalog_broj: brojNaloga.get(foto.nalog_id)?.broj ?? '',
+    nalog_naslov: brojNaloga.get(foto.nalog_id)?.naslov ?? null,
+    url: await getPrivateFileUrl(foto.putanja),
+  })));
+}
+
 async function spremiNaGradiliste(nalogId: string, putanja: string, naziv: string, velicina: number | null, vrsta: 'dokument' | 'slika') {
   try {
     const { data } = await supabase.from('radni_nalozi').select('gradiliste_id').eq('id', nalogId).single();

@@ -2,11 +2,16 @@ import { useEffect, useState } from 'react';
 import { companyStorage } from '@/lib/company';
 import {
   Calendar,
+  Camera,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
+  Download,
   FileText,
   Pencil,
   Plus,
+  RefreshCw,
   Receipt,
   Save,
   Trash2,
@@ -45,6 +50,7 @@ import {
   fetchInvestitori,
   deleteTrosak,
   fetchFullRekapitulacija,
+  fetchGradilisteRadniNalogFoto,
   createUgovoreniRad,
   deleteUgovoreniRad,
   deleteUgovoreniRadDokument,
@@ -53,12 +59,15 @@ import {
   updateGradiliste,
   updateTrosak,
   getPrivateFileUrl,
+  deleteNalogFoto,
   iznosFakture,
+  type GradilisteRadniNalogFoto,
 } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { GradilisteMaterijalDokumenti } from '@/components/views/GradilisteMaterijalDokumenti';
 import { GradilisteTroskovnik } from '@/components/views/GradilisteTroskovnik';
 import { Modal } from '@/components/ui/Modal';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Field, Select, TextInput, Textarea } from '@/components/ui/Field';
 import { fetchPonude, fetchSvePonudeStavke, ponudaBroj, ponudaUkupno, updatePonuda, type Ponuda, type PonudaStavka } from '@/lib/ponude';
 
@@ -122,6 +131,12 @@ function Section({ title, icon, children, action }: { title: string; icon: React
 
 export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilisteUpdate, onRokoviChange, onOpenNalog }: GradilisteDetailsPanelProps) {
   const [details, setDetails] = useState<GradilisteDetails | null>(null);
+  const [radniNalogFoto, setRadniNalogFoto] = useState<GradilisteRadniNalogFoto[]>([]);
+  const [loadingRadniNalogFoto, setLoadingRadniNalogFoto] = useState(true);
+  const [activePhotoIndex, setActivePhotoIndex] = useState<number | null>(null);
+  const [downloadingPhotos, setDownloadingPhotos] = useState(false);
+  const [pendingPhotoDelete, setPendingPhotoDelete] = useState<string | 'all' | null>(null);
+  const [deletingPhotos, setDeletingPhotos] = useState(false);
   const [vtrDocumentUrls, setVtrDocumentUrls] = useState<Record<string, string>>({});
   const [openCostGroups, setOpenCostGroups] = useState<Set<string>>(new Set());
   const [satnica, setSatnicaState] = useState<number>(() => {
@@ -193,6 +208,90 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   });
   const [kooperanti, setKooperanti] = useState<Kooperant[]>([]);
 
+  const sortedRadniNalogFoto = [...radniNalogFoto].sort((first, second) =>
+    (second.created_at ?? '').localeCompare(first.created_at ?? ''),
+  );
+  const deletePhotos = async () => {
+    if (pendingPhotoDelete === null || deletingPhotos) return;
+    const targets = pendingPhotoDelete === 'all'
+      ? sortedRadniNalogFoto
+      : sortedRadniNalogFoto.filter((foto) => foto.id === pendingPhotoDelete);
+    if (targets.length === 0) return;
+
+    setDeletingPhotos(true);
+    setError(null);
+    const deletedIds: string[] = [];
+    const failures: string[] = [];
+    for (const foto of targets) {
+      try {
+        await deleteNalogFoto(foto);
+        deletedIds.push(foto.id);
+      } catch (reason) {
+        failures.push(`${foto.nalog_broj}: ${errText(reason, 'brisanje nije uspjelo')}`);
+      }
+    }
+
+    const remaining = sortedRadniNalogFoto.filter((foto) => !deletedIds.includes(foto.id));
+    setRadniNalogFoto(remaining);
+    if (activePhotoIndex !== null) {
+      const activeId = sortedRadniNalogFoto[activePhotoIndex]?.id;
+      const nextIndex = remaining.findIndex((foto) => foto.id === activeId);
+      setActivePhotoIndex(nextIndex < 0 ? null : nextIndex);
+    }
+    if (failures.length > 0) {
+      setError(`Obrisano ${deletedIds.length} od ${targets.length} fotografija. ${failures.join(' · ')}`);
+    }
+    setPendingPhotoDelete(null);
+    setDeletingPhotos(false);
+  };
+
+  const downloadAllPhotos = async () => {
+    if (sortedRadniNalogFoto.length === 0 || downloadingPhotos) return;
+    setDownloadingPhotos(true);
+    setError(null);
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      await Promise.all(sortedRadniNalogFoto.map(async (foto, index) => {
+        const response = await fetch(foto.url);
+        if (!response.ok) throw new Error(`Preuzimanje fotografije naloga ${foto.nalog_broj} nije uspjelo.`);
+        const baseName = `${foto.naziv ?? `fotografija-${index + 1}`}`
+          .replace(/[^\p{L}\p{N}_. -]/gu, '_');
+        const filename = `${String(index + 1).padStart(3, '0')}-${foto.nalog_broj}-${baseName}`
+          .replace(/[^\p{L}\p{N}_. -]/gu, '_');
+        zip.file(/\.[^/.]+$/.test(filename) ? filename : `${filename}.jpg`, await response.blob());
+      }));
+      const archive = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(archive);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${gradiliste.naziv.replace(/[^\p{L}\p{N}_. -]/gu, '_')}-fotografije.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (reason) {
+      setError(errText(reason, 'Greška pri preuzimanju fotografija.'));
+    } finally {
+      setDownloadingPhotos(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activePhotoIndex === null) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') {
+        setActivePhotoIndex((index) => index === null ? null : (index - 1 + sortedRadniNalogFoto.length) % sortedRadniNalogFoto.length);
+      } else if (event.key === 'ArrowRight') {
+        setActivePhotoIndex((index) => index === null ? null : (index + 1) % sortedRadniNalogFoto.length);
+      } else if (event.key === 'Escape') {
+        setActivePhotoIndex(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activePhotoIndex, sortedRadniNalogFoto.length]);
+
   useEffect(() => {
     fetchKooperanti().then(setKooperanti).catch(() => setKooperanti([]));
     fetchInvestitori().then(setInvoiceInvestitori).catch(() => setInvoiceInvestitori([]));
@@ -218,6 +317,42 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
 
     return () => {
       cancelled = true;
+    };
+  }, [gradiliste.id]);
+
+  const loadRadniNalogFoto = async (showLoading = false) => {
+    if (showLoading) setLoadingRadniNalogFoto(true);
+    try {
+      const photos = await fetchGradilisteRadniNalogFoto(gradiliste.id);
+      setRadniNalogFoto(photos);
+    } catch (reason) {
+      setError(errText(reason, 'Greška pri učitavanju fotografija radnih naloga.'));
+    } finally {
+      if (showLoading) setLoadingRadniNalogFoto(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshPhotos = async () => {
+      try {
+        const photos = await fetchGradilisteRadniNalogFoto(gradiliste.id);
+        if (!cancelled) setRadniNalogFoto(photos);
+      } catch (reason) {
+        if (!cancelled) setError(errText(reason, 'Greška pri učitavanju fotografija radnih naloga.'));
+      } finally {
+        if (!cancelled) setLoadingRadniNalogFoto(false);
+      }
+    };
+
+    setLoadingRadniNalogFoto(true);
+    void refreshPhotos();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshPhotos();
+    }, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
     };
   }, [gradiliste.id]);
 
@@ -923,6 +1058,70 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
         {!loading && details && (
           <>
             <Section
+              title={`Fotografije radnika (${radniNalogFoto.length})`}
+              icon={<Camera className="h-4 w-4" />}
+              action={(
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setPendingPhotoDelete('all')}
+                    disabled={sortedRadniNalogFoto.length === 0 || deletingPhotos}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Izbriši sve
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void downloadAllPhotos()}
+                    disabled={sortedRadniNalogFoto.length === 0 || downloadingPhotos}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    {downloadingPhotos ? 'Priprema ZIP-a…' : 'Preuzmi sve'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void loadRadniNalogFoto(true)}
+                    disabled={loadingRadniNalogFoto}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${loadingRadniNalogFoto ? 'animate-spin' : ''}`} />
+                    Osvježi
+                  </button>
+                </div>
+              )}
+            >
+              {loadingRadniNalogFoto && radniNalogFoto.length === 0 ? (
+                <p className="text-xs text-slate-400">Učitavanje fotografija…</p>
+              ) : radniNalogFoto.length === 0 ? (
+                <p className="text-xs text-slate-400">Još nema fotografija učitanih na radne naloge ovog gradilišta.</p>
+              ) : (
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+                  {sortedRadniNalogFoto.slice(0, 10).map((foto, index) => (
+                    <button
+                      key={foto.id}
+                      type="button"
+                      onClick={() => setActivePhotoIndex(index)}
+                      className="group overflow-hidden rounded-lg border border-slate-200 bg-white text-left"
+                      title={`${foto.nalog_broj}${foto.nalog_naslov ? ` · ${foto.nalog_naslov}` : ''}`}
+                    >
+                      <img src={foto.url} alt={foto.naziv ?? `Fotografija naloga ${foto.nalog_broj}`} className="aspect-square w-full object-cover transition-transform group-hover:scale-105" />
+                      <span className="block truncate px-2 py-1.5 text-[10px] text-slate-600">
+                        {foto.created_at ? new Date(foto.created_at).toLocaleDateString('hr-HR') : 'Bez datuma'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {sortedRadniNalogFoto.length > 10 && (
+                <p className="mt-2 text-[11px] text-slate-500">
+                  Prikazano 10 najnovijih od {sortedRadniNalogFoto.length}. Otvorite fotografiju za pregled cijele galerije.
+                </p>
+              )}
+            </Section>
+
+            <Section
               title="Rokovi i važni datumi"
               icon={<Calendar className="h-4 w-4" />}
               action={(
@@ -1257,6 +1456,62 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
       </div>
 
       <Modal
+        open={activePhotoIndex !== null && Boolean(sortedRadniNalogFoto[activePhotoIndex])}
+        onClose={() => setActivePhotoIndex(null)}
+        title={activePhotoIndex === null ? 'Fotografije gradilišta' : `Fotografija ${activePhotoIndex + 1} od ${sortedRadniNalogFoto.length}`}
+        wide="screen"
+      >
+        {activePhotoIndex !== null && sortedRadniNalogFoto[activePhotoIndex] && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setActivePhotoIndex((activePhotoIndex - 1 + sortedRadniNalogFoto.length) % sortedRadniNalogFoto.length)}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                aria-label="Prethodna fotografija"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Prethodna
+              </button>
+              <div className="min-w-0 text-center">
+                <p className="truncate text-sm font-semibold text-slate-900">{sortedRadniNalogFoto[activePhotoIndex].nalog_broj}</p>
+                <p className="truncate text-xs text-slate-500">
+                  {sortedRadniNalogFoto[activePhotoIndex].nalog_naslov ?? ''}
+                  {sortedRadniNalogFoto[activePhotoIndex].created_at
+                    ? ` · ${new Date(sortedRadniNalogFoto[activePhotoIndex].created_at!).toLocaleString('hr-HR')}`
+                    : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePhotoIndex((activePhotoIndex + 1) % sortedRadniNalogFoto.length)}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                aria-label="Sljedeća fotografija"
+              >
+                Sljedeća
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+            <img
+              src={sortedRadniNalogFoto[activePhotoIndex].url}
+              alt={sortedRadniNalogFoto[activePhotoIndex].naziv ?? `Fotografija naloga ${sortedRadniNalogFoto[activePhotoIndex].nalog_broj}`}
+              className="mx-auto max-h-[78vh] max-w-full rounded-lg object-contain"
+            />
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setPendingPhotoDelete(sortedRadniNalogFoto[activePhotoIndex].id)}
+                disabled={deletingPhotos}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                <Trash2 className="h-4 w-4" />
+                Izbriši ovu fotografiju
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+      <Modal
         open={invoiceModalOpen}
         onClose={() => setInvoiceModalOpen(false)}
         title={editingInvoice ? 'Uredi fakturu' : 'Nova faktura'}
@@ -1517,6 +1772,15 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
           </Field>
         </div>
       </Modal>
+      <ConfirmDialog
+        open={pendingPhotoDelete !== null}
+        onClose={() => setPendingPhotoDelete(null)}
+        onConfirm={() => void deletePhotos()}
+        title={pendingPhotoDelete === 'all' ? 'Izbrisati sve fotografije?' : 'Izbrisati fotografiju?'}
+        message={pendingPhotoDelete === 'all'
+          ? `Trajno ćete izbrisati svih ${sortedRadniNalogFoto.length} fotografija s radnih naloga ovog gradilišta.`
+          : 'Fotografija će biti trajno izbrisana s radnog naloga.'}
+      />
     </aside>
   );
 }

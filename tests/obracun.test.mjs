@@ -153,3 +153,101 @@ test('prava bez migracije slijede upisane cijene, a nakon migracije spremljene k
   assert.equal(obracun.nocniIzNapomene('Ostalo: X · Noćni rad 2.5 h'), 2.5);
   assert.equal(obracun.nocniIzNapomene(null), 0);
 });
+
+test('dnevni detalji daju tocan mjesecni zbroj svih kategorija i centi', () => {
+  const input = {
+    od: '2025-05-01', do: '2025-05-31',
+    unosi: [
+      { datum: '2025-05-02', sati: 0.33, nocni_sati: 0.13, teren: true },
+      { datum: '2025-05-02', sati: 0.33, nocni_sati: 0.13, teren: true },
+      { datum: '2025-05-05', sati: 0.33, nocni_sati: 0.13, teren: true },
+    ],
+    odsustva: [
+      { vrsta: 'godisnji', datum_od: '2025-05-23', datum_do: '2025-06-03' },
+      { vrsta: 'bolovanje', datum_od: '2025-05-26', datum_do: '2025-05-27' },
+    ],
+    prava: { ...svaPrava, bolovanje: false },
+    cijene: { ...cijene, cijena_sata: 7.33, nocni_dodatak: 33 },
+  };
+  const days = obracun.computeObracunPoDanima(input);
+  const monthly = obracun.computeObracun(input);
+  assert.equal(days.length, 31);
+  assert.equal(days[0].datum, input.od);
+  assert.equal(days.at(-1).datum, input.do);
+  const round = (n) => Math.round(n * 100) / 100;
+  for (const key of Object.keys(monthly.iznosi)) {
+    assert.equal(round(days.reduce((sum, day) => sum + day.obracun.iznosi[key], 0)), monthly.iznosi[key], key);
+  }
+  for (const key of Object.keys(monthly.kolicine)) {
+    assert.equal(round(days.reduce((sum, day) => sum + day.obracun.kolicine[key], 0)), monthly.kolicine[key], key);
+  }
+  assert.equal(days.find((day) => day.datum === '2025-05-02').obracun.kolicine.teren, 1);
+  assert.equal(days.find((day) => day.datum === '2025-05-24').obracun.kolicine.godisnji, 0);
+  assert.equal(days.find((day) => day.datum === '2025-05-26').obracun.kolicine.godisnji, 0);
+  assert.equal(days.find((day) => day.datum === '2025-05-26').obracun.iznosi.bolovanje, 0);
+  assert.equal(days.find((day) => day.datum === '2025-05-30').obracun.kolicine.praznik, 1);
+});
+
+test('dnevni detalji prikazuju automatski praznik bez evidencije rada', () => {
+  const days = obracun.computeObracunPoDanima({
+    od: '2025-05-01', do: '2025-05-01', unosi: [], odsustva: [], prava: svaPrava, cijene,
+  });
+  assert.equal(days[0].obracun.iznosi.ukupno, 80);
+  assert.equal(days[0].obracun.kolicine.praznik, 1);
+});
+
+test('evidencija obracuna ucitava gradiliste, nalog i smjenu odgovarajuceg radnika uz stari format nocnih sati', async () => {
+  const selections = [];
+  const records = [
+    {
+      id: 'entry', radnik_id: 'worker', datum: '2026-10-02', sati: '8',
+      napomena: 'Noćni rad 2.5 h', gradiliste: { naziv: 'Gradiliste A' },
+      nalog: { broj: 'RN-1', naslov: 'Bojanje', teren: true, radnici: [
+        { radnik_id: 'other', vrijeme_od: '07:00', vrijeme_do: '17:00' },
+        { radnik_id: 'worker', vrijeme_od: '20:00', vrijeme_do: '04:00' },
+      ] },
+    },
+    { id: 'manual', radnik_id: 'worker', datum: '2026-10-03', sati: 4, napomena: null, gradiliste: null, nalog: null },
+  ];
+  const mocks = {
+    './supabase': { supabase: { from: (table) => {
+      assert.equal(table, 'radno_vrijeme');
+      let columns;
+      const query = {
+        select: (value) => { columns = value; selections.push(value); return query; },
+        gte: () => query, lte: () => query, order: () => query, range: () => query,
+        returns: async () => columns.includes('nocni_sati')
+          ? { data: null, error: { message: 'column nocni_sati does not exist' } }
+          : { data: records, error: null },
+      };
+      return query;
+    } } },
+    './postavke': {}, './obracunSati': obracun, './company': {},
+    './pagination': { fetchAllRows: async (page) => {
+      const result = await page(0, 499);
+      if (result.error) throw result.error;
+      return result.data;
+    } },
+  };
+  const compiled = ts.transpileModule(readFileSync(new URL('../src/lib/api.ts', import.meta.url), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  });
+  const api = { exports: {} };
+  vm.runInNewContext(compiled.outputText, {
+    module: api, exports: api.exports, require: (name) => {
+      assert.ok(Object.hasOwn(mocks, name), `Unexpected import: ${name}`);
+      return mocks[name];
+    },
+  });
+  const result = await api.exports.fetchObracunRadnoVrijeme('2026-10-01', '2026-10-31');
+  assert.equal(selections.length, 2);
+  assert.equal(result[0].gradiliste_naziv, 'Gradiliste A');
+  assert.equal(result[0].nalog_broj, 'RN-1');
+  assert.equal(result[0].nalog_naslov, 'Bojanje');
+  assert.equal(result[0].vrijeme_od, '20:00');
+  assert.equal(result[0].vrijeme_do, '04:00');
+  assert.equal(result[0].nocni_sati, 2.5);
+  assert.equal(result[0].teren, true);
+  assert.equal(result[1].vrijeme_od, null);
+  assert.equal(result[1].nalog_broj, null);
+});

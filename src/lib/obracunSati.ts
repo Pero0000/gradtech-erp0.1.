@@ -208,6 +208,30 @@ export function computeObracun(input: {
   return { redovniSati, kolicine, iznosi };
 }
 
+export function computeObracunPoDanima(input: Parameters<typeof computeObracun>[0]) {
+  const dani: { datum: string; obracun: ObracunRezultat }[] = [];
+  let prethodni = computeObracun({ ...input, unosi: [], odsustva: [], do: toIso(toUtc(input.od) - DAY_MS) });
+  for (let t = toUtc(input.od); t <= toUtc(input.do); t += DAY_MS) {
+    const datum = toIso(t);
+    const trenutni = computeObracun({ ...input, do: datum });
+    // Kumulativne razlike zadržavaju točan mjesečni zbroj i kod zaokruživanja centi.
+    const razlika: ObracunRezultat = {
+      redovniSati: round2(trenutni.redovniSati - prethodni.redovniSati),
+      kolicine: { ...trenutni.kolicine },
+      iznosi: { ...trenutni.iznosi },
+    };
+    for (const { key } of OBRACUN_KATEGORIJE) {
+      razlika.kolicine[key] -= prethodni.kolicine[key];
+      razlika.iznosi[key] = round2(trenutni.iznosi[key] - prethodni.iznosi[key]);
+    }
+    razlika.iznosi.redovni = round2(trenutni.iznosi.redovni - prethodni.iznosi.redovni);
+    razlika.iznosi.ukupno = round2(trenutni.iznosi.ukupno - prethodni.iznosi.ukupno);
+    dani.push({ datum, obracun: razlika });
+    prethodni = trenutni;
+  }
+  return dani;
+}
+
 /** Prava radnika; prije migracije (polja ne postoje) vrijedi staro ponašanje: pravo ima tko ima cijenu. */
 export function pravaRadnika(r: ObracunCijene & Partial<Record<(typeof PRAVO_POLJA)[ObracunKategorija], boolean | null>>): ObracunPrava {
   const pick = (polje: boolean | null | undefined, cijena: number | null | undefined) =>

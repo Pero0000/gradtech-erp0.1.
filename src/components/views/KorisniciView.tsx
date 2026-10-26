@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, LoaderCircle, Save } from 'lucide-react';
+import { Check, ChevronDown, LoaderCircle, Save } from 'lucide-react';
 import { MODULES, type AppModule } from '@/auth/permissions';
 import { useAuth } from '@/auth/useAuth';
 import type { AppProfile } from '@/auth/profile';
@@ -212,6 +212,17 @@ export function KorisniciView() {
                         </span>
                       </label>
                     </div>
+                    <details className="group">
+                      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-500 [&::-webkit-details-marker]:hidden">
+                        <span className="inline-flex items-center gap-2">
+                          <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
+                          Moduli i prava
+                        </span>
+                        <span className="text-xs font-normal text-slate-500">
+                          Pregled: {MODULES.filter(({ id }) => user.permissions[id].can_view).length}/{MODULES.length}
+                          {' · '}Uređivanje: {MODULES.filter(({ id }) => user.permissions[id].can_edit).length}/{MODULES.length}
+                        </span>
+                      </summary>
                     <div className="overflow-x-auto">
                       <table className="w-full min-w-[600px] text-sm">
                         <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -232,6 +243,7 @@ export function KorisniciView() {
                         </tbody>
                       </table>
                     </div>
+                    </details>
                     <div className="flex justify-end border-t border-slate-200 p-3">
                       <button type="button" disabled={savingId === user.id} onClick={() => void saveUser(user)} className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-wait disabled:opacity-60">
                         {savingId === user.id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : notice?.includes(user.email) ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}

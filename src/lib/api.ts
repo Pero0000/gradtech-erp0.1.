@@ -932,24 +932,49 @@ export interface ObracunRadnoVrijemeRow {
   sati: number;
   nocni_sati: number;
   teren: boolean;
+  id?: string;
+  gradiliste_naziv?: string | null;
+  nalog_broj?: string | null;
+  nalog_naslov?: string | null;
+  vrijeme_od?: string | null;
+  vrijeme_do?: string | null;
+  napomena?: string | null;
 }
 
 // Sati za mjesečni obračun; prije migracije obracun_sati noćni sati čitaju se iz napomene.
 export async function fetchObracunRadnoVrijeme(od: string, doo: string): Promise<ObracunRadnoVrijemeRow[]> {
+  type Row = {
+    id: string; radnik_id: string; datum: string; sati: number; napomena: string | null; nocni_sati?: number | null;
+    gradiliste: { naziv: string } | null;
+    nalog: {
+      broj: string; naslov: string; teren: boolean | null;
+      radnici: { radnik_id: string; vrijeme_od: string | null; vrijeme_do: string | null }[];
+    } | null;
+  };
+  const relations = 'gradiliste:gradiliste_id ( naziv ), nalog:nalog_id ( broj, naslov, teren, radnici:radni_nalozi_radnici ( radnik_id, vrijeme_od, vrijeme_do ) )';
   const query = (cols: string) =>
-    supabase.from('radno_vrijeme').select(cols).gte('datum', od).lte('datum', doo);
-  let res = await query('radnik_id, datum, sati, napomena, nocni_sati, nalog:nalog_id ( teren )');
-  if (res.error && /nocni_sati/i.test(res.error.message)) {
-    res = await query('radnik_id, datum, sati, napomena, nalog:nalog_id ( teren )');
+    fetchAllRows((from, to) => supabase.from('radno_vrijeme').select(cols)
+      .gte('datum', od).lte('datum', doo).order('datum').order('id').range(from, to).returns<Row[]>());
+  let rows: Row[];
+  try {
+    rows = await query(`id, radnik_id, datum, sati, napomena, nocni_sati, ${relations}`);
+  } catch (error) {
+    if (!error || typeof error !== 'object' || !('message' in error) || !/nocni_sati/i.test(String(error.message))) throw error;
+    rows = await query(`id, radnik_id, datum, sati, napomena, ${relations}`);
   }
-  if (res.error) throw res.error;
-  type Row = { radnik_id: string; datum: string; sati: number; napomena: string | null; nocni_sati?: number | null; nalog: { teren: boolean | null } | null };
-  return ((res.data ?? []) as unknown as Row[]).map((r) => ({
+  return rows.map((r) => ({
+    id: r.id,
     radnik_id: r.radnik_id,
     datum: r.datum,
     sati: Number(r.sati) || 0,
     nocni_sati: r.nocni_sati !== undefined && r.nocni_sati !== null ? Number(r.nocni_sati) : nocniIzNapomene(r.napomena),
     teren: Boolean(r.nalog?.teren),
+    gradiliste_naziv: r.gradiliste?.naziv ?? null,
+    nalog_broj: r.nalog?.broj ?? null,
+    nalog_naslov: r.nalog?.naslov ?? null,
+    vrijeme_od: r.nalog?.radnici.find((worker) => worker.radnik_id === r.radnik_id)?.vrijeme_od ?? null,
+    vrijeme_do: r.nalog?.radnici.find((worker) => worker.radnik_id === r.radnik_id)?.vrijeme_do ?? null,
+    napomena: r.napomena,
   }));
 }
 
@@ -2117,6 +2142,7 @@ export interface GradilisteStavka {
   tip: StavkaTip;
   naziv: string;
   gotovo: boolean;
+  uzeto?: boolean;
   izvor_id?: string | null;
   oprema_id?: string | null;
   sati?: number | null;
@@ -2138,7 +2164,7 @@ export async function setNalogStavke(nalogId: string, gradilisteId: string | nul
   if (currentError) throw currentError;
 
   const siteRows = gradilisteId ? await fetchGradilisteStavke(gradilisteId) : [];
-  const availableRows = siteRows.filter((item) => !item.gotovo || item.nalog_id === nalogId);
+  const availableRows = siteRows.filter((item) => !item.gotovo);
   const availableById = new Map(availableRows.map((item) => [item.id, item]));
   const selectedIds = new Set(stavkaIds.filter((id) => availableById.has(id)));
 
@@ -2329,10 +2355,11 @@ export async function setNalogZadaci(nalogId: string, gradilisteId: string | nul
     .from('gradiliste_zadaci')
     .update({ nalog_id: null })
     .eq('nalog_id', nalogId)
+    .eq('gotovo', false)
     .not('gradiliste_id', 'is', null);
   if (clearError) throw clearError;
   if (!gradilisteId || zadatakIds.length === 0) return;
-  const { error } = await supabase.from('gradiliste_zadaci').update({ nalog_id: nalogId }).in('id', zadatakIds);
+  const { error } = await supabase.from('gradiliste_zadaci').update({ nalog_id: nalogId }).eq('gradiliste_id', gradilisteId).eq('gotovo', false).in('id', zadatakIds);
   if (error) throw error;
 }
 

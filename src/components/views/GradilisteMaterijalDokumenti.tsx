@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, FileText, Hammer, Package, Plus, Trash2, Wrench } from 'lucide-react';
+import { Camera, ChevronLeft, ChevronRight, Download, FileText, Hammer, Package, Plus, Trash2, Wrench } from 'lucide-react';
+import { Modal } from '@/components/ui/Modal';
+import { downloadFile } from '@/lib/downloadFile';
 import {
   addGradilisteStavka,
   deleteGradilisteDokument,
@@ -107,6 +109,8 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
   const [dokumenti, setDokumenti] = useState<GradilisteDokument[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [activePhotoId, setActivePhotoId] = useState<string | null>(null);
+  const [downloadingPhotoId, setDownloadingPhotoId] = useState<string | null>(null);
   const docRef = useRef<HTMLInputElement>(null);
   const imgRef = useRef<HTMLInputElement>(null);
 
@@ -122,6 +126,28 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const list = await fetchGradilisteStavke(gradilisteId);
+        if (!cancelled) setStavke(list);
+      } catch (reason) {
+        if (!cancelled) setError(errText(reason, 'Greška pri osvježavanju materijala i alata gradilišta.'));
+      }
+    };
+    const timer = window.setInterval(() => void refresh(), 15000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [gradilisteId]);
 
   const guard = async (action: () => Promise<void>, fallback: string) => {
     setError(null);
@@ -174,6 +200,14 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
   const strojevi = stavke.filter((s) => s.tip === 'stroj');
   const docs = dokumenti.filter((d) => d.vrsta === 'dokument');
   const slike = dokumenti.filter((d) => d.vrsta === 'slika');
+  const activePhotoIndex = slike.findIndex((photo) => photo.id === activePhotoId);
+  const activePhoto = slike[activePhotoIndex];
+  const downloadPhoto = async (photo: GradilisteDokument) => {
+    if (downloadingPhotoId) return;
+    setDownloadingPhotoId(photo.id);
+    await guard(() => downloadFile(photo.url, photo.naziv), 'Greška pri preuzimanju slike.');
+    setDownloadingPhotoId(null);
+  };
 
   return (
     <>
@@ -222,16 +256,26 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
         <SectionBox title={`Slike (${slike.length})`} icon={<Camera className="h-4 w-4" />}>
           <input ref={imgRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void upload(e.target.files, 'slika')} />
           {slike.length > 0 && (
-            <div className="mb-2 grid grid-cols-3 gap-2">
+            <div className="mb-2 grid max-h-[34rem] auto-rows-[11rem] grid-cols-3 gap-2 overflow-y-auto overscroll-contain" tabIndex={0} role="region" aria-label="Slike gradilišta — pomaknite za ostale slike">
               {slike.map((d) => (
-                <div key={d.id} className="group relative overflow-hidden rounded-lg border border-slate-200">
-                  <a href={d.url} target="_blank" rel="noreferrer">
-                    <img src={d.url} alt={d.naziv} className="h-24 w-full object-cover" />
-                  </a>
+                <div key={d.id} className="group relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200">
+                  <button type="button" onClick={() => setActivePhotoId(d.id)} className="block min-h-0 w-full flex-1 bg-slate-50" aria-label={`Pregledaj ${d.naziv}`}>
+                    <img loading="lazy" src={d.url} alt={d.naziv} className="h-full w-full object-contain" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void downloadPhoto(d)}
+                    disabled={downloadingPhotoId !== null}
+                    className="inline-flex w-full shrink-0 items-center justify-center gap-1 border-t border-slate-100 px-2 py-2 text-xs font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+                    aria-label={`Preuzmi ${d.naziv}`}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    {downloadingPhotoId === d.id ? 'Preuzimanje…' : 'Preuzmi'}
+                  </button>
                   <button
                     type="button"
                     onClick={() => removeDokument(d)}
-                    className="absolute right-1 top-1 hidden rounded bg-white/90 p-1 text-red-600 group-hover:block"
+                    className="absolute right-1 top-1 rounded bg-white/90 p-1 text-red-600"
                     aria-label="Obriši sliku"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -252,6 +296,34 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
           </button>
         </SectionBox>
       </div>
+      <Modal
+        open={Boolean(activePhoto)}
+        onClose={() => setActivePhotoId(null)}
+        title={`Slika ${activePhotoIndex + 1} od ${slike.length}`}
+        wide="screen"
+      >
+        {activePhoto && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <button type="button" onClick={() => setActivePhotoId(slike[(activePhotoIndex - 1 + slike.length) % slike.length].id)} className="rounded-lg border border-slate-200 p-2 hover:bg-slate-50" aria-label="Prethodna slika">
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <p className="min-w-0 truncate text-sm font-semibold text-slate-900">{activePhoto.naziv}</p>
+              <button type="button" onClick={() => setActivePhotoId(slike[(activePhotoIndex + 1) % slike.length].id)} className="rounded-lg border border-slate-200 p-2 hover:bg-slate-50" aria-label="Sljedeća slika">
+                <ChevronRight className="h-5 w-5" />
+              </button>
+            </div>
+            <img src={activePhoto.url} alt={activePhoto.naziv} className="mx-auto max-h-[70vh] max-w-full rounded-lg object-contain" />
+            <div className="flex justify-end">
+              <button type="button" onClick={() => void downloadPhoto(activePhoto)} disabled={downloadingPhotoId !== null} className="inline-flex items-center gap-2 rounded-lg border border-sky-200 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50">
+                <Download className="h-4 w-4" />
+                {downloadingPhotoId ? 'Preuzimanje…' : 'Preuzmi ovu sliku'}
+              </button>
+            </div>
+            {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+          </div>
+        )}
+      </Modal>
     </>
   );
 }

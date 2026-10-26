@@ -306,7 +306,7 @@ export function MobileWorkOrdersView() {
         gradilisteId: nalog.gradiliste_id,
         vozacId: nalog.vozac_id,
         napomena: nalog.napomena,
-        zadaci,
+        zadaci: zadaci.filter((task) => !task.gotovo),
         stavke,
         alati: alati.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'),
         strojevi: strojevi.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'),
@@ -514,7 +514,9 @@ export function MobileWorkOrdersView() {
   };
 
   const toggleItem = async (item: NalogStavka, field: 'gotovo' | 'uzeto' = 'gotovo') => {
-    await runAction(() => updateNalogStavka(item.id, { [field]: !item[field] }));
+    await runAction(() => updateNalogStavka(item.id, item.tip === 'stroj'
+      ? { [field]: !item[field] }
+      : { gotovo: !item.gotovo, uzeto: !item.gotovo }));
   };
 
   const numberOrNull = (value: string) => value.trim() === '' ? null : Number(value.replace(',', '.'));
@@ -597,8 +599,10 @@ export function MobileWorkOrdersView() {
     await runAction(() => saveReport({ potvrde: next, report: nextReport }));
   };
   const selectedPhotoQueue = photoQueue.filter((photo) => photo.nalogId === selectedId);
-  const materijalStavke = details?.stavke.filter((item) => item.tip === 'materijal') ?? [];
-  const alatStavke = details?.stavke.filter((item) => item.tip === 'alat') ?? [];
+  const savMaterijal = details?.stavke.filter((item) => item.tip === 'materijal') ?? [];
+  const savAlat = details?.stavke.filter((item) => item.tip === 'alat') ?? [];
+  const materijalStavke = savMaterijal.filter((item) => !item.gotovo);
+  const alatStavke = savAlat.filter((item) => !item.gotovo);
   // Nakon pokretanja gradilišta prikazuju se samo stavke upisane za nastavak radova.
   const siteStartedAt = [selected?.mobile_started_at, ...(details?.ekipa ?? []).map((worker) => worker.mobile_started_at)]
     .filter((value): value is string => Boolean(value))
@@ -606,8 +610,7 @@ export function MobileWorkOrdersView() {
   const zaNastavak = (item: NalogStavka) => Boolean(siteStartedAt && item.created_at && item.created_at >= siteStartedAt);
   const materijalZaNastavak = materijalStavke.filter(zaNastavak);
   const alatZaNastavak = alatStavke.filter(zaNastavak);
-  // Prije pokretanja gradilišta ostaje samo alat iz popisa opreme.
-  const alatIzOpreme = alatStavke.filter((item) => Boolean(item.oprema_id));
+  const alatIzOpreme = alatStavke;
   const strojStavke = details?.stavke.filter((item) => item.tip === 'stroj') ?? [];
   const hasNapomena = Boolean(details?.napomena?.trim());
   const radniZadaci = details?.zadaci.filter((task) => zadatakVrsta(task) === 'zadatak') ?? [];
@@ -618,12 +621,12 @@ export function MobileWorkOrdersView() {
     { label: 'Radni zadaci pregledani', ok: prep.includes('zadaci') },
     { label: 'Dodatni radovi pregledani', ok: prep.includes('dodatni') },
     {
-      label: 'Materijal preuzet',
-      ok: materijalStavke.length ? materijalStavke.every((item) => item.uzeto) : prep.includes('materijal_na'),
+      label: 'Materijal riješen',
+      ok: savMaterijal.length ? savMaterijal.every((item) => item.gotovo) : prep.includes('materijal_na'),
     },
     {
-      label: 'Alat preuzet',
-      ok: alatIzOpreme.length ? alatIzOpreme.every((item) => item.uzeto) : prep.includes('alat_na'),
+      label: 'Alat riješen',
+      ok: savAlat.length ? savAlat.every((item) => item.gotovo) : prep.includes('alat_na'),
     },
     { label: 'Dokumenti pregledani', ok: prep.includes('dokumenti') },
     {
@@ -790,13 +793,13 @@ export function MobileWorkOrdersView() {
                       title="Materijal"
                       icon={<Package className="h-5 w-5" />}
                       tone="amber"
-                      summary={`${materijalStavke.filter((item) => item.uzeto).length} / ${materijalStavke.length} uzeto`}
+                      summary={`${materijalStavke.length} neriješeno`}
                     >
-                      <p className="text-sm text-slate-500">Označi svaki materijal koji si uzeo/la.</p>
+                      <p className="text-sm text-slate-500">Označi riješeni materijal. Ostaje označen na gradilištu i nestaje s naloga.</p>
                       <ItemEditor
                         title="Materijal"
                         items={materijalStavke}
-                        checkKey="uzeto"
+                        checkKey="gotovo"
                         value={newMaterial}
                         onValue={setNewMaterial}
                         onAdd={() => void addItem('materijal')}
@@ -804,7 +807,7 @@ export function MobileWorkOrdersView() {
                         onToggle={(item) => void toggleItem(item, 'uzeto')}
                         noneChecked={prep.includes('materijal_na')}
                         onNone={(checked) => togglePrep('materijal_na', checked)}
-                        showNone={materijalStavke.length === 0}
+                        showNone={savMaterijal.length === 0}
                         noneLabel="Materijal nije potreban."
                         placeholder="Npr. boja bijela 15 l"
                         working={working}
@@ -815,13 +818,13 @@ export function MobileWorkOrdersView() {
                       title="Alat"
                       icon={<Wrench className="h-5 w-5" />}
                       tone="sky"
-                      summary={`${alatIzOpreme.filter((item) => item.uzeto).length} / ${alatIzOpreme.length} uzeto`}
+                      summary={`${alatIzOpreme.length} neriješeno`}
                     >
-                      <p className="text-sm text-slate-500">Alat iz popisa opreme. Označi svaki alat koji si uzeo/la.</p>
+                      <p className="text-sm text-slate-500">Označi riješeni alat. Ostaje označen na gradilištu i nestaje s naloga.</p>
                       <ItemEditor
                         title="Alat"
                         items={alatIzOpreme}
-                        checkKey="uzeto"
+                        checkKey="gotovo"
                         equipment={details.alati}
                         value={newTool}
                         onValue={setNewTool}
@@ -831,7 +834,7 @@ export function MobileWorkOrdersView() {
                         onToggle={(item) => void toggleItem(item, 'uzeto')}
                         noneChecked={prep.includes('alat_na')}
                         onNone={(checked) => togglePrep('alat_na', checked)}
-                        showNone={alatIzOpreme.length === 0}
+                        showNone={savAlat.length === 0}
                         noneLabel="Alat nije potreban."
                         placeholder="Npr. skela, brusilica"
                         working={working}
@@ -896,8 +899,8 @@ export function MobileWorkOrdersView() {
                               : <p className="text-sm text-slate-500">Nema upisanih dodatnih radova.</p>}
                           </ReviewBlock>
                           <ReviewBlock title="Materijal i alat">
-                            {details.stavke.length
-                              ? <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">{details.stavke.map((item) => <li key={item.id}>{item.naziv}</li>)}</ul>
+                            {details.stavke.some((item) => !item.gotovo)
+                              ? <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">{details.stavke.filter((item) => !item.gotovo).map((item) => <li key={item.id}>{item.naziv}</li>)}</ul>
                               : <p className="text-sm text-slate-500">Nema unaprijed upisanog materijala ni alata.</p>}
                           </ReviewBlock>
                           <ReviewBlock title="Dokumenti">

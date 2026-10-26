@@ -14,6 +14,8 @@ import {
   OBRACUN_KATEGORIJE,
   PRAVO_POLJA,
   computeObracun,
+  computeObracunPoDanima,
+  hrPraznici,
   mjesecRaspon,
   pravaRadnika,
   type ObracunKategorija,
@@ -55,6 +57,7 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
   const [odsustvoForm, setOdsustvoForm] = useState<{ radnik_id: string; vrsta: OdsustvoVrsta; datum_od: string; datum_do: string; napomena: string } | null>(null);
   const [savingOdsustvo, setSavingOdsustvo] = useState(false);
   const [deleteOdsustvoId, setDeleteOdsustvoId] = useState<string | null>(null);
+  const [selectedRadnikId, setSelectedRadnikId] = useState<string | null>(null);
 
   const raspon = useMemo(() => mjesecRaspon(mjesec), [mjesec]);
 
@@ -117,6 +120,23 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
     }
     return sum;
   }, [redovi]);
+
+  const selected = redovi.find((row) => row.radnik.id === selectedRadnikId);
+  const detaljiDana = useMemo(() => {
+    if (!selected) return [];
+    const radnikUnosi = unosi.filter((u) => u.radnik_id === selected.radnik.id);
+    const radnikOdsustva = odsustva.filter((o) => o.radnik_id === selected.radnik.id);
+    const praznici = hrPraznici(Number(mjesec.slice(0, 4)));
+    return computeObracunPoDanima({
+      od: raspon.od, do: raspon.do, unosi: radnikUnosi, odsustva: radnikOdsustva,
+      prava: selected.prava, cijene: selected.radnik,
+    }).map((dan) => ({
+      ...dan,
+      unosi: radnikUnosi.filter((u) => u.datum === dan.datum),
+      odsustva: radnikOdsustva.filter((o) => o.datum_od <= dan.datum && o.datum_do >= dan.datum),
+      praznik: praznici.get(dan.datum),
+    })).filter((dan) => dan.unosi.length || dan.odsustva.length || dan.obracun.kolicine.praznik > 0);
+  }, [selected, unosi, odsustva, mjesec, raspon.od, raspon.do]);
 
   const togglePortalVrijeme = async (radnik: Radnik, value: boolean) => {
     setSavingPravo(`${radnik.id}:portal`);
@@ -296,7 +316,9 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
               {redovi.map(({ radnik, prava, obracun }) => (
                 <tr key={radnik.id} className="hover:bg-slate-50">
                   <td className="px-4 py-3 text-sm font-medium text-slate-900">
-                    {radnik.ime} {radnik.prezime}
+                    <button type="button" onClick={() => setSelectedRadnikId(radnik.id)} className="text-left text-sky-700 underline decoration-sky-200 underline-offset-4 hover:text-sky-900" aria-label={`Detalji obračuna za ${radnik.ime} ${radnik.prezime}`}>
+                      {radnik.ime} {radnik.prezime}
+                    </button>
                     <div className="text-xs font-normal text-slate-400">{radnik.uloga}</div>
                   </td>
                   <td className="px-4 py-3 text-center">
@@ -391,6 +413,106 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
           </ul>
         )}
       </div>
+
+      <Modal
+        open={selectedRadnikId !== null}
+        onClose={() => setSelectedRadnikId(null)}
+        title={selected ? `${selected.radnik.ime} ${selected.radnik.prezime} — ${mjesecNaziv}` : 'Detalji radnika'}
+        wide="screen"
+      >
+        {loading ? <p className="text-sm text-slate-500">Učitavanje…</p> : !selected ? (
+          <p className="text-sm text-red-700">Podaci radnika nisu dostupni za odabrani mjesec.</p>
+        ) : (
+          <div className="space-y-5">
+            <p className="text-sm text-slate-600">
+              {selected.radnik.uloga} · Satnica: <strong>{eur(selected.radnik.cijena_sata ?? 0)}/h</strong>
+              {' · '}Noćni dodatak: {broj(selected.radnik.nocni_dodatak ?? 0)}%
+              {' · '}Teren: {eur(selected.radnik.teren_dnevnica ?? 0)}/dan
+            </p>
+            <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-7">
+              {[{ label: 'Redovni rad', kolicina: `${broj(selected.obracun.redovniSati)} h`, iznos: selected.obracun.iznosi.redovni, odobreno: true },
+                ...OBRACUN_KATEGORIJE.map((k) => ({
+                  label: k.label, kolicina: `${broj(selected.obracun.kolicine[k.key])} ${k.jedinica}`,
+                  iznos: selected.obracun.iznosi[k.key], odobreno: selected.prava[k.key],
+                })),
+                { label: 'Ukupno', kolicina: mjesecNaziv, iznos: selected.obracun.iznosi.ukupno, odobreno: true },
+              ].map((stavka) => (
+                <div key={stavka.label} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs text-slate-500">{stavka.label}</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">{stavka.kolicina}</p>
+                  <p className="text-sm font-bold text-sky-800">{eur(stavka.iznos)}</p>
+                  {!stavka.odobreno && <p className="text-xs text-amber-700">Nije odobreno</p>}
+                </div>
+              ))}
+            </div>
+            {!odsustvaDostupna && <p role="alert" className="text-sm text-amber-700">Odsustva nisu dostupna. Obračun ne uključuje neevidentirana odsustva.</p>}
+            <p className="text-xs text-slate-500">
+              Iznosi koriste trenutačne cijene i odobrena prava radnika, jednako kao mjesečni obračun. Noćni sati dio su ukupnih sati; posebno se dodaje samo noćni dodatak. Teren se računa jednom dnevno, ne po nalogu.
+              Prikazana je evidencija uključena u obračun; nalog bez evidentiranih sati još nije uključen.
+            </p>
+            {detaljiDana.length === 0 ? <p className="text-sm text-slate-500">Nema evidentiranog rada ni odsustava u odabranom mjesecu.</p> : (
+              <div className="space-y-4">
+                {detaljiDana.map((dan) => (
+                  <section key={dan.datum} className="overflow-hidden rounded-xl border border-slate-200">
+                    <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-100 px-4 py-3">
+                      <h3 className="text-sm font-semibold text-slate-900">{fmtDatum(dan.datum)}{dan.praznik ? ` · ${dan.praznik}` : ''}</h3>
+                      <p className="text-sm font-bold text-sky-800">{broj(dan.obracun.redovniSati)} h · {eur(dan.obracun.iznosi.ukupno)}</p>
+                    </div>
+                    {dan.unosi.length > 0 && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[700px] text-left text-xs">
+                          <thead className="text-slate-500">
+                            <tr>
+                              {['Gradilište', 'Radni nalog / posao', 'Početak', 'Završetak', 'Sati', 'Noćni sati', 'Teren', 'Trošak rada', 'Noćni dodatak'].map((label) => <th key={label} className="px-3 py-2 font-medium">{label}</th>)}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {dan.unosi.map((unos, index) => {
+                              const trosak = computeObracun({
+                                od: dan.datum, do: dan.datum, unosi: [unos], odsustva: [],
+                                prava: selected.prava, cijene: selected.radnik,
+                              }).iznosi;
+                              return (
+                              <tr key={unos.id ?? index}>
+                                <td className="px-3 py-2">{unos.gradiliste_naziv ?? 'Bez gradilišta'}</td>
+                                <td className="px-3 py-2">
+                                  <p className="font-medium">{unos.nalog_broj ?? 'Ručna evidencija'}{unos.nalog_naslov ? ` · ${unos.nalog_naslov}` : ''}</p>
+                                  {unos.napomena && <p className="mt-1 whitespace-pre-wrap text-slate-500">{unos.napomena}</p>}
+                                </td>
+                                <td className="px-3 py-2">{unos.vrijeme_od?.slice(0, 5) ?? '—'}</td>
+                                <td className="px-3 py-2">{unos.vrijeme_do?.slice(0, 5) ?? '—'}</td>
+                                <td className="px-3 py-2">{broj(unos.sati)}</td>
+                                <td className="px-3 py-2">{broj(unos.nocni_sati)}</td>
+                                <td className="px-3 py-2">{unos.teren ? 'Da' : 'Ne'}</td>
+                                <td className="whitespace-nowrap px-3 py-2">{eur(trosak.redovni)}</td>
+                                <td className="whitespace-nowrap px-3 py-2">{eur(trosak.nocni)}</td>
+                              </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {dan.odsustva.map((o) => (
+                      <p key={o.id} className="px-4 py-2 text-xs text-slate-600">
+                        {VRSTE_ODSUSTVA.find((v) => v.value === o.vrsta)?.label ?? o.vrsta}
+                        {' · '}{fmtDatum(o.datum_od)} – {fmtDatum(o.datum_do)}{o.napomena ? ` · ${o.napomena}` : ''}
+                      </p>
+                    ))}
+                    <div className="flex flex-wrap gap-x-5 gap-y-1 border-t border-slate-100 px-4 py-3 text-xs text-slate-600">
+                      {dan.unosi.length > 0 && <span>Rad: {eur(dan.obracun.iznosi.redovni)}</span>}
+                      {OBRACUN_KATEGORIJE.filter((k) => dan.obracun.kolicine[k.key] !== 0).map((k) => (
+                        <span key={k.key}>{k.label}: {broj(dan.obracun.kolicine[k.key])} {k.jedinica} · {eur(dan.obracun.iznosi[k.key])}{!selected.prava[k.key] ? ' (nije odobreno)' : ''}</span>
+                      ))}
+                      {dan.unosi.length === 0 && OBRACUN_KATEGORIJE.every((k) => dan.obracun.kolicine[k.key] === 0) && <span>Dan nije uključen u plaćene dane obračuna.</span>}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={odsustvoForm !== null}

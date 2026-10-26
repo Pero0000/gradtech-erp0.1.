@@ -234,8 +234,8 @@ export function RasporedView() {
   const formNalogId = nalogForm?.nalogId;
   const [zadatakNalozi, setZadatakNalozi] = useState<Record<string, string>>({});
   // Otvoreni zadaci vidljivi su i kad ih drži drugi (nezavršeni) nalog, da se mogu prebaciti na ovaj.
-  const visibleZadaci = nalogZadaci.filter((z) => !z.gotovo || z.nalog_id === formNalogId);
-  const visibleStavke = nalogStavke.filter((item) => !item.gotovo || item.nalog_id === formNalogId);
+  const visibleZadaci = nalogZadaci.filter((z) => !z.gotovo);
+  const visibleStavke = nalogStavke.filter((item) => !item.gotovo);
 
   useEffect(() => {
     if (!formGradilisteId && !formNalogId) {
@@ -273,7 +273,7 @@ export function RasporedView() {
         if (cancelled) return;
         setNalogStavke(list);
         setNalogForm((current) => current && current.gradiliste_id === formGradilisteId
-          ? { ...current, stavka_ids: list.filter((item) => item.nalog_id === current.nalogId).map((item) => item.id) }
+          ? { ...current, stavka_ids: list.filter((item) => !item.gotovo && item.nalog_id === current.nalogId).map((item) => item.id) }
           : current);
       })
       .catch(() => {
@@ -566,7 +566,7 @@ export function RasporedView() {
       const linkedZadaci = (nalog.gradiliste_id
         ? (await fetchGradilisteZadaci(nalog.gradiliste_id).catch(() => [] as GradilisteZadatak[]))
         : await fetchNalogZadaci(nalogId).catch(() => [] as GradilisteZadatak[])
-      ).filter((z) => z.nalog_id === nalogId);
+      ).filter((z) => !z.gotovo && z.nalog_id === nalogId);
       setNalogForm({
         nalogId,
         zakljucen_at: nalog.zakljucen_at ?? null,
@@ -650,12 +650,12 @@ export function RasporedView() {
         zakljucen: lock === 'unlock' ? false : undefined,
       };
       if (nalogForm.nalogId) await updateRadniNalog(nalogForm.nalogId, payload);
-      const validIds = nalogZadaci.filter((z) => nalogForm.zadatak_ids.includes(z.id)).map((z) => z.id);
+      const validIds = visibleZadaci.filter((z) => nalogForm.zadatak_ids.includes(z.id)).map((z) => z.id);
       try {
         await setNalogZadaci(nalogId, nalogForm.gradiliste_id || null, validIds);
         // Odznačeni zadatak bez gradilišta nema kamo vratiti pa se briše.
         for (const z of nalogZadaci) {
-          if (!z.gradiliste_id && z.nalog_id === nalogId && !nalogForm.zadatak_ids.includes(z.id)) {
+          if (!z.gotovo && !z.gradiliste_id && z.nalog_id === nalogId && !nalogForm.zadatak_ids.includes(z.id)) {
             await deleteGradilisteZadatak(z.id);
           }
         }

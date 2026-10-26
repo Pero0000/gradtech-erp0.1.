@@ -1,5 +1,9 @@
 # Tm-color
 
+## Fotografije gradilišta
+
+U detaljima i pregledu gradilišta sve fotografije radnika dostupne su u predpregledu, bez ograničenja na prvih deset. Galerije prikazuju najviše tri reda odjednom; ostale slike pregledavaju se okomitim pomicanjem unutar galerije. Sličice prikazuju cijelu fotografiju bez rezanja. Klik otvara uvećani pregled s listanjem; svaka fotografija ima gumb **Preuzmi** i na sličici i u uvećanom pregledu. Isto vrijedi za slike dodane izravno na gradilište u odjeljku **Slike**. Postojeće preuzimanje svih fotografija radnika kao ZIP ostaje dostupno.
+
 ## Stvarni troškovi i prihodi gradilišta
 
 U modulu **Rekapitulacija** tab **Stvarni troškovi i prihodi** prikazuje popis gradilišta, evidentirane troškove uvećane za rad prema odabranoj univerzalnoj satnici ili netto satnici radnika, izdane fakture svih statusa, plaćeni i nenaplaćeni dio, razliku, maržu i radne sate. Prihod koristi postojeći obračun fakture (`iznos + rabat`), nije isto što i naplata i ne uključuje nefakturirane ugovorene radove.
@@ -7,6 +11,8 @@ U modulu **Rekapitulacija** tab **Stvarni troškovi i prihodi** prikazuje popis 
 Filtri obuhvaćaju pretragu, višestruki odabir gradilišta, status, regiju, investitora prema objektu, objekt, voditelja, razdoblje, kategoriju troška, status fakture, financijski rezultat, prisutnost evidencije i raspone troška, prihoda i razlike. Razdoblje je uključivo i primjenjuje se na datum troška, rada i izdavanja fakture. Kategorija filtrira samo troškove (kategorija plaća uključuje i radne sate), a status fakture samo prihode; razlika i marža tada prikazuju odabrani dio evidencije. Marža bez prihoda nije definirana. Zbrojevi i PDF/Excel izvoz prate iste filtre; ukupna marža računa se iz ukupne razlike i prihoda, ne kao prosjek marži gradilišta. Klik na naziv otvara postojeći detaljni pregled gradilišta. Nova migracija nije potrebna.
 
 ## Prijava i korisnička prava
+
+U **Korisnici i prava** popis modula za svakog korisnika početno je sklopljen. Klik na **Moduli i prava** otvara ili zatvara tablicu prava; sažetak prikazuje broj modula s pravom pregleda i uređivanja. Gumb **Spremi prava** ostaje dostupan i kada je popis sklopljen. Otvaranje i zatvaranje popisa ne mijenja dodijeljena prava.
 
 Prijava koristi Supabase Auth s e-mailom i lozinkom. Svaki korisnik pripada jednoj tvrtki. Novi računi otvaraju se pozivnicom administratora; javna registracija nije dopuštena. RLS odvaja poslovne podatke i privatne datoteke tvrtki te zadržava prava pregleda/uređivanja po modulima.
 
@@ -28,6 +34,12 @@ Detaljan plan, prijenos postojećih podataka, konfiguracija pozivnica i provjere
 
 ### Portal djelatnika
 
+Na radnim nalozima prikazuju se samo neriješeni radni zadaci, dodatni radovi, materijal i alat — pri odabiru stavki u rasporedu i pri popunjavanju naloga u web portalu i mobilnoj aplikaciji. Nakon oznake „riješeno” stavka nestaje s naloga, ali se ne briše iz evidencije gradilišta. Spremanje naloga zadržava vezu ranije riješenih stavki s nalogom. Nova migracija nije potrebna. Provjera spremanja: `node --test tests/work-order-items.test.mjs`.
+
+Pregled gradilišta zadržava i riješene stavke s kvačicom i precrtanim nazivom. Zadaci, materijal i alat čitaju isti spremljeni status kao nalog; nije potrebno zaključiti nalog. Otvoreni pregled osvježava te podatke svakih 15 sekundi dok je kartica preglednika vidljiva te pri povratku na karticu/prozor, kako bi pokazao i promjene radnika s drugog uređaja.
+
+Materijal i alat imaju jednu korisničku oznaku: kvačica znači **riješeno**, ostaje označena na gradilištu, a stavka nestaje s naloga. Prikazuje se sav neriješeni alat, ne samo onaj iz inventara. Migracija `supabase/migrations/20261026074000_material_tool_checkbox_completion.sql` pretvara ranije oznake preuzimanja u riješene stavke i usklađuje polja `uzeto` i `gotovo` radi kompatibilnosti sa starijim aplikacijama i provjerama pokretanja naloga. Strojevi nisu obuhvaćeni. Prethodna migracija `supabase/migrations/20261026073000_work_order_item_site_link.sql` popravlja nedostajuće veze stavki s gradilištem unutar iste tvrtke. RLS pravila ostaju nepromijenjena.
+
 Nakon migracije `supabase/migrations/20261021110000_worker_portal.sql` svaki odobreni korisnik koji nije administrator ni označen kao **Voditelj** (u **Korisnici i prava**) nakon prijave vidi samo Portal djelatnika — i na webu i na mobitelu: moje radne naloge, raspored ekipa i vozila, moje radno vrijeme i moje dokumente. ERP moduli (fakture, ponude, troškovi, vozila, administracija, tvrtke…) su mu skriveni u sučelju i blokirani RLS-om; od modula smije samo čitati alat i strojeve radi odabira na nalogu. Migracija postojeće uredske račune bez povezanog djelatnika, koji imaju neko pravo, automatski označava kao voditelje.
 
 Tab **Raspored** u portalu prikazuje kopiju dnevnog rasporeda (vozila, vrijeme polaska, gradilišta i ekipe) koju ured pošalje na kartici **Pošalji raspored** u Dnevnom rasporedu (vidljiva korisnicima s pravom uređivanja rasporeda; prikazuje pregled kakav vide radnici i status slanja; migracija `supabase/migrations/20261021120000_raspored_objave.sql`). Promjene rasporeda nakon slanja radnici ne vide dok se raspored ne pošalje ponovno.
@@ -37,6 +49,8 @@ Tab **Raspored** u portalu prikazuje kopiju dnevnog rasporeda (vozila, vrijeme p
 Portal djelatnika računa ukupne i noćne sate iz aktualnog početka i završetka smjene, istim izračunom kao troškove naloga, uključujući prijelaz preko ponoći. Noćni sati zato su vidljivi i prije odobrenja naloga; nezavršena smjena još se ne zbraja. Zadani noćni interval je 22:00–06:00 (postavke noćnog rada). Noćni sati su dio ukupno odrađenih sati, ne dodatni sati.
 
 U **Radno vrijeme → Obračun sati** (potrebno pravo pregleda modula Radnici; za izmjene pravo uređivanja) vidi se mjesečni obračun po radniku: redovni rad, noćni rad, teren, praznik, godišnji i bolovanje. Kvačicom se radniku odobrava pravo na pojedinu kategoriju; obračunavaju se samo odobrene kategorije, po cijenama upisanima kod radnika. Noćni rad i teren bez odobrenja ne upisuju se ni u trošak gradilišta (vrijedi za naloge zaključene nakon promjene). Godišnji, bolovanje i dodatne slobodne dane upisuje ured; broje se radni dani (pon–pet), godišnji ne uključuje državne praznike, a državni praznik na radni dan kad radnik nije radio računa se automatski. U Portalu djelatnika radnik u kartici **Vrijeme** vidi samo sate/dane odobrenih kategorija, bez iznosa. Potrebna je migracija `supabase/migrations/20261021130000_obracun_sati.sql` (postojećim radnicima odobrava kategorije za koje već imaju upisanu cijenu); provjera izračuna: `npm run test:obracun`.
+
+Klik na ime radnika u **Obračunu sati** otvara detalje odabranog mjeseca: rad po datumima, gradilište, broj i naslov naloga, početak i završetak smjene (ako je upisan na nalogu), sate, noćne sate, teren i napomene. Prikazana su odsustva i automatski obračunati državni praznici te dnevna i mjesečna razrada troška po kategorijama. Trošak koristi iste trenutačne cijene i prava kao glavna tablica, a dnevni iznosi zadržavaju točan mjesečni zbroj i pri zaokruživanju centi. Teren se broji jednom po danu. Prikaz obuhvaća evidenciju uključenu u obračun, ne naloge koji još nemaju evidentirane sate. Ručna evidencija bez podataka o smjeni prikazuje crtice umjesto pretpostavljenog vremena. Nova migracija nije potrebna.
 
 Kartica **Vrijeme** u Portalu djelatnika prikazuje povijest po mjesecima (tekući i do 24 prethodna). U **Obračun sati** stupac „Portal: Vrijeme” određuje vidi li pojedini radnik tu karticu (gumbi „Uključi svima” / „Isključi svima”); kad je isključena, kartica se ne prikazuje, a RPC-ovi `get_my_radno_vrijeme` i `get_my_obracun_podaci` ne vraćaju podatke. Potrebna je migracija `supabase/migrations/20261021150000_portal_vrijeme_vidljivost.sql` (nakon `20261021140000`); postojećim radnicima kartica ostaje uključena.
 

@@ -615,11 +615,11 @@ export function NalogIzvrsenje({
         {!napomena.trim() && <p className="text-sm font-medium text-amber-900">Napomena nije upisana.</p>}
       </div>
       {([['zadatak', 'Radni zadaci', 'Nema zadataka na ovom nalogu.', 'Novi radni zadatak'], ['dodatni', 'Dodatni radovi', 'Nema dodatnih radova na ovom nalogu.', 'Novi dodatni rad']] as const).map(([vrsta, naslov, prazno, placeholder]) => {
-        const lista = zadaci.filter((z) => zadatakVrsta(z) === vrsta);
+        const lista = zadaci.filter((z) => !z.gotovo && zadatakVrsta(z) === vrsta);
         return (
       <div key={vrsta} className={hideZadaci ? 'hidden' : undefined}>
         <SectionTitle icon={<ListChecks className="h-4 w-4" />}>
-          {naslov} ({lista.filter((z) => z.gotovo).length}/{lista.length})
+          {naslov} ({lista.length})
         </SectionTitle>
         <div className="space-y-1.5">
           {lista.map((z) => (
@@ -747,10 +747,10 @@ export function NalogIzvrsenje({
       {!hideStavke && <div className="grid gap-4">
         <div>
           <SectionTitle icon={<Package className="h-4 w-4" />}>
-            Materijal potreban za dalje ({stavke.filter((s) => s.tip === 'materijal' && s.gotovo).length}/{stavke.filter((s) => s.tip === 'materijal').length})
+            Materijal potreban za dalje ({stavke.filter((s) => s.tip === 'materijal' && !s.gotovo).length})
           </SectionTitle>
           <Checklist
-            items={stavke.filter((s) => s.tip === 'materijal')}
+            items={stavke.filter((s) => s.tip === 'materijal' && !s.gotovo)}
             placeholder="npr. boja bijela 15 l"
             onAdd={(n) => addStavka('materijal', n)}
             onToggle={toggleStavka}
@@ -759,10 +759,10 @@ export function NalogIzvrsenje({
         </div>
         <div>
           <SectionTitle icon={<Hammer className="h-4 w-4" />}>
-            Alat potreban za dalje ({stavke.filter((s) => s.tip === 'alat' && s.gotovo).length}/{stavke.filter((s) => s.tip === 'alat').length})
+            Alat potreban za dalje ({stavke.filter((s) => s.tip === 'alat' && !s.gotovo).length})
           </SectionTitle>
           <Checklist
-            items={stavke.filter((s) => s.tip === 'alat')}
+            items={stavke.filter((s) => s.tip === 'alat' && !s.gotovo)}
             placeholder="npr. skela, brusilica"
             onAdd={(n) => addStavka('alat', n)}
             equipment={alati}

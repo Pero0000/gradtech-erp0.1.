@@ -225,7 +225,7 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-4 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:flex-wrap xl:items-center">
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => setMjesec((m) => pomakniMjesec(m, -1))} className="rounded-lg border border-slate-300 p-2 text-slate-600 hover:bg-slate-50" aria-label="Prethodni mjesec">
             <ChevronLeft className="h-4 w-4" />
@@ -265,7 +265,7 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
         </div>
       )}
 
-      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
+      <div className="mb-4 flex min-w-0 flex-col items-stretch gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm xl:flex-row xl:flex-wrap xl:items-center">
         <span className="font-medium text-slate-700">Kartica „Vrijeme” u Portalu djelatnika:</span>
         {portalMigracija ? (
           <>
@@ -273,7 +273,7 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
               vidi {radnici.filter((r) => r.portal_vrijeme !== false && r.status !== 'neaktivan').length} od {radnici.filter((r) => r.status !== 'neaktivan').length} aktivnih radnika
             </span>
             {canEdit && (
-              <div className="ml-auto flex gap-2">
+              <div className="flex flex-col gap-2 xl:ml-auto xl:flex-row xl:flex-wrap">
                 <button type="button" disabled={savingPravo !== null} onClick={() => void setPortalVrijemeSvima(true)} className="rounded-lg border border-emerald-300 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
                   Uključi svima
                 </button>
@@ -292,7 +292,7 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
       {loading ? (
         <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="min-w-0 max-w-full overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full min-w-[960px]">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -395,8 +395,8 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
         ) : (
           <ul className="divide-y divide-slate-100">
             {odsustva.map((o) => (
-              <li key={o.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                <div>
+              <li key={o.id} className="flex min-w-0 items-center justify-between gap-3 py-2 text-sm">
+                <div className="min-w-0 break-words">
                   <span className="font-medium text-slate-900">{imeRadnika(o.radnik_id)}</span>
                   <span className="ml-2 text-slate-500">
                     {VRSTE_ODSUSTVA.find((v) => v.value === o.vrsta)?.label ?? o.vrsta} · {fmtDatum(o.datum_od)} – {fmtDatum(o.datum_do)}
@@ -429,7 +429,7 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
               {' · '}Noćni dodatak: {broj(selected.radnik.nocni_dodatak ?? 0)}%
               {' · '}Teren: {eur(selected.radnik.teren_dnevnica ?? 0)}/dan
             </p>
-            <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-7">
+            <div className="grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-2 2xl:grid-cols-7">
               {[{ label: 'Redovni rad', kolicina: `${broj(selected.obracun.redovniSati)} h`, iznos: selected.obracun.iznosi.redovni, odobreno: true },
                 ...OBRACUN_KATEGORIJE.map((k) => ({
                   label: k.label, kolicina: `${broj(selected.obracun.kolicine[k.key])} ${k.jedinica}`,
@@ -459,7 +459,7 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
                       <p className="text-sm font-bold text-sky-800">{broj(dan.obracun.redovniSati)} h · {eur(dan.obracun.iznosi.ukupno)}</p>
                     </div>
                     {dan.unosi.length > 0 && (
-                      <div className="overflow-x-auto">
+                      <div className="min-w-0 max-w-full overflow-x-auto">
                         <table className="w-full min-w-[700px] text-left text-xs">
                           <thead className="text-slate-500">
                             <tr>
@@ -551,7 +551,7 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
                 ))}
               </Select>
             </Field>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 gap-4">
               <Field label="Od">
                 <TextInput type="date" value={odsustvoForm.datum_od} onChange={(e) => setOdsustvoForm({ ...odsustvoForm, datum_od: e.target.value, datum_do: odsustvoForm.datum_do < e.target.value ? e.target.value : odsustvoForm.datum_do })} />
               </Field>

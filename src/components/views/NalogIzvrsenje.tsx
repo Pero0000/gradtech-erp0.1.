@@ -562,11 +562,11 @@ export function NalogIzvrsenje({
     }, 'Greška pri brisanju dokumenta.');
 
   const kmRazlika = km.pocetak !== '' && km.kraj !== '' && Number(km.kraj) >= Number(km.pocetak) ? Number(km.kraj) - Number(km.pocetak) : null;
-  const inputCls = 'rounded-lg border border-slate-300 px-3 py-1.5 text-sm';
+  const inputCls = 'min-w-0 max-w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm';
   const visibleVremena = radnikIds ? vremena.filter((v) => radnikIds.includes(v.radnik_id)) : vremena;
 
   return (
-    <div className={`md:columns-2 md:gap-x-6 [&>*]:mb-5 [&>*]:break-inside-avoid ${hideZadaci ? '' : 'mt-5 border-t border-slate-100 pt-4'}`}>
+    <div className={`min-w-0 break-words xl:columns-2 xl:gap-x-6 [&>*]:mb-5 [&>*]:min-w-0 [&>*]:break-inside-avoid ${hideZadaci ? '' : 'mt-5 border-t border-slate-100 pt-4'}`}>
       {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>}
 
       {slot && createPortal(
@@ -802,7 +802,7 @@ export function NalogIzvrsenje({
       {pickerDocs.length > 0 && (
         <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-3">
           <SectionTitle icon={<FileText className="h-4 w-4" />}>Dokumenti i slike gradilišta — označi one koji se prikazuju na ovom nalogu ({gradLinked.length}/{pickerDocs.length})</SectionTitle>
-          <div className="grid gap-1.5 md:grid-cols-2">
+          <div className="grid gap-1.5 xl:grid-cols-2">
             {pickerDocs.map((d) => (
               <label key={d.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-sky-100 bg-white px-3 py-1.5 text-sm">
                 <input type="checkbox" checked={gradLinked.includes(d.id)} onChange={(e) => void toggleGradDok(d.id, e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-sky-600" />
@@ -853,7 +853,7 @@ export function NalogIzvrsenje({
           {uploading ? 'Učitavanje…' : 'Dodaj fotografije'}
         </button>
         {foto.length > 0 && (
-          <div className="grid grid-cols-3 gap-2 md:grid-cols-4">
+          <div className="grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-2 2xl:grid-cols-4">
             {foto.map((f) => (
               <div key={f.id} className="group relative overflow-hidden rounded-lg border border-slate-200">
                 <a href={f.url} target="_blank" rel="noreferrer">
@@ -871,7 +871,7 @@ export function NalogIzvrsenje({
           </div>
         )}
       </div>
-      <div className="md:col-span-2">
+      <div className="xl:col-span-2">
         <details className="group rounded-lg border border-slate-200 bg-slate-50">
           <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 [&::-webkit-details-marker]:hidden">
             <History className="h-4 w-4 flex-shrink-0 text-slate-400" />

@@ -74,7 +74,7 @@ function SignaturePad({ value, onChange }: { value: string; onChange: (v: string
   };
 
   return (
-    <div>
+    <div className="min-w-0 max-w-full break-words">
       <p className="mb-1 text-sm font-medium text-slate-700">Elektronički potpis</p>
       <canvas
         ref={ref}
@@ -151,7 +151,7 @@ function PostavkeModal({ open, onClose }: { open: boolean; onClose: () => void }
       <div className="space-y-4">
         {err && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{err}</p>}
         <p className="text-xs text-slate-500">Ove postavke koriste se u zaglavlju i podnožju PDF-a te kao zadane vrijednosti kod nove ponude. Spremaju se u bazu i vrijede na svim računalima.</p>
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
           <Field label="Izvođač radova"><TextInput value={p.izvodac} onChange={(e) => set('izvodac', e.target.value)} /></Field>
           <Field label="OIB"><TextInput value={p.oib} onChange={(e) => set('oib', e.target.value)} /></Field>
           <Field label="Mjesto, ulica i kućni broj"><TextInput value={p.adresa} onChange={(e) => set('adresa', e.target.value)} /></Field>
@@ -168,9 +168,9 @@ function PostavkeModal({ open, onClose }: { open: boolean; onClose: () => void }
         <SignaturePad key={String(open)} value={p.potpis} onChange={(v) => set('potpis', v)} />
         <div>
           <p className="mb-1 text-sm font-medium text-slate-700">Logo</p>
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-col items-start gap-3 xl:flex-row xl:flex-wrap xl:items-center">
             {p.logo && <img src={p.logo} alt="Logo" className="h-14 rounded border border-slate-200 p-1" />}
-            <input type="file" accept="image/*" onChange={(e) => onLogo(e.target.files?.[0])} className="text-sm" />
+            <input type="file" accept="image/*" onChange={(e) => onLogo(e.target.files?.[0])} className="min-w-0 max-w-full text-sm" />
             {p.logo && <button type="button" onClick={() => set('logo', '')} className="text-xs text-red-600 hover:underline">Ukloni</button>}
           </div>
         </div>
@@ -277,13 +277,13 @@ export function PonudeView() {
   ];
 
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
+    <div className="min-w-0 max-w-full break-words">
+      <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Ponude</h1>
           <p className="mt-1 text-sm text-slate-500">Izrada ponuda iz baze stavki, PDF izvoz i pretvorba u planirano gradilište</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap">
           <ExportMenu
             disabled={rows.length === 0}
             build={() => ({
@@ -315,7 +315,7 @@ export function PonudeView() {
 
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-4 grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-4">
         {kpis.map((k) => (
           <div key={k.label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center gap-3">
@@ -331,7 +331,7 @@ export function PonudeView() {
       </div>
 
       <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
           <span>Udio po vrijednosti</span>
           <span className="font-semibold text-emerald-700">Uspješnost: {pct(potvrdeno).toFixed(0)}%</span>
         </div>
@@ -340,23 +340,23 @@ export function PonudeView() {
           <div className="bg-amber-400" style={{ width: `${pct(nepotvrdeno)}%` }} title="Nepotvrđene" />
           <div className="bg-red-400" style={{ width: `${pct(odbijeno)}%` }} title="Odbijene" />
         </div>
-        <div className="mt-2 flex gap-4 text-xs text-slate-500">
+        <div className="mt-2 flex flex-wrap gap-4 text-xs text-slate-500">
           <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-emerald-500" />Potvrđene</span>
           <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-amber-400" />Nepotvrđene</span>
           <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-red-400" />Odbijene</span>
         </div>
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <div className="relative min-w-60 flex-1">
+      <div className="mb-4 flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap">
+        <div className="relative min-w-0 xl:min-w-60 xl:flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Traži po broju, naslovu, investitoru, adresi…" className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm" />
         </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as '' | PonudaStatus)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as '' | PonudaStatus)} className="min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
           <option value="">Svi statusi</option>
           {Object.entries(statusLabel).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
-        <select value={godina} onChange={(e) => setGodina(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        <select value={godina} onChange={(e) => setGodina(e.target.value)} className="min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
           <option value="">Sve godine</option>
           {godine.map((g) => <option key={g} value={g}>{g}</option>)}
         </select>
@@ -365,7 +365,7 @@ export function PonudeView() {
       {ponude.length === 0 ? (
         <EmptyState icon={<FileSignature className="h-7 w-7" />} title="Nema ponuda" description="Kreiraj prvu ponudu iz baze stavki." />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="min-w-0 max-w-full overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">

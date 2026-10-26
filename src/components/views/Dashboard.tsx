@@ -35,8 +35,8 @@ const levelBadge: Record<ObavijestLevel, string> = {
 
 function Card({ title, icon, action, onAction, children }: { title: string; icon: React.ReactNode; action?: string; onAction?: () => void; children: React.ReactNode }) {
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between">
+    <section className="min-w-0 break-words rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex flex-col items-start justify-between gap-2 xl:flex-row xl:items-center">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">{icon}{title}</h2>
         {action && <button type="button" onClick={onAction} className="text-xs font-medium text-sky-700 hover:underline">{action}</button>}
       </div>
@@ -144,7 +144,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   ];
 
   return (
-    <div>
+    <div className="min-w-0 max-w-full">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Nadzorna ploča</h1>
         <p className="mt-1 text-sm text-slate-500">
@@ -152,7 +152,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         </p>
       </div>
 
-      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="mb-5 grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-5">
         {kpis.map((k) => {
           const Icon = k.icon;
           return (
@@ -166,7 +166,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         })}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
         <Card title="Rokovi gradilišta" icon={<Building2 className="h-4 w-4 text-sky-600" />} action="Sve obavijesti" onAction={() => onNavigate('obavijesti')}>
           {rokGradilista.length === 0 ? <Empty text="Nema nadolazećih rokova ✅" /> : rokGradilista.map((o) => <ObavijestRow key={o.id} o={o} onClick={() => onNavigate('gradilista')} />)}
         </Card>

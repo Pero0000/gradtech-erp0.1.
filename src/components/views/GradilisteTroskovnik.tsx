@@ -65,9 +65,9 @@ export function GradilisteTroskovnik({ gradilisteId, naziv }: { gradilisteId: st
 
   return (
     <section className="border-t border-slate-200 py-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="mb-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
         <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800"><FileSignature className="h-4 w-4" /> Troškovnik iz ponude</h3>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button type="button" onClick={() => setImportOpen(true)} className="inline-flex items-center gap-1 text-xs text-sky-600 hover:underline"><Sparkles className="h-3.5 w-3.5" /> Učitaj AI-em</button>
           <button type="button" onClick={() => setOpen((v) => !v)} className="text-xs text-sky-600 hover:underline">{open ? 'Sažmi' : 'Prikaži stavke'}</button>
         </div>
@@ -75,11 +75,11 @@ export function GradilisteTroskovnik({ gradilisteId, naziv }: { gradilisteId: st
       {importModal}
       {groups.map(({ ponuda, tot, groups: gr, count }) => (
         <div key={ponuda.id} className="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
-          <div className="flex items-center justify-between">
-            <p className="font-semibold text-slate-800">Ponuda {ponudaBroj(ponuda)} · {ponuda.naslov}</p>
-            <span className="text-slate-400">{count} stavki</span>
+          <div className="flex items-start justify-between gap-2">
+            <p className="min-w-0 break-words font-semibold text-slate-800">Ponuda {ponudaBroj(ponuda)} · {ponuda.naslov}</p>
+            <span className="flex-shrink-0 text-slate-400">{count} stavki</span>
           </div>
-          <div className="mt-2 grid grid-cols-3 gap-2">
+          <div className="mt-2 grid grid-cols-1 gap-2 xl:grid-cols-2 2xl:grid-cols-3">
             <div><p className="text-slate-400">Bez PDV-a</p><p className="font-semibold text-slate-800">{eur(tot.neto)}</p></div>
             <div><p className="text-slate-400">PDV</p><p className="font-semibold text-slate-800">{ponuda.prijenos_porezne_obveze ? 'prijenos' : eur(tot.pdv)}</p></div>
             <div><p className="text-slate-400">Ukupno</p><p className="font-semibold text-slate-800">{eur(tot.bruto)}</p></div>
@@ -87,15 +87,16 @@ export function GradilisteTroskovnik({ gradilisteId, naziv }: { gradilisteId: st
           {open && (
             <div className="mt-3 space-y-3">
               {gr.map(([vrsta, list]) => (
-                <div key={vrsta}>
+                <div key={vrsta} className="min-w-0">
                   <p className="mb-1 font-semibold text-orange-700">{vrsta}</p>
+                  <div className="overflow-x-auto">
                   <table className="w-full">
                     <tbody>
                       {list.map((s) => {
                         const pop = ponuda.prikazi_popust === false ? 0 : stavkaPopust(s, ponuda.popust);
                         return (
                           <tr key={s.id} className="border-t border-slate-200 align-top">
-                            <td className="py-1 pr-2 text-slate-700">{s.opis}</td>
+                            <td className="break-words py-1 pr-2 text-slate-700">{s.opis}</td>
                             <td className="whitespace-nowrap py-1 pr-2 text-right text-slate-500">{n2(s.kolicina)} {s.jedinica}</td>
                             <td className="whitespace-nowrap py-1 text-right font-medium text-slate-800">{eur(s.kolicina * s.cijena * (1 - pop / 100))}</td>
                           </tr>
@@ -103,6 +104,7 @@ export function GradilisteTroskovnik({ gradilisteId, naziv }: { gradilisteId: st
                       })}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               ))}
             </div>

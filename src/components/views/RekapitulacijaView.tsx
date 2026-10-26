@@ -189,7 +189,7 @@ export function RekapitulacijaView() {
               </button>
             ))}
           </div>
-          {tab === 'pregled' && <div className="mb-6 w-80">
+          {tab === 'pregled' && <div className="mb-6 w-full xl:w-80">
             <Select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
               <option value="all">Sva gradilišta (pregled)</option>
               {gradilista.map((g) => (
@@ -200,7 +200,7 @@ export function RekapitulacijaView() {
             </Select>
           </div>}
 
-          <div className="mb-5 flex flex-wrap items-center gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+          <div className="mb-5 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 xl:flex-row xl:flex-wrap xl:items-center xl:gap-4">
             <label className="inline-flex items-center gap-2">
               Univerzalna satnica
               <input
@@ -245,25 +245,25 @@ export function RekapitulacijaView() {
           {tab === 'pregled' && selectedId !== 'all' && selectedGradiliste && (
             <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center gap-3 mb-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
                   <Building2 className="h-5 w-5" />
                 </div>
-                <div>
-                  <h2 className="font-semibold text-slate-900">{selectedGradiliste.naziv}</h2>
+                <div className="min-w-0">
+                  <h2 className="break-words font-semibold text-slate-900">{selectedGradiliste.naziv}</h2>
                   {selectedGradiliste.adresa && (
-                    <p className="text-sm text-slate-500">{selectedGradiliste.adresa}</p>
+                    <p className="break-words text-sm text-slate-500">{selectedGradiliste.adresa}</p>
                   )}
                 </div>
               </div>
               {selectedGradiliste.opis && (
-                <p className="text-sm text-slate-600">{selectedGradiliste.opis}</p>
+                <p className="break-words text-sm text-slate-600">{selectedGradiliste.opis}</p>
               )}
             </div>
           )}
 
           {tab === 'pregled' && selectedId !== 'all' && (<>
           {/* Summary cards */}
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-2 mb-8">
+          <div className="mb-8 grid gap-4 xl:grid-cols-2">
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center gap-3 mb-2">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 text-red-600">
@@ -271,7 +271,7 @@ export function RekapitulacijaView() {
                 </div>
                 <span className="text-sm text-slate-500">Ukupni troškovi</span>
               </div>
-              <p className="text-2xl font-bold text-slate-900">
+              <p className="break-words text-2xl font-bold text-slate-900">
                 {ukupniTroskovi.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
               </p>
               <p className="text-xs text-slate-400 mt-1">
@@ -287,7 +287,7 @@ export function RekapitulacijaView() {
                 </div>
                 <span className="text-sm text-slate-500">Ukupno sati</span>
               </div>
-              <p className="text-2xl font-bold text-slate-900">{ukupnoSati.toFixed(1)}h</p>
+              <p className="break-words text-2xl font-bold text-slate-900">{ukupnoSati.toFixed(1)}h</p>
               <p className="text-xs text-slate-400 mt-1">
                 ≈ {trosakRada.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })} trošak rada
               </p>
@@ -295,7 +295,7 @@ export function RekapitulacijaView() {
           </div>
 
           {/* Fakture + ugovoreni radovi summary */}
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 mb-8">
+          <div className="mb-8 grid gap-4 xl:grid-cols-2 2xl:grid-cols-4">
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center gap-3 mb-2">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
@@ -303,7 +303,7 @@ export function RekapitulacijaView() {
                 </div>
                 <span className="text-sm text-slate-500">Fakture ukupno</span>
               </div>
-              <p className="text-xl font-bold text-slate-900">
+              <p className="break-words text-xl font-bold text-slate-900">
                 {ukupnoFakture.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
               </p>
               <p className="text-xs text-emerald-600 mt-1">
@@ -318,7 +318,7 @@ export function RekapitulacijaView() {
                 </div>
                 <span className="text-sm text-slate-500">Ugovoreno</span>
               </div>
-              <p className="text-xl font-bold text-slate-900">
+              <p className="break-words text-xl font-bold text-slate-900">
                 {ugovorenoUkupno.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
               </p>
               <p className="text-xs text-slate-400 mt-1">
@@ -333,7 +333,7 @@ export function RekapitulacijaView() {
                 </div>
                 <span className="text-sm text-slate-500">Rokovi</span>
               </div>
-              <p className="text-xl font-bold text-slate-900">{rokovi.length}</p>
+              <p className="break-words text-xl font-bold text-slate-900">{rokovi.length}</p>
               <p className="text-xs text-slate-400 mt-1">
                 {rokovi.filter((r) => r.status === 'otvoren').length} otvorenih ·{' '}
                 {rokovi.filter((r) => r.status === 'prekoracen').length} prekoračenih
@@ -347,7 +347,7 @@ export function RekapitulacijaView() {
                 </div>
                 <span className="text-sm text-slate-500">Nalozi</span>
               </div>
-              <p className="text-xl font-bold text-slate-900">{nalozi.length}</p>
+              <p className="break-words text-xl font-bold text-slate-900">{nalozi.length}</p>
               <p className="text-xs text-slate-400 mt-1">
                 {nalozi.filter((n: any) => n.status === 'otvoren' || n.status === 'u_tijeku').length} aktivnih
               </p>
@@ -366,12 +366,12 @@ export function RekapitulacijaView() {
                   const rb = rokStatusBadge[r.status] ?? rokStatusBadge.otvoren;
                   const d = daysUntil(r.datum);
                   return (
-                    <div key={r.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 p-3">
+                    <div key={r.id} className="flex flex-col gap-2 rounded-lg border border-slate-100 p-3 xl:flex-row xl:items-center xl:justify-between xl:gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-slate-900">{r.naziv}</p>
+                        <p className="break-words text-sm font-medium text-slate-900">{r.naziv}</p>
                         {r.opis && <p className="text-xs text-slate-400 truncate">{r.opis}</p>}
                       </div>
-                      <div className="flex items-center gap-3 flex-shrink-0">
+                      <div className="flex flex-shrink-0 flex-wrap items-center gap-3">
                         <span className="text-sm text-slate-500">
                           {new Date(r.datum + 'T00:00:00').toLocaleDateString('hr-HR')}
                         </span>
@@ -393,7 +393,7 @@ export function RekapitulacijaView() {
             </div>
           )}
 
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 xl:grid-cols-2 [&>*]:min-w-0">
             {/* Troškovi po kategoriji */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h3 className="mb-4 font-semibold text-slate-900 flex items-center gap-2">
@@ -410,9 +410,9 @@ export function RekapitulacijaView() {
                       const pct = direktniTroskovi > 0 ? (iznos / direktniTroskovi) * 100 : 0;
                       return (
                         <div key={kat}>
-                          <div className="flex items-center justify-between text-sm mb-1">
-                            <span className="text-slate-700">{kategorijaLabel[kat as TrosakKategorija] ?? kat}</span>
-                            <span className="font-medium text-slate-900">
+                          <div className="mb-1 flex items-center justify-between gap-2 text-sm">
+                            <span className="min-w-0 break-words text-slate-700">{kategorijaLabel[kat as TrosakKategorija] ?? kat}</span>
+                            <span className="flex-shrink-0 whitespace-nowrap font-medium text-slate-900">
                               {iznos.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
                             </span>
                           </div>
@@ -425,12 +425,12 @@ export function RekapitulacijaView() {
                   {/* Trošak rada (auto-izračunat) */}
                   {trosakRada > 0 && (
                     <div>
-                      <div className="flex items-center justify-between text-sm mb-1">
-                        <span className="text-slate-700 flex items-center gap-1.5">
+                      <div className="mb-1 flex items-center justify-between gap-2 text-sm">
+                        <span className="flex min-w-0 items-center gap-1.5 text-slate-700">
                           <Users className="h-3.5 w-3.5" />
                           Trošak rada (auto)
                         </span>
-                        <span className="font-medium text-emerald-600">
+                        <span className="flex-shrink-0 whitespace-nowrap font-medium text-emerald-600">
                           {trosakRada.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
                         </span>
                       </div>
@@ -461,7 +461,7 @@ export function RekapitulacijaView() {
                     .map(([id, data]) => (
                       <div key={id} className="flex items-center justify-between gap-3">
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-slate-700">{data.ime}</p>
+                          <p className="break-words text-sm font-medium text-slate-700">{data.ime}</p>
                           <p className="text-xs text-slate-400">{data.sati.toFixed(1)}h × {data.satnica.toLocaleString('hr-HR')} €/h</p>
                         </div>
                         <span className="text-sm font-semibold text-slate-900 whitespace-nowrap">
@@ -484,14 +484,14 @@ export function RekapitulacijaView() {
                   {fakture.map((f) => {
                     const fb = fakturaStatusBadge[f.status] ?? fakturaStatusBadge.izdana;
                     return (
-                      <div key={f.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 p-3">
+                      <div key={f.id} className="flex flex-col gap-2 rounded-lg border border-slate-100 p-3 xl:flex-row xl:items-center xl:justify-between xl:gap-3">
                         <div className="min-w-0">
-                          <p className="text-sm font-mono font-medium text-slate-700">{f.broj}</p>
-                          <p className="text-xs text-slate-400">
+                          <p className="break-words font-mono text-sm font-medium text-slate-700">{f.broj}</p>
+                          <p className="break-words text-xs text-slate-400">
                             {f.kupac ?? '—'} · {new Date(f.datum_izdavanja + 'T00:00:00').toLocaleDateString('hr-HR')}
                           </p>
                         </div>
-                        <div className="flex items-center gap-3 flex-shrink-0">
+                        <div className="flex flex-shrink-0 flex-wrap items-center gap-3">
                           <span className="text-sm font-semibold text-slate-900">
                             {iznosFakture(f).toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
                           </span>
@@ -516,13 +516,13 @@ export function RekapitulacijaView() {
                     const pct = u.ugovoreni_iznos > 0 ? (u.ostvareni_iznos / u.ugovoreni_iznos) * 100 : 0;
                     return (
                       <div key={u.id} className="rounded-lg border border-slate-100 p-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-sm font-medium text-slate-900">{u.naziv}</p>
+                        <div className="mb-2 flex items-start justify-between gap-2">
+                          <p className="min-w-0 break-words text-sm font-medium text-slate-900">{u.naziv}</p>
                           <Badge variant={u.status === 'zavrseno' ? 'green' : u.status === 'u_tijeku' ? 'yellow' : 'blue'}>
                             {u.status === 'zavrseno' ? 'Završeno' : u.status === 'u_tijeku' ? 'U tijeku' : 'Planirano'}
                           </Badge>
                         </div>
-                        <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+                        <div className="mb-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-slate-500">
                           <span>Ugovoreno: {u.ugovoreni_iznos.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}</span>
                           <span>Ostvareno: {(u.ostvareni_iznos ?? 0).toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}</span>
                         </div>
@@ -563,10 +563,10 @@ export function RekapitulacijaView() {
                           <td className="px-3 py-2.5 text-xs font-mono text-slate-500">{n.broj}</td>
                           <td className="px-3 py-2.5 text-sm font-medium text-slate-900">{n.naslov}</td>
                           <td className="px-3 py-2.5"><Badge variant={si.variant}>{si.label}</Badge></td>
-                          <td className="px-3 py-2.5 text-sm text-slate-500">
+                          <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-500">
                             {new Date(n.datum_kreiranja + 'T00:00:00').toLocaleDateString('hr-HR')}
                           </td>
-                          <td className="px-3 py-2.5 text-sm text-slate-500">
+                          <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-500">
                             {n.rok ? new Date(n.rok + 'T00:00:00').toLocaleDateString('hr-HR') : '—'}
                           </td>
                         </tr>
@@ -598,14 +598,14 @@ export function RekapitulacijaView() {
                   <tbody className="divide-y divide-slate-100">
                     {troskovi.map((t) => (
                       <tr key={t.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-3 py-2.5 text-sm text-slate-500">
+                        <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-500">
                           {new Date(t.datum + 'T00:00:00').toLocaleDateString('hr-HR')}
                         </td>
                         <td className="px-3 py-2.5 text-sm text-slate-600">
                           {kategorijaLabel[t.kategorija] ?? t.kategorija}
                         </td>
                         <td className="px-3 py-2.5 text-sm text-slate-700">{t.opis}</td>
-                        <td className="px-3 py-2.5 text-right text-sm font-medium text-slate-900">
+                        <td className="whitespace-nowrap px-3 py-2.5 text-right text-sm font-medium text-slate-900">
                           {t.iznos.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
                         </td>
                       </tr>

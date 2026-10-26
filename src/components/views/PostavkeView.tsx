@@ -42,14 +42,14 @@ export function PostavkeView() {
   const grupe = [...new Set(obavijestTipovi.map((t) => t.grupa))];
 
   return (
-    <div>
+    <div className="min-w-0 max-w-full break-words">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Postavke sustava</h1>
         <p className="mt-1 text-sm text-slate-500">Obavijesti i dnevni/noćni rad · postavke se spremaju u ovom pregledniku</p>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <div className="space-y-5">
+      <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-2">
+        <div className="min-w-0 space-y-5">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="font-semibold text-slate-900">Dnevni i noćni rad</h2>
             <p className="mb-4 text-xs text-slate-500">Odaberi sat početka dnevnog i noćnog rada · koristi se za obračun noćnih sati</p>
@@ -74,10 +74,10 @@ export function PostavkeView() {
               {['00:00', '06:00', '12:00', '18:00', '24:00'].map((t) => <span key={t}>{t}</span>)}
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="mt-4 grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
                 <p className="flex items-center gap-1 text-xs font-semibold text-amber-800"><Sun className="h-3.5 w-3.5" /> Dnevni rad</p>
-                <div className="mt-2 flex items-center gap-2 text-sm">
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
                   <select value={p.danOd} onChange={(event) => update({ ...p, danOd: event.target.value })} className="rounded border border-slate-300 bg-white px-2 py-1">
                     {hours.map((h) => <option key={h}>{h}</option>)}
                   </select>
@@ -88,7 +88,7 @@ export function PostavkeView() {
               </div>
               <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
                 <p className="flex items-center gap-1 text-xs font-semibold text-indigo-800"><Moon className="h-3.5 w-3.5" /> Noćni rad</p>
-                <div className="mt-2 flex items-center gap-2 text-sm">
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
                   <select value={p.nocOd} onChange={(event) => update({ ...p, nocOd: event.target.value })} className="rounded border border-slate-300 bg-white px-2 py-1">
                     {hours.map((h) => <option key={h}>{h}</option>)}
                   </select>
@@ -100,7 +100,7 @@ export function PostavkeView() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="font-semibold text-slate-900">AI asistent</h2>
             <p className="mb-3 text-xs text-slate-500">
               Besplatni Google Gemini ključ: otvori aistudio.google.com/apikey, prijavi se Google računom, klikni „Create API key” i zalijepi ga ovdje. Ključ se sprema samo u ovom pregledniku.
@@ -125,9 +125,9 @@ export function PostavkeView() {
                 {obavijestTipovi.filter((t) => t.grupa === g).map((t) => {
                   const cfg = p.obavijesti[t.tip];
                   return (
-                    <div key={t.tip} className="flex items-center gap-3 py-2">
+                    <div key={t.tip} className="flex min-w-0 flex-wrap items-center gap-3 py-2">
                       <Toggle on={cfg.on} onChange={(value) => setTipValue(t.tip, { on: value })} />
-                      <span className="flex-1 text-sm text-slate-800">{t.label}</span>
+                      <span className="min-w-0 flex-1 basis-[calc(100%_-_4rem)] text-sm text-slate-800 xl:basis-0">{t.label}</span>
                       <input
                         type="number"
                         min={0}

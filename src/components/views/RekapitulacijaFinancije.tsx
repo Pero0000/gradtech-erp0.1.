@@ -130,8 +130,8 @@ export function RekapitulacijaFinancije({ gradilista, satnica, nettoPoRadnicima,
         <p className="mt-1"><strong>Stvarni trošak</strong> uključuje evidentirane troškove i rad prema satnici odabranoj iznad. Razlika = prihod − trošak; marža = razlika / prihod. Nisu uključeni planirani troškovi ni nefakturirani ugovoreni radovi.</p>
       </div>
 
-      <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="min-w-0 space-y-4 rounded-xl border border-slate-200 bg-white p-4">
+        <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-4">
           <Field label="Pretraga"><TextInput placeholder="Naziv, adresa, objekt, investitor…" value={filters.search} onChange={(e) => update('search', e.target.value)} /></Field>
           <Field label="Status gradilišta"><Select value={filters.status} onChange={(e) => {
             const value = e.target.value;
@@ -143,11 +143,11 @@ export function RekapitulacijaFinancije({ gradilista, satnica, nettoPoRadnicima,
         <p className="text-xs text-slate-500">Razdoblje filtrira datum troška, datum rada i datum izdavanja fakture (uključujući oba granična datuma), a ne datum početka gradilišta. Prazni datumi znače sva razdoblja.</p>
         <details>
           <summary className="cursor-pointer text-sm font-semibold text-sky-700">Dodatni filtri: gradilišta, lokacija, investitor, troškovi, fakture i iznosi</summary>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-3 grid gap-3 xl:grid-cols-2 2xl:grid-cols-4">
             <div>
               <span className="mb-1.5 block text-sm font-medium text-slate-700">Gradilišta (moguć višestruki odabir)</span>
               <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-300 p-2">
-                {gradilista.map((g) => <label key={g.id} className="flex items-center gap-2 text-sm">
+                {gradilista.map((g) => <label key={g.id} className="flex min-w-0 items-center gap-2 break-words text-sm">
                   <input type="checkbox" checked={filters.gradilista.includes(g.id)} onChange={(e) => update('gradilista', e.target.checked ? [...filters.gradilista, g.id] : filters.gradilista.filter((id) => id !== g.id))} />
                   {g.naziv}
                 </label>)}
@@ -182,10 +182,10 @@ export function RekapitulacijaFinancije({ gradilista, satnica, nettoPoRadnicima,
           </div>
           <p className="mt-3 text-xs text-amber-800">Kategorija troška filtrira samo troškove, a status fakture samo prihode. Razlika i marža tada se odnose na odabrani dio evidencije, ne na cijelo gradilište.</p>
         </details>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
           <button type="button" onClick={() => setFilters(prazniFinancijskiFilteri)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Poništi sve filtre</button>
-          <button type="button" disabled={loading} onClick={() => setRefresh((value) => value + 1)} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50"><RefreshCw className="h-4 w-4" /> Osvježi iznose</button>
-          <div className="ml-auto">
+          <button type="button" disabled={loading} onClick={() => setRefresh((value) => value + 1)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50"><RefreshCw className="h-4 w-4" /> Osvježi iznose</button>
+          <div className="xl:ml-auto">
             <ExportMenu disabled={!ready || rows.length === 0} build={() => ({
               file: 'Stvarni_troskovi_i_prihodi', title: 'Stvarni troškovi i prihodi gradilišta',
               subtitle: filterSummary, rows,
@@ -216,12 +216,12 @@ export function RekapitulacijaFinancije({ gradilista, satnica, nettoPoRadnicima,
       {loading && <p className="py-10 text-center text-slate-500">Učitavanje troškova, radnih sati i faktura…</p>}
       {ready && <>
         <p className="text-xs text-slate-500">{filterSummary}</p>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-4">
           {[
             ['Stvarni trošak', totals.trosak], ['Stvarni prihod (izdane fakture)', totals.prihod],
             ['Razlika prihoda i troška', totals.saldo], ['Nenaplaćene fakture', totals.neplaceno],
           ].map(([label, value]) => <div key={label} className="rounded-xl border border-slate-200 bg-white p-4">
-            <p className="text-sm text-slate-500">{label}</p><p className="mt-1 text-xl font-bold text-slate-900">{eur(Number(value))}</p>
+            <p className="text-sm text-slate-500">{label}</p><p className="mt-1 break-words text-xl font-bold text-slate-900">{eur(Number(value))}</p>
           </div>)}
         </div>
         <p className="text-sm text-slate-600">Prikazano {rows.length} od {gradilista.length} gradilišta · {totals.brojFaktura} faktura · {num(totals.sati)} h. Svi zbrojevi odnose se samo na filtrirani prikaz.</p>
@@ -233,7 +233,7 @@ export function RekapitulacijaFinancije({ gradilista, satnica, nettoPoRadnicima,
             <tbody className="divide-y divide-slate-100">
               {rows.length === 0 && <tr><td colSpan={columns.length} className="p-8 text-center text-slate-500">Nema gradilišta koja odgovaraju odabranim filtrima.</td></tr>}
               {rows.map((row) => <tr key={row.gradiliste.id} className="hover:bg-slate-50">
-                <td className="px-4 py-3"><button type="button" onClick={() => onOpen(row.gradiliste.id)} className="text-left font-semibold text-sky-700 hover:underline">{row.gradiliste.naziv}</button><p className="text-xs text-slate-500">{statusLabels[row.gradiliste.status]}{row.gradiliste.objekti?.naziv ? ` · ${row.gradiliste.objekti.naziv}` : ''}</p></td>
+                <td className="min-w-[12rem] px-4 py-3"><button type="button" onClick={() => onOpen(row.gradiliste.id)} className="text-left font-semibold text-sky-700 hover:underline">{row.gradiliste.naziv}</button><p className="text-xs text-slate-500">{statusLabels[row.gradiliste.status]}{row.gradiliste.objekti?.naziv ? ` · ${row.gradiliste.objekti.naziv}` : ''}</p></td>
                 <td className="whitespace-nowrap px-4 py-3 text-right"><p>{eur(row.trosak)}</p><p className="text-xs text-slate-500">Evidencija {eur(row.direktni)} · rad {eur(row.rad)}</p></td>
                 <td className="whitespace-nowrap px-4 py-3 text-right">{eur(row.prihod)}<p className="text-xs text-slate-500">{row.brojFaktura} faktura</p></td>
                 <td className="whitespace-nowrap px-4 py-3 text-right">{eur(row.placeno)}</td>

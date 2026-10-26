@@ -113,7 +113,7 @@ export function VoziloDokumenti({ voziloId, onChange }: { voziloId: string; onCh
                 </p>
               </div>
               {st && <span className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${st.cls}`}>{st.label}</span>}
-              <button type="button" onClick={() => void remove(d)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600" aria-label="Obriši">
+              <button type="button" onClick={() => void remove(d)} className="flex-shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600" aria-label="Obriši">
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
@@ -121,26 +121,26 @@ export function VoziloDokumenti({ voziloId, onChange }: { voziloId: string; onCh
         })}
       </div>
       <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
           <Select value={form.vrsta} onChange={(e) => setForm({ ...form, vrsta: e.target.value as VoziloDokumentVrsta })}>
             {Object.entries(vrste).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </Select>
           <TextInput value={form.naziv} onChange={(e) => setForm({ ...form, naziv: e.target.value })} placeholder={isServis ? 'Opis servisa (npr. veliki servis)' : 'Naziv (neobavezno)'} />
-          <label className="text-xs text-slate-500">{isServis ? 'Datum servisa' : 'Početak'}
+          <label className="block min-w-0 text-xs text-slate-500">{isServis ? 'Datum servisa' : 'Početak'}
             <TextInput type="date" value={form.datum_od} onChange={(e) => setForm({ ...form, datum_od: e.target.value })} />
           </label>
-          <label className="text-xs text-slate-500">{isServis ? 'Idući servis (datum)' : 'Kraj / istek'}
+          <label className="block min-w-0 text-xs text-slate-500">{isServis ? 'Idući servis (datum)' : 'Kraj / istek'}
             <TextInput type="date" value={form.datum_do} onChange={(e) => setForm({ ...form, datum_do: e.target.value })} />
           </label>
           <TextInput type="number" min="0" value={form.km} onChange={(e) => setForm({ ...form, km: e.target.value })} placeholder={isServis ? 'Kilometraža na servisu' : 'Kilometraža (neobavezno)'} />
           <TextInput type="number" min="0" step="0.01" value={form.iznos} onChange={(e) => setForm({ ...form, iznos: e.target.value })} placeholder="Iznos (€)" />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
           <input ref={fileRef} type="file" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-          <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
-            <Paperclip className="h-3.5 w-3.5" /> {file ? file.name : 'Priloži datoteku'}
+          <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex min-w-0 max-w-full items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+            <Paperclip className="h-3.5 w-3.5 flex-shrink-0" /> <span className="min-w-0 truncate">{file ? file.name : 'Priloži datoteku'}</span>
           </button>
-          <button type="button" onClick={() => void add()} disabled={saving} className="ml-auto inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50">
+          <button type="button" onClick={() => void add()} disabled={saving} className="inline-flex items-center justify-center gap-1 rounded-lg bg-sky-600 xl:ml-auto px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50">
             <Plus className="h-3.5 w-3.5" /> {saving ? 'Spremanje…' : 'Dodaj'}
           </button>
         </div>

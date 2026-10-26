@@ -260,8 +260,8 @@ export function PonudaEditor({ open, onClose, onSaved, ponuda, ponudaStavke, inv
     >
       <div className="space-y-4">
         {error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-        <div className="grid gap-3 md:grid-cols-4">
-          <div className="md:col-span-2"><Field label="Naslov (npr. Fasaderski radovi) *"><TextInput value={form.naslov} onChange={(e) => setForm({ ...form, naslov: e.target.value })} /></Field></div>
+        <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-4">
+          <div className="min-w-0 xl:col-span-2"><Field label="Naslov (npr. Fasaderski radovi) *"><TextInput value={form.naslov} onChange={(e) => setForm({ ...form, naslov: e.target.value })} /></Field></div>
           <Field label="Datum"><TextInput type="date" value={form.datum} onChange={(e) => setForm({ ...form, datum: e.target.value })} /></Field>
           <Field label="Status">
             <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as PonudaStatus })}>
@@ -269,36 +269,36 @@ export function PonudaEditor({ open, onClose, onSaved, ponuda, ponudaStavke, inv
             </Select>
           </Field>
           <Field label="Investitor">
-            <div className="flex gap-1">
-              <Select value={form.investitor_id} onChange={(e) => onInvestitor(e.target.value)}>
+            <div className="flex min-w-0 gap-1">
+              <Select className="min-w-0" value={form.investitor_id} onChange={(e) => onInvestitor(e.target.value)}>
                 <option value="">—</option>
                 {investitori.map((i) => <option key={i.id} value={i.id}>{i.naziv}</option>)}
               </Select>
-              <button type="button" title="Novi investitor" onClick={() => openQuick('investitor')} className="rounded-lg border border-slate-200 px-2.5 text-lg leading-none text-sky-600 hover:bg-sky-50">+</button>
+              <button type="button" title="Novi investitor" onClick={() => openQuick('investitor')} className="flex-shrink-0 rounded-lg border border-slate-200 px-2.5 text-lg leading-none text-sky-600 hover:bg-sky-50">+</button>
             </div>
           </Field>
           <Field label="Objekt">
-            <div className="flex gap-1">
-              <Select value={form.objekt_id} onChange={(e) => onObjekt(e.target.value)}>
+            <div className="flex min-w-0 gap-1">
+              <Select className="min-w-0" value={form.objekt_id} onChange={(e) => onObjekt(e.target.value)}>
                 <option value="">—</option>
                 {objektiInv.map((o) => <option key={o.id} value={o.id}>{o.naziv}</option>)}
               </Select>
-              <button type="button" title="Novi objekt" onClick={() => openQuick('objekt')} className="rounded-lg border border-slate-200 px-2.5 text-lg leading-none text-sky-600 hover:bg-sky-50">+</button>
+              <button type="button" title="Novi objekt" onClick={() => openQuick('objekt')} className="flex-shrink-0 rounded-lg border border-slate-200 px-2.5 text-lg leading-none text-sky-600 hover:bg-sky-50">+</button>
             </div>
           </Field>
-          <div className="md:col-span-2"><Field label="Adresa izvođenja radova"><TextInput value={form.adresa_radova} onChange={(e) => setForm({ ...form, adresa_radova: e.target.value })} /></Field></div>
+          <div className="min-w-0 xl:col-span-2"><Field label="Adresa izvođenja radova"><TextInput value={form.adresa_radova} onChange={(e) => setForm({ ...form, adresa_radova: e.target.value })} /></Field></div>
           {quick && (
-            <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 md:col-span-4">
+            <div className="min-w-0 rounded-xl border border-sky-200 bg-sky-50 p-3 xl:col-span-2 2xl:col-span-4">
               <p className="mb-2 text-sm font-semibold text-slate-700">
                 {quick === 'investitor' ? 'Novi investitor' : `Novi objekt za: ${investitori.find((i) => i.id === form.investitor_id)?.naziv ?? ''}`}
               </p>
-              <div className="grid gap-2 md:grid-cols-4">
+              <div className="grid gap-2 xl:grid-cols-2 2xl:grid-cols-4">
                 <Field label="Naziv *"><TextInput value={quickForm.naziv} onChange={(e) => setQuickForm({ ...quickForm, naziv: e.target.value })} /></Field>
                 {quick === 'investitor' && <Field label="OIB"><TextInput value={quickForm.oib} onChange={(e) => setQuickForm({ ...quickForm, oib: e.target.value })} /></Field>}
                 <Field label="Adresa"><TextInput value={quickForm.adresa} onChange={(e) => setQuickForm({ ...quickForm, adresa: e.target.value })} /></Field>
                 {quick === 'investitor' && <Field label="Mjesto"><TextInput value={quickForm.mjesto} onChange={(e) => setQuickForm({ ...quickForm, mjesto: e.target.value })} /></Field>}
               </div>
-              <div className="mt-2 flex justify-end gap-2">
+              <div className="mt-2 flex flex-wrap justify-end gap-2">
                 <button type="button" onClick={() => setQuick(null)} className="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-white">Odustani</button>
                 <button type="button" onClick={() => void saveQuick()} disabled={!quickForm.naziv.trim()} className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">Dodaj</button>
               </div>
@@ -306,7 +306,7 @@ export function PonudaEditor({ open, onClose, onSaved, ponuda, ponudaStavke, inv
           )}
           <Field label="Opći popust (%)"><TextInput type="number" min="0" max="100" disabled={!form.prikazi_popust} value={form.popust} onChange={(e) => setForm({ ...form, popust: e.target.value })} /></Field>
           <Field label="PDV (%)"><TextInput type="number" min="0" disabled={form.prijenos} value={form.prijenos ? '0' : form.pdv} onChange={(e) => setForm({ ...form, pdv: e.target.value })} /></Field>
-          <div className="flex flex-col justify-end gap-1 text-sm text-slate-700 md:col-span-2">
+          <div className="flex min-w-0 flex-col justify-end gap-1 text-sm text-slate-700 xl:col-span-2">
             <label className="inline-flex items-center gap-2">
               <input type="checkbox" checked={form.prikazi_popust} onChange={(e) => setForm({ ...form, prikazi_popust: e.target.checked })} />
               Prikaži rabat/popust na ponudi
@@ -318,9 +318,9 @@ export function PonudaEditor({ open, onClose, onSaved, ponuda, ponudaStavke, inv
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200">
-          <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 p-3">
-            <div className="relative min-w-64 flex-1">
+        <div className="min-w-0 rounded-xl border border-slate-200">
+          <div className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 p-3 xl:flex-row xl:flex-wrap xl:items-center">
+            <div className="relative min-w-0 xl:min-w-64 xl:flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Dodaj stavku iz baze (naziv, šifra, vrsta posla)…" className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm" />
               {suggestions.length > 0 && (
@@ -329,7 +329,7 @@ export function PonudaEditor({ open, onClose, onSaved, ponuda, ponudaStavke, inv
                     <li key={s.id}>
                       <button type="button" onClick={() => addFromBase(s)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-sky-50">
                         <ListPlus className="h-4 w-4 text-sky-600" />
-                        <span className="flex-1 truncate">{s.naziv}</span>
+                        <span className="min-w-0 flex-1 truncate">{s.naziv}</span>
                         <span className="text-xs text-slate-400">{s.vrsta_posla}</span>
                         <span className="text-xs font-semibold text-slate-700">{eur(s.cijena)}/{s.jedinica}</span>
                       </button>
@@ -338,7 +338,7 @@ export function PonudaEditor({ open, onClose, onSaved, ponuda, ponudaStavke, inv
                 </ul>
               )}
             </div>
-            <button type="button" onClick={addNew} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            <button type="button" onClick={addNew} className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
               <FilePlus2 className="h-4 w-4" /> Nova stavka
             </button>
           </div>
@@ -347,7 +347,7 @@ export function PonudaEditor({ open, onClose, onSaved, ponuda, ponudaStavke, inv
             <p className="p-6 text-center text-sm text-slate-400">Još nema stavki. Pretraži bazu ili dodaj novu stavku.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[48rem] text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
                     <th className="w-8 px-2 py-2">#</th>
@@ -413,12 +413,12 @@ export function PonudaEditor({ open, onClose, onSaved, ponuda, ponudaStavke, inv
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-x-6 border-t border-slate-200 bg-slate-50 p-3 text-sm md:ml-auto md:w-96">
-            <span className="text-slate-500">Vrijednost radova</span><span className="text-right">{eur(tot.vrijednost)}</span>
-            {form.prikazi_popust && <><span className="text-slate-500">Popust</span><span className="text-right text-red-600">− {eur(tot.popust)}</span></>}
-            <span className="font-semibold text-slate-700">Za platiti</span><span className="text-right font-semibold">{eur(tot.neto)}</span>
-            <span className="text-slate-500">{form.prijenos ? 'PDV' : `PDV ${pn(form.pdv)}%`}</span><span className="text-right">{form.prijenos ? 'prijenos porezne obveze' : eur(tot.pdv)}</span>
-            <span className="font-bold text-slate-900">Ukupno s PDV-om</span><span className="text-right font-bold text-slate-900">{eur(tot.bruto)}</span>
+          <div className="border-t border-slate-200 bg-slate-50 p-3 text-sm xl:ml-auto xl:w-96">
+            <div className="flex min-w-0 items-baseline justify-between gap-x-6"><span className="text-slate-500">Vrijednost radova</span><span className="shrink-0 text-right">{eur(tot.vrijednost)}</span></div>
+            {form.prikazi_popust && <><div className="flex min-w-0 items-baseline justify-between gap-x-6"><span className="text-slate-500">Popust</span><span className="shrink-0 text-right text-red-600">− {eur(tot.popust)}</span></div></>}
+            <div className="flex min-w-0 items-baseline justify-between gap-x-6"><span className="font-semibold text-slate-700">Za platiti</span><span className="shrink-0 text-right font-semibold">{eur(tot.neto)}</span></div>
+            <div className="flex min-w-0 items-baseline justify-between gap-x-6"><span className="text-slate-500">{form.prijenos ? 'PDV' : `PDV ${pn(form.pdv)}%`}</span><span className="shrink-0 text-right">{form.prijenos ? 'prijenos porezne obveze' : eur(tot.pdv)}</span></div>
+            <div className="flex min-w-0 items-baseline justify-between gap-x-6"><span className="font-bold text-slate-900">Ukupno s PDV-om</span><span className="shrink-0 text-right font-bold text-slate-900">{eur(tot.bruto)}</span></div>
           </div>
         </div>
 

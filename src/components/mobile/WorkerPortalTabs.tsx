@@ -82,7 +82,7 @@ export function WorkerScheduleTab({ radnikId }: { radnikId: string | null }) {
   return (
     <div className="space-y-3">
       {objave.length > 1 && (
-        <div className="flex gap-2 overflow-x-auto pb-1">
+        <div className="flex min-w-0 flex-col gap-2 pb-1 xl:flex-row xl:flex-wrap">
           {objave.map((item) => (
             <button key={item.id} type="button" onClick={() => setSelectedDatum(item.datum)} className={`min-h-10 shrink-0 rounded-xl px-3 text-xs font-bold capitalize ${item.datum === objava.datum ? 'bg-sky-700 text-white' : 'bg-white text-slate-600 shadow-sm'}`}>
               {new Date(`${item.datum}T00:00:00`).toLocaleDateString('hr-HR', { weekday: 'short', day: 'numeric', month: 'numeric' })}
@@ -223,7 +223,7 @@ export function WorkerTimeTab() {
           <ChevronRight className="h-5 w-5" />
         </button>
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 gap-2">
         <div className="rounded-2xl bg-slate-900 p-4 text-white">
           <p className="text-2xl font-bold">{total.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} h</p>
           <p className="text-xs text-slate-400">ukupno sati</p>
@@ -234,7 +234,7 @@ export function WorkerTimeTab() {
         </div>
       </div>
       {!loading && !error && kategorije.length > 0 && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 gap-2 2xl:grid-cols-3">
           {kategorije.map((k) => (
             <div key={k.key} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
               <p className="text-lg font-bold text-slate-900">

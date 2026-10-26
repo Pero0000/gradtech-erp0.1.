@@ -32,7 +32,7 @@ export function PozoviKorisnika({ companyId, allowAdmin = false, onInvited }: {
   };
 
   return (
-    <form onSubmit={(event) => void invite(event)} className="space-y-3">
+    <form onSubmit={(event) => void invite(event)} className="min-w-0 max-w-full space-y-3 break-words">
       <Field label="E-mail novog korisnika"><TextInput type="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></Field>
       {allowAdmin && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={admin} onChange={(event) => setAdmin(event.target.checked)} />Administrator ove tvrtke</label>}
       <button disabled={busy} className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Slanje…' : 'Pošalji pozivnicu'}</button>
@@ -99,13 +99,13 @@ export function TvrtkeView() {
   if (!isPlatformOwner) return <p role="alert">Nemate pravo upravljanja tvrtkama.</p>;
 
   return (
-    <section className="space-y-6">
+    <section className="min-w-0 max-w-full space-y-6 break-words">
       <header><h1 className="text-2xl font-bold text-slate-900">Tvrtke</h1><p className="mt-1 text-sm text-slate-600">Otvaranje tvrtki i njihovih administratora. Ovaj ekran ne daje pristup njihovim poslovnim podacima.</p></header>
       {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
       {notice && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">{notice}</p>}
       <form onSubmit={(event) => void create(event)} className="space-y-3 rounded-xl border border-slate-200 bg-white p-5">
         <h2 className="font-semibold">Nova tvrtka</h2>
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
           <Field label="Naziv"><TextInput required value={form.naziv} onChange={(event) => setForm({ ...form, naziv: event.target.value })} /></Field>
           <Field label="OIB"><TextInput required pattern="[0-9]{11}" maxLength={11} value={form.oib} onChange={(event) => setForm({ ...form, oib: event.target.value })} /></Field>
           <Field label="Adresa"><TextInput required value={form.adresa} onChange={(event) => setForm({ ...form, adresa: event.target.value })} /></Field>
@@ -115,7 +115,7 @@ export function TvrtkeView() {
       </form>
       {loading ? <p>Učitavanje tvrtki…</p> : companies.map((item) => (
         <article key={item.id} className="space-y-4 rounded-xl border border-slate-200 bg-white p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:flex-wrap xl:items-center">
             <div><h2 className="font-semibold">{item.naziv}</h2><p className="text-sm text-slate-600">OIB: {item.oib} · {item.adresa}</p><p className="text-sm">{item.aktivna ? 'Aktivna' : 'Neaktivna'}</p></div>
             <button type="button" disabled={busy || company?.id === item.id} onClick={() => void toggle(item)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">{item.aktivna ? 'Deaktiviraj' : 'Aktiviraj'}</button>
           </div>

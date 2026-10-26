@@ -135,17 +135,17 @@ export function Sidebar({ current, onNavigate, mobileOpen, desktopHidden = false
   const { canAccess, isAdmin, isPlatformOwner, company, profile, signOut } = useAuth();
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const sidebarClassName = mobileOpen
-    ? 'fixed inset-y-0 left-0 z-50 flex w-72 shadow-xl'
+    ? 'fixed inset-y-0 left-0 z-50 flex w-72 max-w-[calc(100vw-2rem)] shadow-xl'
     : desktopOverlay
       ? desktopHidden
         ? 'hidden'
         : 'fixed inset-y-0 left-0 z-50 flex w-64 shadow-xl'
       : desktopHidden
-        ? 'hidden lg:hidden 2xl:relative 2xl:flex 2xl:w-64 2xl:shadow-none'
-        : 'hidden lg:sticky lg:top-0 lg:flex lg:w-64 lg:shadow-none';
+        ? 'hidden xl:hidden 2xl:relative 2xl:flex 2xl:w-64 2xl:shadow-none'
+        : 'hidden xl:sticky xl:top-0 xl:flex xl:w-64 xl:shadow-none';
   return (
     <>
-    {mobileOpen && <button type="button" aria-label="Zatvori navigaciju" onClick={onMobileClose} className="fixed inset-0 z-40 bg-slate-950/40 lg:hidden" />}
+    {mobileOpen && <button type="button" aria-label="Zatvori navigaciju" onClick={onMobileClose} className="fixed inset-0 z-40 bg-slate-950/40 xl:hidden" />}
     <aside
       onMouseEnter={desktopOverlay ? onDesktopEnter : undefined}
       onMouseLeave={desktopOverlay ? onDesktopLeave : undefined}
@@ -155,7 +155,7 @@ export function Sidebar({ current, onNavigate, mobileOpen, desktopHidden = false
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-600 text-white">
           <Building2 className="h-6 w-6" />
         </div>
-        <div>
+        <div className="min-w-0 break-words">
           <p className="text-sm font-bold text-slate-900 leading-tight">GradTech</p>
           <p className="text-xs text-slate-500">{company?.naziv}</p>
         </div>

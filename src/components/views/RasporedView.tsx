@@ -878,7 +878,7 @@ export function RasporedView() {
           <h1 className="text-2xl font-bold text-slate-900">Dnevni raspored</h1>
           <p className="mt-1 max-w-4xl text-sm text-slate-500">Gradilište možeš dodati na više vozila. Radnika s vozila na kojem je nalog zaključan povuci s popisa zaposlenika na drugo vozilo da ga tamo dodaš bez micanja s prvog.</p>
         </div>
-        <div className="flex min-w-0 flex-wrap items-center justify-center gap-2 sm:gap-3 2xl:justify-end">
+        <div className="flex min-w-0 flex-col items-stretch justify-center gap-2 sm:gap-3 xl:flex-row xl:flex-wrap xl:items-center 2xl:justify-end">
           <button
             type="button"
             onClick={() => changeDay(-1)}
@@ -887,7 +887,7 @@ export function RasporedView() {
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
-          <div className="min-w-0 flex-1 text-center sm:flex-none sm:min-w-[250px]">
+          <div className="min-w-0 flex-1 text-center xl:flex-none">
             <div className="flex items-center justify-center gap-2">
               <CalendarDays className="h-5 w-5 flex-shrink-0 text-sky-600" />
               <span className="text-sm font-semibold capitalize text-slate-900 sm:text-base">{formatDate(selectedDate)}</span>
@@ -977,7 +977,7 @@ export function RasporedView() {
       )}
 
       {canSendSchedule && rasporedTab === 'posalji' ? (
-        <div className="grid min-w-0 items-start gap-6 2xl:grid-cols-[minmax(0,1fr)_minmax(280px,380px)]">
+        <div className="grid min-w-0 grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,380px)]">
           <section className="min-w-0 space-y-4 rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
             <div>
               <h2 className="text-lg font-semibold capitalize text-slate-900">Raspored za {formatDate(selectedDate)}</h2>
@@ -990,7 +990,7 @@ export function RasporedView() {
                 ? 'Raspored za ovaj dan još nije poslan radnicima.'
                 : `${objavaZastarjela ? 'Raspored je promijenjen nakon slanja — radnici još vide staru verziju. ' : 'Radnici vide ovaj raspored. '}Poslano ${new Date(objava.poslano_at).toLocaleString('hr-HR', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}.`}
             </div>
-            <dl className="grid grid-cols-3 gap-3 text-center">
+            <dl className="grid min-w-0 grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-3 text-center">
               {[
                 { label: 'vozila', value: objavaVozila.length },
                 { label: 'gradilišta', value: objavaVozila.reduce((sum, v) => sum + v.gradilista.length, 0) },
@@ -1019,9 +1019,9 @@ export function RasporedView() {
           </section>
         </div>
       ) : (
-      <div className="grid min-w-0 items-start gap-4 2xl:grid-cols-[minmax(620px,1.35fr)_minmax(0,1.9fr)_minmax(190px,0.4fr)]">
+      <div className="grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] 2xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1.9fr)_minmax(190px,0.4fr)]">
         {/* Gradilišta */}
-        <div>
+        <div className="min-w-0">
           <div className="mb-2 flex flex-wrap gap-1" role="tablist" aria-label="Kategorije gradilišta">
             {categories.map((category) => {
               const count = gradilista.filter((g) => category.statuses.includes(g.status)).length;
@@ -1041,7 +1041,7 @@ export function RasporedView() {
               );
             })}
           </div>
-          <div className="grid grid-cols-1 items-start gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-2 xl:grid-cols-3">
+          <div className="grid min-w-0 grid-cols-1 items-start gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-2 xl:grid-cols-2 2xl:grid-cols-3">
             {columns.map((column, index) => {
               const mode = sortModes[index] ?? 'manual';
               const items = column
@@ -1148,7 +1148,7 @@ export function RasporedView() {
             Nema vozila. Dodajte vozila na tabu Vozila i ona će se pojaviti ovdje kao auti.
           </div>
         ) : (
-          <div className="grid grid-cols-3 items-start gap-2">
+          <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 items-start gap-2">
             {[...vozila].sort((a, b) => b.broj_mjesta - a.broj_mjesta || a.registracija.localeCompare(b.registracija)).map((vozilo) => {
               const carSites = siteAssignments.filter((a) => a.vozilo_id === vozilo.id);
               const carWorkers = workerAssignments.filter((a) => a.vozilo_id === vozilo.id);
@@ -1173,7 +1173,7 @@ export function RasporedView() {
                   title={vehicleLocked ? 'Zaključano zbog potvrđene stavke Ostalo ili zaključenog radnog naloga' : undefined}
                   className={`min-w-0 rounded-lg border-2 p-2 transition-colors ${vehicleLocked ? 'border-emerald-500 bg-emerald-50/60' : dropTarget === target ? 'border-sky-400 bg-sky-50' : 'border-slate-400 bg-slate-200'}`}
                 >
-                  <div className="mb-2 flex items-center gap-1.5">
+                  <div className="mb-2 flex min-w-0 flex-wrap items-center gap-1.5">
                     <span className="w-12 flex-shrink-0 truncate rounded border border-slate-800 bg-white px-1 py-0.5 text-[9px] text-slate-900">AUTO:</span>
                     <span className="min-w-0 flex-1 truncate rounded border border-slate-800 bg-amber-200 px-1 py-0.5 text-center text-xs font-bold uppercase text-slate-900" title={[vozilo.marka, vozilo.model].filter(Boolean).join(' ')}>
                       {[vozilo.marka, vozilo.model].filter(Boolean).join(' ')}
@@ -1202,7 +1202,7 @@ export function RasporedView() {
                             }}
                             className={`min-h-[2.25rem] border-b border-slate-100 pb-0.5 ${nalogLocked ? 'cursor-not-allowed bg-emerald-100' : 'cursor-grab'}`}
                           >
-                            <div className="flex items-start justify-between gap-1">
+                            <div className="flex min-w-0 flex-wrap items-start justify-between gap-1">
                               {isText ? (
                                 <div className={`flex min-w-0 flex-1 items-center gap-1 rounded px-1 ${a.iz_ostalo ? 'bg-pink-50' : ''}`}>
                                   <input
@@ -1358,7 +1358,7 @@ export function RasporedView() {
           </div>
         )}
 
-        <div className="min-w-0 space-y-3">
+        <div className="min-w-0 space-y-3 xl:col-span-2 xl:grid xl:grid-cols-2 xl:items-start xl:gap-4 xl:space-y-0 2xl:col-span-1 2xl:block 2xl:space-y-3">
         {/* Radnici */}
         <aside
           onDragOver={(e) => allowDrop(e, 'panel-radnici')}
@@ -1523,7 +1523,7 @@ export function RasporedView() {
       >
         {nalogForm && (
           <div className="space-y-4">
-            <div className={`flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-xs ${nalogForm.zakljucen_at ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+            <div className={`flex flex-col items-stretch justify-between gap-3 rounded-lg px-3 py-2 text-xs xl:flex-row xl:flex-wrap xl:items-center ${nalogForm.zakljucen_at ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
               <span>
                 {nalogForm.zakljucen_at
                   ? `Zaključen ${new Date(nalogForm.zakljucen_at).toLocaleString('hr-HR')}. Izmjene i dalje možeš spremati.`
@@ -1540,7 +1540,7 @@ export function RasporedView() {
                 </button>
               )}
             </div>
-            <div className="grid gap-x-6 gap-y-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-4 xl:grid-cols-2 2xl:grid-cols-4">
             <div className="space-y-4">
             <Field label="Broj naloga">
               <TextInput value={nalogForm.broj} readOnly className="font-mono bg-slate-50" />
@@ -1564,7 +1564,7 @@ export function RasporedView() {
             <Field label="Opis">
               <Textarea rows={3} value={nalogForm.opis} onChange={(e) => setNalogForm({ ...nalogForm, opis: e.target.value })} placeholder="Detaljan opis zadatka…" />
             </Field>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 gap-4">
               <Field label="Status">
                 <Select value={nalogForm.status} onChange={(e) => setNalogForm({ ...nalogForm, status: e.target.value as NalogStatus })}>
                   <option value="otvoren">Otvoren</option>
@@ -1703,7 +1703,7 @@ export function RasporedView() {
                   ))}
                 </div>
               )}
-              <div className="mt-3 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
+              <div className="mt-3 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 xl:grid-cols-2">
                 {(['materijal', 'alat'] as const).map((tip) => {
                   const isMaterial = tip === 'materijal';
                   const Icon = isMaterial ? Package : Hammer;
@@ -1787,7 +1787,7 @@ export function RasporedView() {
             </div>
             </div>
             {nalogForm.nalogId && (
-              <div className="md:col-span-2 xl:col-span-2">
+              <div className="xl:col-span-2">
                 <NalogIzvrsenje
                   key={nalogForm.nalogId}
                   nalog={{ id: nalogForm.nalogId, gradiliste_id: nalogForm.gradiliste_id || null }}

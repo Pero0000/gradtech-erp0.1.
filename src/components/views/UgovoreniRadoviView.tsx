@@ -125,8 +125,8 @@ export function UgovoreniRadoviView() {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="min-w-0 max-w-full break-words">
+      <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Ugovoreni radovi</h1>
           <p className="text-sm text-slate-500 mt-1">Pratite ugovorene i ostvarene iznose po radovima</p>
@@ -146,8 +146,8 @@ export function UgovoreniRadoviView() {
         </div>
       )}
 
-      <div className="mb-6 flex flex-wrap items-center gap-4">
-        <div className="w-64">
+      <div className="mb-6 flex min-w-0 flex-col gap-4 xl:flex-row xl:flex-wrap xl:items-center">
+        <div className="min-w-0 w-full xl:w-64">
           <Select value={filterGradiliste} onChange={(e) => setFilterGradiliste(e.target.value)}>
             <option value="">Sva gradilišta</option>
             {gradilista.map((g) => (
@@ -157,14 +157,14 @@ export function UgovoreniRadoviView() {
             ))}
           </Select>
         </div>
-        <div className="flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-white">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-white">
           <Euro className="h-5 w-5" />
           <span className="text-sm text-slate-300">Ugovoreno:</span>
           <span className="font-bold">
             {ukupnoUgovoreno.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
           </span>
         </div>
-        <div className="flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-white">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-white">
           <span className="text-sm text-emerald-200">Ostvareno:</span>
           <span className="font-bold">
             {ukupnoOstvareno.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
@@ -197,12 +197,12 @@ export function UgovoreniRadoviView() {
                 key={u.id}
                 className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-md transition-shadow"
               >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
+                <div className="mb-3 flex min-w-0 flex-col items-start justify-between gap-3 xl:flex-row">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
                       <ClipboardCheck className="h-5 w-5" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <h3 className="font-semibold text-slate-900">{u.naziv}</h3>
                       {u.gradilista?.naziv && (
                         <p className="text-sm text-slate-500">{u.gradilista.naziv}</p>
@@ -231,7 +231,7 @@ export function UgovoreniRadoviView() {
                   <Badge variant={si.variant}>{si.label}</Badge>
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
                   <div>
                     <p className="text-xs text-slate-500 mb-1">Ugovoreno</p>
                     <p className="text-lg font-bold text-slate-900">
@@ -317,7 +317,7 @@ export function UgovoreniRadoviView() {
               placeholder="Opis radova…"
             />
           </Field>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Ugovoreni iznos (EUR)">
               <TextInput
                 type="number"

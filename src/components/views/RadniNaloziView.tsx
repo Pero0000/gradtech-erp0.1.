@@ -286,7 +286,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex min-w-0 flex-col items-stretch justify-between gap-3 mb-6 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Radni nalozi</h1>
           <p className="text-sm text-slate-500 mt-1">Pregled i praćenje radnih naloga. Novi nalozi kreiraju se u Dnevnom rasporedu.</p>
@@ -325,7 +325,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
         />
       ) : (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3">
+          <div className="flex min-w-0 flex-col items-stretch gap-2 xl:flex-row xl:flex-wrap xl:items-center rounded-xl border border-slate-200 bg-white p-3">
             {periodOptions.map((p) => (
               <button
                 key={p.key}
@@ -348,7 +348,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as NalogStatus | 'svi')}
-              className="ml-auto rounded-lg border border-slate-300 px-2 py-1 text-xs"
+              className="min-w-0 max-w-full rounded-lg border border-slate-300 px-2 py-1 text-xs xl:ml-auto"
             >
               <option value="svi">Svi statusi</option>
               {(Object.keys(statusInfo) as NalogStatus[]).map((s) => (
@@ -360,7 +360,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Traži broj, naslov, gradilište…"
-              className="w-56 rounded-lg border border-slate-300 px-2 py-1 text-xs"
+              className="min-w-0 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs xl:w-56"
             />
             <span className="text-xs text-slate-400">{filteredItems.length} / {items.length}</span>
           </div>
@@ -368,8 +368,8 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
             <p className="py-8 text-center text-sm text-slate-400">Nema naloga za odabrani filter.</p>
           )}
           {filteredItems.length > 0 && (
-          <div className="grid items-start gap-4 xl:grid-cols-[minmax(380px,0.75fr)_minmax(0,1.6fr)]">
-          <div className="space-y-2">
+          <div className="grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,0.75fr)_minmax(0,1.6fr)]">
+          <div className="min-w-0 space-y-2">
             {filteredItems.map((n) => {
               const nextRok = rokovi.filter((r) => r.nalog_id === n.id && r.status === 'otvoren')[0];
               const active = selected?.id === n.id;
@@ -400,7 +400,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
               );
             })}
           </div>
-          <div>
+          <div className="min-w-0 break-words">
           {selected && (() => {
             const n = selected;
             const si = statusInfo[n.status];
@@ -411,8 +411,8 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                 key={n.id}
                 className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
               >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-start gap-3">
+                <div className="mb-3 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:flex-wrap xl:items-start">
+                  <div className="flex min-w-0 items-start gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
                       <ClipboardList className="h-5 w-5" />
                     </div>
@@ -532,7 +532,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                       onChange={(e) => setRokForm((f) => ({ ...f, naziv: e.target.value }))}
                       onKeyDown={(e) => { if (e.key === 'Enter') void addRok(n); }}
                       placeholder="Naziv roka ili važnog datuma"
-                      className="min-w-[200px] flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                      className="min-w-0 w-full flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm xl:w-auto"
                     />
                     <input
                       type="date"
@@ -545,7 +545,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                       onChange={(e) => setRokForm((f) => ({ ...f, opis: e.target.value }))}
                       onKeyDown={(e) => { if (e.key === 'Enter') void addRok(n); }}
                       placeholder="Napomena (neobavezno)"
-                      className="min-w-[160px] flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                      className="min-w-0 w-full flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm xl:w-auto"
                     />
                     <button
                       onClick={() => void addRok(n)}
@@ -592,7 +592,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
           </>
         }
       >
-        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-2 2xl:grid-cols-4">
         <div className="space-y-4">
           {!editing && (
             <Field label="Broj naloga">
@@ -627,7 +627,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
               placeholder="Detaljan opis zadatka…"
             />
           </Field>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 gap-4">
             <Field label="Status">
               <Select
                 value={form.status}
@@ -689,7 +689,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
           </div>
         </div>
         {editing && (
-          <div className="md:col-span-2 xl:col-span-3">
+          <div className="xl:col-span-1 2xl:col-span-3">
             <NalogIzvrsenje
               key={editing.id}
               nalog={editing}

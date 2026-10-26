@@ -313,14 +313,14 @@ export function InvestitoriView() {
   }
 
   return (
-    <div>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+    <div className="min-w-0 max-w-full">
+      <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-4 xl:flex-row xl:flex-wrap xl:items-end">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Investitori</h1>
           <p className="mt-1 text-sm text-slate-500">Financije po investitoru: fakture, troškovi i rad; filtriranje po datumu dodavanja</p>
         </div>
-        <div className="flex w-full flex-wrap items-end justify-end gap-3 sm:w-auto">
-          <div className="relative w-full sm:w-72">
+        <div className="flex min-w-0 w-full flex-col gap-3 xl:w-auto xl:flex-row xl:flex-wrap xl:items-end xl:justify-end">
+          <div className="relative min-w-0 w-full xl:w-72">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <TextInput
               aria-label="Pretraži investitore"
@@ -361,7 +361,7 @@ export function InvestitoriView() {
         </div>
       </div>
 
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_auto]">
+      <div className="mb-5 grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-[repeat(4,minmax(0,1fr))_auto]">
         <Field label="Godina">
           <Select value={year} onChange={(event) => setYear(event.target.value)}>
             <option value="">Sve godine</option>
@@ -424,7 +424,7 @@ export function InvestitoriView() {
       ) : filtered.length === 0 ? (
         <p className="py-10 text-center text-sm text-slate-500">Nema investitora za zadanu pretragu.</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+        <div className="min-w-0 max-w-full overflow-x-auto rounded-xl border border-slate-200 bg-white">
           <table className="w-full min-w-[72rem]">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
@@ -560,7 +560,7 @@ export function InvestitoriView() {
           <Field label="Adresa">
             <TextInput value={form.adresa} onChange={(event) => setForm({ ...form, adresa: event.target.value })} />
           </Field>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Poštanski broj">
               <TextInput value={form.postanski_broj} onChange={(event) => setForm({ ...form, postanski_broj: event.target.value })} />
             </Field>
@@ -571,7 +571,7 @@ export function InvestitoriView() {
           <Field label="Kontakt osoba">
             <TextInput value={form.kontakt_osoba} onChange={(event) => setForm({ ...form, kontakt_osoba: event.target.value })} />
           </Field>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Telefon">
               <TextInput type="tel" value={form.telefon} onChange={(event) => setForm({ ...form, telefon: event.target.value })} />
             </Field>
@@ -846,14 +846,14 @@ export function ObjektiView() {
   }
 
   return (
-    <div>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+    <div className="min-w-0 max-w-full">
+      <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-4 xl:flex-row xl:flex-wrap xl:items-end">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Objekti</h1>
           <p className="mt-1 text-sm text-slate-500">Gradilišta, termini i naplaćene fakture po objektu</p>
         </div>
-        <div className="flex w-full flex-wrap items-end justify-end gap-3 sm:w-auto">
-          <div className="relative w-full sm:w-72">
+        <div className="flex min-w-0 w-full flex-col gap-3 xl:w-auto xl:flex-row xl:flex-wrap xl:items-end xl:justify-end">
+          <div className="relative min-w-0 w-full xl:w-72">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <TextInput
               aria-label="Pretraži objekte"
@@ -912,7 +912,7 @@ export function ObjektiView() {
       ) : filtered.length === 0 ? (
         <p className="py-10 text-center text-sm text-slate-500">Nema objekata za zadanu pretragu.</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+        <div className="min-w-0 max-w-full overflow-x-auto rounded-xl border border-slate-200 bg-white">
           <table className="w-full min-w-[64rem]">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
@@ -1031,7 +1031,7 @@ export function ObjektiView() {
           <Field label="Adresa">
             <TextInput value={form.adresa} onChange={(event) => setForm({ ...form, adresa: event.target.value })} />
           </Field>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Poštanski broj">
               <TextInput value={form.postanski_broj} onChange={(event) => setForm({ ...form, postanski_broj: event.target.value })} />
             </Field>
@@ -1039,7 +1039,7 @@ export function ObjektiView() {
               <TextInput value={form.mjesto} onChange={(event) => setForm({ ...form, mjesto: event.target.value })} />
             </Field>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Kontakt osoba">
               <TextInput value={form.kontakt_osoba} onChange={(event) => setForm({ ...form, kontakt_osoba: event.target.value })} />
             </Field>

@@ -1,5 +1,13 @@
 # Tm-color
 
+## Responsive raspored
+
+Tailwind prijelomi su `sm` 640 px, `md` 768 px, `lg` 1024 px, `xl` 1280 px i `2xl` 1720 px. Sadržaj koristi jedan stupac ispod 1280 px, dva od 1280 px, a raniji rasporedi s tri ili više stupaca vraćaju se od 1720 px. Navigacijski gumbi nisu sadržajni gridovi. Filtri i akcije slažu se okomito ispod 1280 px; na širim ekranima zadržavaju vodoravni raspored uz prelamanje. Bočna navigacija vidljiva je od 1280 px, osim na ekranima s postojećim automatskim skrivanjem; ispod toga otvara se gumbom iz zaglavlja.
+
+Široke tablice pomiču se unutar vlastitih ograničenih kontejnera, ne cijele stranice. Zajednički modal ima ograničenu visinu prema dinamičkom viewportu, pomični sadržaj i zaseban pomični podnožni dio s akcijama; dugi naslovi prelamaju se. Glavni sadržaj ograničen je na 2560 px na najvećim zaslonima. Nije dodano globalno skrivanje horizontalnog overflowa.
+
+Provjera: `node --test tests/layout.test.mjs`. Za pregled stvarnih komponenti s izoliranim testnim podacima bez pristupa bazi: `node tests/responsive-fixtures.mjs <putanja-do-html-datoteke>`. HTML se može otvoriti u pregledniku i provjeriti na 375, 768, 1280 i 1720 px; svaki korijenski `data-fixture` element predstavlja zaseban ekran (ukloniti mu atribut `hidden` za prikaz). Ovo nije zamjena za provjeru svih korisničkih tokova s produkcijskim podacima.
+
 ## Fotografije gradilišta
 
 U detaljima i pregledu gradilišta sve fotografije radnika dostupne su u predpregledu, bez ograničenja na prvih deset. Galerije prikazuju najviše tri reda odjednom; ostale slike pregledavaju se okomitim pomicanjem unutar galerije. Sličice prikazuju cijelu fotografiju bez rezanja. Klik otvara uvećani pregled s listanjem; svaka fotografija ima gumb **Preuzmi** i na sličici i u uvećanom pregledu. Isto vrijedi za slike dodane izravno na gradilište u odjeljku **Slike**. Postojeće preuzimanje svih fotografija radnika kao ZIP ostaje dostupno.

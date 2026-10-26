@@ -261,13 +261,13 @@ export function TroskoviView() {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="min-w-0 max-w-full">
+      <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Troškovi</h1>
           <p className="text-sm text-slate-500 mt-1">Pratite troškove po gradilištima</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
         <ExportMenu
           disabled={filtered.length === 0}
           build={() => ({
@@ -302,7 +302,7 @@ export function TroskoviView() {
       )}
 
       {/* Pregled */}
-      <div className="mb-4 grid gap-3 lg:grid-cols-[16rem_1fr]">
+      <div className="mb-4 grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-[16rem_minmax(0,1fr)]">
         <div className="rounded-2xl bg-slate-800 p-4 text-white shadow-sm">
           <div className="flex items-center gap-2 text-sm text-slate-300"><Euro className="h-4 w-4" /> Ukupno{hasFilters ? ' (filtrirano)' : ''}</div>
           <p className="mt-1 text-2xl font-bold">{eur(ukupno)}</p>
@@ -330,22 +330,22 @@ export function TroskoviView() {
       </div>
 
       {/* Filteri */}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="relative min-w-56 flex-1">
+      <div className="mb-4 flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
+        <div className="relative min-w-0 xl:min-w-56 xl:flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Traži opis, gradilište, kooperanta…" className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm" />
         </div>
-        <select value={filterGradiliste} onChange={(e) => setFilterGradiliste(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        <select value={filterGradiliste} onChange={(e) => setFilterGradiliste(e.target.value)} className="min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
           <option value="">Sva gradilišta</option>
           {gradilista.map((g) => <option key={g.id} value={g.id}>{g.naziv}</option>)}
         </select>
-        <select value={filterKat} onChange={(e) => setFilterKat(e.target.value as '' | TrosakKategorija)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        <select value={filterKat} onChange={(e) => setFilterKat(e.target.value as '' | TrosakKategorija)} className="min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
           <option value="">Sve kategorije</option>
           {(Object.keys(kategorijaInfo) as TrosakKategorija[]).map((k) => <option key={k} value={k}>{kategorijaInfo[k].label}</option>)}
         </select>
         <input type="date" value={od} onChange={(e) => setOd(e.target.value)} title="Od datuma" className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm" />
         <input type="date" value={doDatuma} onChange={(e) => setDoDatuma(e.target.value)} title="Do datuma" className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm" />
-        <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)} className="min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
           <option value="none">Bez grupiranja</option>
           <option value="gradiliste">Grupiraj po gradilištu</option>
           <option value="kategorija">Grupiraj po kategoriji</option>
@@ -373,7 +373,7 @@ export function TroskoviView() {
           }
         />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="min-w-0 max-w-full overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full min-w-[720px]">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
@@ -509,7 +509,7 @@ export function TroskoviView() {
               placeholder="npr. Cement 50x, Cigla 1000 kom"
             />
           </Field>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Iznos (EUR) *">
               <TextInput
                 type="number"

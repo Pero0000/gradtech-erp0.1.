@@ -29,7 +29,7 @@ function formatSize(bytes: number | null) {
 function SectionBox({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="border-t border-slate-200 py-4">
-      <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
+      <h3 className="mb-3 flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-900">
         <span className="inline-flex items-center gap-2 rounded-md bg-sky-50 px-2.5 py-1.5 text-sky-900">
           <span className="text-sky-700">{icon}</span>
           {title}
@@ -77,7 +77,7 @@ function StavkeList({
           </div>
         ))}
       </div>
-      {onAdd && <div className="mt-2 flex items-center gap-2">
+      {onAdd && <div className="mt-2 flex flex-col gap-2 xl:flex-row xl:items-center">
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -88,13 +88,13 @@ function StavkeList({
             }
           }}
           placeholder={placeholder}
-          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs"
+          className="min-w-0 rounded-lg border border-slate-300 px-3 py-1.5 text-xs xl:flex-1"
         />
         <button
           type="button"
           onClick={submit}
           disabled={!text.trim()}
-          className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+          className="inline-flex items-center justify-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50"
         >
           <Plus className="h-3.5 w-3.5" />
           Dodaj
@@ -212,7 +212,7 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
   return (
     <>
       {error && <p className="my-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-      <div className="grid gap-x-6 md:grid-cols-2">
+      <div className="grid min-w-0 gap-x-6 xl:grid-cols-2">
         <SectionBox title={`Materijal (${materijal.filter((s) => s.gotovo).length}/${materijal.length})`} icon={<Package className="h-4 w-4" />}>
           <StavkeList items={materijal} placeholder="npr. boja bijela 15 l" onAdd={(n) => addStavka('materijal', n)} onToggle={toggleStavka} onRemove={removeStavka} />
         </SectionBox>
@@ -226,7 +226,7 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
       </div>
       <p className="-mt-2 mb-1 text-[11px] text-slate-500">Materijal i alat s oznakom „čeka nalog” automatski ulaze u idući radni nalog ovog gradilišta.</p>
 
-      <div className="grid gap-x-6 md:grid-cols-2">
+      <div className="grid min-w-0 gap-x-6 xl:grid-cols-2">
         <SectionBox title={`Dokumenti (${docs.length})`} icon={<FileText className="h-4 w-4" />}>
           <input ref={docRef} type="file" multiple className="hidden" onChange={(e) => void upload(e.target.files, 'dokument')} />
           <div className="mb-2 space-y-1.5">
@@ -235,8 +235,8 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
               <div key={d.id} className="flex items-center gap-2 rounded-md border border-slate-200 px-2.5 py-1.5 text-xs">
                 <FileText className="h-4 w-4 flex-shrink-0 text-slate-400" />
                 <a href={d.url} target="_blank" rel="noreferrer" download={d.naziv} className="min-w-0 flex-1 truncate text-sky-700 hover:underline">{d.naziv}</a>
-                <span className="text-[10px] text-slate-400">{formatSize(d.velicina)}</span>
-                <button type="button" onClick={() => removeDokument(d)} className="text-slate-300 hover:text-red-600" aria-label="Obriši dokument">
+                <span className="flex-shrink-0 text-[10px] text-slate-400">{formatSize(d.velicina)}</span>
+                <button type="button" onClick={() => removeDokument(d)} className="flex-shrink-0 text-slate-300 hover:text-red-600" aria-label="Obriši dokument">
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
@@ -246,7 +246,7 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
             type="button"
             onClick={() => docRef.current?.click()}
             disabled={uploading}
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex max-w-full items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             <Plus className="h-3.5 w-3.5" />
             {uploading ? 'Učitavanje…' : 'Dodaj dokumente (PDF, Excel, Word…)'}
@@ -256,7 +256,7 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
         <SectionBox title={`Slike (${slike.length})`} icon={<Camera className="h-4 w-4" />}>
           <input ref={imgRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void upload(e.target.files, 'slika')} />
           {slike.length > 0 && (
-            <div className="mb-2 grid max-h-[34rem] auto-rows-[11rem] grid-cols-3 gap-2 overflow-y-auto overscroll-contain" tabIndex={0} role="region" aria-label="Slike gradilišta — pomaknite za ostale slike">
+            <div className="mb-2 grid max-h-[34rem] auto-rows-[11rem] grid-cols-1 gap-2 overflow-y-auto xl:grid-cols-2 2xl:grid-cols-3 overscroll-contain" tabIndex={0} role="region" aria-label="Slike gradilišta — pomaknite za ostale slike">
               {slike.map((d) => (
                 <div key={d.id} className="group relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200">
                   <button type="button" onClick={() => setActivePhotoId(d.id)} className="block min-h-0 w-full flex-1 bg-slate-50" aria-label={`Pregledaj ${d.naziv}`}>
@@ -289,7 +289,7 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
             type="button"
             onClick={() => imgRef.current?.click()}
             disabled={uploading}
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex max-w-full items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             <Plus className="h-3.5 w-3.5" />
             {uploading ? 'Učitavanje…' : 'Dodaj slike'}
@@ -305,11 +305,11 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
         {activePhoto && (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
-              <button type="button" onClick={() => setActivePhotoId(slike[(activePhotoIndex - 1 + slike.length) % slike.length].id)} className="rounded-lg border border-slate-200 p-2 hover:bg-slate-50" aria-label="Prethodna slika">
+              <button type="button" onClick={() => setActivePhotoId(slike[(activePhotoIndex - 1 + slike.length) % slike.length].id)} className="flex-shrink-0 rounded-lg border border-slate-200 p-2 hover:bg-slate-50" aria-label="Prethodna slika">
                 <ChevronLeft className="h-5 w-5" />
               </button>
               <p className="min-w-0 truncate text-sm font-semibold text-slate-900">{activePhoto.naziv}</p>
-              <button type="button" onClick={() => setActivePhotoId(slike[(activePhotoIndex + 1) % slike.length].id)} className="rounded-lg border border-slate-200 p-2 hover:bg-slate-50" aria-label="Sljedeća slika">
+              <button type="button" onClick={() => setActivePhotoId(slike[(activePhotoIndex + 1) % slike.length].id)} className="flex-shrink-0 rounded-lg border border-slate-200 p-2 hover:bg-slate-50" aria-label="Sljedeća slika">
                 <ChevronRight className="h-5 w-5" />
               </button>
             </div>

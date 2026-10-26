@@ -28,7 +28,7 @@ function PasswordRecoveryForm({ onSave }: { onSave: (password: string) => Promis
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8">
-      <form onSubmit={submit} className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+      <form onSubmit={submit} className="min-w-0 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-8">
         <h1 className="text-xl font-bold text-slate-900">Postavljanje nove lozinke</h1>
         <label className="mt-5 block text-sm font-medium text-slate-700">
           Nova lozinka
@@ -79,7 +79,7 @@ function AuthForm() {
   const title = mode === 'login' ? 'Prijava u aplikaciju' : 'Promjena lozinke';
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8">
-      <form onSubmit={submit} className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+      <form onSubmit={submit} className="min-w-0 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-8">
         <div className="mb-6 flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-600 text-white"><Building2 className="h-6 w-6" /></div>
           <div><h1 className="text-xl font-bold text-slate-900">GradTech</h1><p className="text-sm text-slate-500">{title}</p></div>
@@ -99,7 +99,7 @@ function AuthForm() {
         <button type="submit" disabled={busy} className="w-full rounded-lg bg-sky-600 px-4 py-2.5 font-semibold text-white hover:bg-sky-700 disabled:cursor-wait disabled:opacity-60">
           {busy ? 'Molimo pričekajte…' : mode === 'login' ? 'Prijavi se' : 'Pošalji poveznicu'}
         </button>
-        <div className="mt-4 flex flex-wrap justify-between gap-2 text-sm">
+        <div className="mt-4 flex flex-col gap-2 text-sm xl:flex-row xl:flex-wrap xl:justify-between">
           {mode !== 'login' && <button type="button" onClick={() => { setMode('login'); setError(null); setMessage(null); }} className="text-sky-700 hover:underline">Prijava</button>}
           {mode === 'login' && <span className="text-xs text-slate-500">Za novi račun zatražite pozivnicu administratora tvrtke.</span>}
           {mode === 'login' && <button type="button" onClick={() => { setMode('reset'); setError(null); setMessage(null); }} className="text-slate-600 hover:underline">Zaboravljena lozinka?</button>}

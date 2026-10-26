@@ -15,21 +15,22 @@ export function Modal({ open, onClose, title, children, footer, wide, headerSlot
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex min-w-0 items-center justify-center p-2 sm:p-4">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
-      <div className={`relative z-10 w-full ${wide === 'screen' ? 'max-w-[min(96vw,1600px)]' : wide === 'md' ? 'max-w-4xl' : wide ? 'max-w-7xl' : 'max-w-lg'} ${wide === 'screen' ? 'max-h-[96vh]' : 'max-h-[92vh]'} overflow-y-auto rounded-2xl bg-white shadow-2xl`}>
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-          {headerSlotId && <div id={headerSlotId} className="ml-auto mr-3" />}
+      <div role="dialog" aria-modal="true" aria-label={title} className={`relative z-10 flex min-h-0 min-w-0 w-full flex-col ${wide === 'screen' ? 'max-w-[min(96vw,1600px)]' : wide === 'md' ? 'max-w-4xl' : wide ? 'max-w-7xl' : 'max-w-lg'} ${wide === 'screen' ? 'max-h-[96dvh]' : 'max-h-[92dvh]'} rounded-2xl bg-white shadow-2xl`}>
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-3 py-3 sm:px-6 sm:py-4">
+          <h2 className="min-w-0 flex-1 break-words text-lg font-semibold text-slate-900">{title}</h2>
+          {headerSlotId && <div id={headerSlotId} className="order-last flex w-full min-w-0 flex-wrap gap-2 xl:order-none xl:ml-auto xl:mr-3 xl:w-auto" />}
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+            aria-label="Zatvori prozor"
+            className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="px-6 py-5">{children}</div>
-        {footer && <div className="border-t border-slate-200 px-6 py-4 flex justify-end gap-3">{footer}</div>}
+        <div className="min-h-0 min-w-0 overflow-y-auto break-words px-3 py-4 sm:px-6 sm:py-5">{children}</div>
+        {footer && <div className="flex max-h-[35dvh] shrink-0 flex-col gap-3 overflow-y-auto border-t border-slate-200 px-3 py-3 sm:px-6 xl:flex-row xl:flex-wrap xl:justify-end xl:py-4">{footer}</div>}
       </div>
     </div>
   );

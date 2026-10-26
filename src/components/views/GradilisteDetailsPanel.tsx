@@ -116,8 +116,8 @@ function date(value: string | null) {
 function Section({ title, icon, children, action }: { title: string; icon: React.ReactNode; children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <section className="border-t border-slate-200 py-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+      <div className="mb-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+        <h3 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-900">
           <span className="inline-flex items-center gap-2 rounded-md bg-sky-50 px-2.5 py-1.5 text-sky-900">
             <span className="text-sky-700">{icon}</span>
             {title}
@@ -910,14 +910,14 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     zavrseno: 'Završeno',
   }[gradiliste.status];
   return (
-    <aside className="flex min-h-[28rem] min-w-0 flex-col border-l border-slate-200 bg-white lg:sticky lg:top-4 lg:max-h-[calc(100vh-4rem)]">
-      <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-4">
+    <aside className="flex min-h-[28rem] min-w-0 flex-col border-l border-slate-200 bg-white xl:sticky xl:top-4 xl:max-h-[calc(100vh-4rem)]">
+      <header className="flex flex-col gap-3 border-b border-slate-200 px-4 py-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-lg font-semibold text-slate-900">{gradiliste.naziv}</h2>
+            <h2 className="min-w-0 break-words text-lg font-semibold text-slate-900">{gradiliste.naziv}</h2>
             <Badge variant={statusVariant}>{statusLabel}</Badge>
           </div>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 break-words text-xs text-slate-500">
             {[
               gradiliste.objekti?.investitori?.naziv,
               gradiliste.regija ? ({ dalmacija: 'Dalmacija', istra_kvarner: 'Istra i Kvarner', slavonija: 'Slavonija', zagreb_i_okolica: 'Zagreb i okolica', medimurje: 'Međimurje' }[gradiliste.regija]) : null,
@@ -928,7 +928,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
           </p>
           <p className="mt-1 text-xs text-slate-500">Za otvaranje u Exploreru instaliraj pomoćni program iz mape windows-helper.</p>
         </div>
-        <div className="flex flex-shrink-0 items-center gap-1">
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-1">
           <a
             href={`tmcolor-folder://open/${encodeURIComponent(gradiliste.id)}`}
             className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700 hover:bg-sky-100"
@@ -968,10 +968,10 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4">
         <section className="border-b border-slate-200 py-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="mb-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
             <h3 className="text-sm font-semibold text-slate-900">Financije</h3>
             {editingFinancials ? (
-              <div className="flex items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1">
                 <button type="button" onClick={() => setEditingFinancials(false)} className="rounded-md px-2 py-1 text-xs text-slate-600 hover:bg-slate-100">
                   Odustani
                 </button>
@@ -988,7 +988,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
             )}
           </div>
           {editingFinancials ? (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
               <Field label="Osnovna ugovorena ponuda">
                 <TextInput type="number" min="0" step="0.01" value={financialForm.ugovorena_vrijednost} onChange={(event) => setFinancialForm((previous) => ({ ...previous, ugovorena_vrijednost: event.target.value }))} />
               </Field>
@@ -999,7 +999,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
             </div>
           ) : (
             <div className="space-y-2">
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 gap-2 xl:grid-cols-2 2xl:grid-cols-3">
                 <div className="min-w-0 rounded-lg border border-sky-100 bg-sky-50 p-2 sm:p-3">
                   <p className="text-[10px] font-bold uppercase text-sky-800">Ponuda (ugovoreno)</p>
                   <p className="mt-1 break-words text-sm font-bold text-slate-900 sm:text-base">{currency(offer)}</p>
@@ -1095,7 +1095,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               title={`Fotografije radnika (${radniNalogFoto.length})`}
               icon={<Camera className="h-4 w-4" />}
               action={(
-                <div className="flex items-center gap-1">
+                <div className="flex flex-wrap items-center gap-1">
                   <button
                     type="button"
                     onClick={() => setPendingPhotoDelete('all')}
@@ -1131,7 +1131,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               ) : radniNalogFoto.length === 0 ? (
                 <p className="text-xs text-slate-400">Još nema fotografija učitanih na radne naloge ovog gradilišta.</p>
               ) : (
-                <div className="grid max-h-[34rem] auto-rows-[11rem] grid-cols-3 gap-2 overflow-y-auto overscroll-contain sm:grid-cols-5" tabIndex={0} role="region" aria-label="Fotografije radnika — pomaknite za ostale slike">
+                <div className="grid max-h-[34rem] auto-rows-[11rem] grid-cols-1 gap-2 overflow-y-auto overscroll-contain xl:grid-cols-2 2xl:grid-cols-5" tabIndex={0} role="region" aria-label="Fotografije radnika — pomaknite za ostale slike">
                   {sortedRadniNalogFoto.map((foto, index) => (
                     <div
                       key={foto.id}
@@ -1174,7 +1174,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                 </button>
               )}
             >
-              <div className="mb-3 grid grid-cols-2 gap-3">
+              <div className="mb-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
                 <div className="rounded-md border border-sky-100 bg-sky-50 px-2.5 py-2">
                   <p className="text-[10px] font-semibold text-sky-800">Početak gradilišta</p>
                   <p className="mt-0.5 text-xs font-bold text-slate-900">{date(gradiliste.datum_pocetka)}</p>
@@ -1271,26 +1271,26 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                   </div>
                 ))}
               </div>
-              <div className="mt-2 flex items-center gap-2">
+              <div className="mt-2 flex flex-col gap-2 xl:flex-row xl:items-center">
                 <input
                   value={newZadatak[sekcija.vrsta]}
                   onChange={(event) => setNewZadatak((prev) => ({ ...prev, [sekcija.vrsta]: event.target.value }))}
                   onKeyDown={(event) => { if (event.key === 'Enter') void addZadatak(sekcija.vrsta); }}
                   placeholder={sekcija.placeholder}
-                  className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs"
+                  className="min-w-0 rounded-lg border border-slate-300 px-3 py-1.5 text-xs xl:flex-1"
                 />
                 <input
                   type="date"
                   value={newZadatakRok[sekcija.vrsta]}
                   onChange={(event) => setNewZadatakRok((prev) => ({ ...prev, [sekcija.vrsta]: event.target.value }))}
                   title="Rok izvršenja (neobavezno)"
-                  className="w-[8rem] flex-shrink-0 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                  className="w-full flex-shrink-0 rounded-lg border border-slate-300 px-2 py-1.5 text-xs xl:w-[8rem]"
                 />
                 <button
                   type="button"
                   onClick={() => void addZadatak(sekcija.vrsta)}
                   disabled={!newZadatak[sekcija.vrsta].trim()}
-                  className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Dodaj
@@ -1314,7 +1314,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                       title="Otvori radni nalog"
                     >
                       <div className="min-w-0">
-                        <p className="font-medium text-slate-800">{item.broj} · {item.naslov}</p>
+                        <p className="break-words font-medium text-slate-800">{item.broj} · {item.naslov}</p>
                         <p className="text-slate-500">{item.prioritet} · rok {date(item.rok)}</p>
                       </div>
                       <span className="flex-shrink-0 text-slate-500">{item.status.replace('_', ' ')}</span>
@@ -1350,9 +1350,9 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                         aria-expanded={isOpen}
                       >
                         <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 text-slate-400 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
-                        <span className={`flex-1 font-medium ${group.hidden ? 'text-slate-400' : 'text-slate-800'}`}>{group.label}{group.hidden ? ' (skriveno)' : ''}</span>
-                        {group.hint && <span className="text-[11px] text-slate-500">{group.hint}</span>}
-                        <span className="w-24 text-right font-semibold text-slate-900">{currency(group.total)}</span>
+                        <span className={`min-w-0 flex-1 break-words font-medium ${group.hidden ? 'text-slate-400' : 'text-slate-800'}`}>{group.label}{group.hidden ? ' (skriveno)' : ''}</span>
+                        {group.hint && <span className="min-w-0 break-words text-[11px] text-slate-500">{group.hint}</span>}
+                        <span className="w-24 flex-shrink-0 text-right font-semibold text-slate-900">{currency(group.total)}</span>
                       </button>
                       {isOpen && (
                         <div className="space-y-1.5 bg-slate-50 px-3 py-2 pl-8">
@@ -1412,7 +1412,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                 })}
                 <div className="flex items-center gap-2 bg-sky-50 px-3 py-2 text-xs">
                   <span className="flex-1 font-semibold text-sky-900">Ukupno</span>
-                  <span className="w-24 text-right font-bold text-sky-900">{currency(totalCosts)}</span>
+                  <span className="w-24 flex-shrink-0 text-right font-bold text-sky-900">{currency(totalCosts)}</span>
                 </div>
               </div>
             </Section>
@@ -1430,11 +1430,11 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               {contractedWorks.length === 0 ? <p className="text-xs text-slate-400">Nema ugovorenih radova.</p> : (
                 <div className="space-y-2">
                   {contractedWorks.map((item) => (
-                    <div key={item.id} className="flex items-start justify-between gap-3 rounded-md border border-slate-100 px-2 py-1.5 text-xs">
+                    <div key={item.id} className="flex flex-col gap-1 rounded-md border border-slate-100 px-2 py-1.5 text-xs xl:flex-row xl:items-start xl:justify-between xl:gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-1.5">
                           {item.vrsta === 'vtr' && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">VTR</span>}
-                          <span className="text-slate-700">{item.naziv}</span>
+                          <span className="min-w-0 break-words text-slate-700">{item.naziv}</span>
                         </div>
                         {item.opis && <p className="mt-1 whitespace-pre-line text-[10px] text-slate-500">{item.opis}</p>}
                         {item.dokument_putanja && item.dokument_naziv && (
@@ -1481,8 +1481,8 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                 <div className="space-y-2">
                   {invoices.map((item) => (
                     <div key={item.id} className="flex items-center justify-between gap-2 text-xs">
-                      <span className="text-slate-700">{item.broj} · {item.status === 'placena' ? 'Plaćena' : item.status === 'izdana' ? 'Izdana' : 'Neplaćena'}</span>
-                      <span className="text-right">
+                      <span className="min-w-0 break-words text-slate-700">{item.broj} · {item.status === 'placena' ? 'Plaćena' : item.status === 'izdana' ? 'Izdana' : 'Neplaćena'}</span>
+                      <span className="flex-shrink-0 text-right">
                         <span className="block font-medium text-slate-600">{currency(iznosFakture(item))}</span>
                         {item.rabat > 0 && <span className="block text-[10px] text-slate-400">{currency(item.iznos)} + rabat {currency(item.rabat)}</span>}
                       </span>
@@ -1609,7 +1609,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
           <p className="-mt-2 rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-900">
             Ukupna izlazna faktura: <strong>{((Number(invoiceForm.iznos) || 0) + (Number(invoiceForm.rabat) || 0)).toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}</strong>
           </p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
             <Field label="Datum izdavanja">
               <TextInput type="date" value={invoiceForm.datum_izdavanja} onChange={(event) => setInvoiceForm((previous) => ({ ...previous, datum_izdavanja: event.target.value }))} />
             </Field>
@@ -1724,7 +1724,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               <Field label="Opis">
                 <Textarea rows={3} value={vtrForm.opis} onChange={(event) => setVtrForm((previous) => ({ ...previous, opis: event.target.value }))} placeholder="Opis ili stavke rada" />
               </Field>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
                 <Field label="Ugovoreni iznos (EUR)">
                   <TextInput type="number" min="0" step="0.01" value={vtrForm.ugovoreni_iznos} onChange={(event) => setVtrForm((previous) => ({ ...previous, ugovoreni_iznos: event.target.value }))} />
                 </Field>
@@ -1772,7 +1772,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
             </Select>
           </Field>
           {costForm.kategorija === 'kooperanti' && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
               <Field label="Kooperant">
                 <Select value={costForm.kooperant_id} onChange={(event) => setCostForm((previous) => ({ ...previous, kooperant_id: event.target.value }))}>
                   <option value="">— Odaberi —</option>
@@ -1787,7 +1787,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
           <Field label="Opis troška *">
             <TextInput value={costForm.opis} onChange={(event) => setCostForm((previous) => ({ ...previous, opis: event.target.value }))} placeholder="Opis stavke" />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
             <Field label="Iznos (EUR) *">
               <TextInput type="number" min="0" step="0.01" value={costForm.iznos} onChange={(event) => setCostForm((previous) => ({ ...previous, iznos: event.target.value }))} />
             </Field>

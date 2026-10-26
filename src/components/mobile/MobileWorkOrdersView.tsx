@@ -658,15 +658,15 @@ export function MobileWorkOrdersView() {
   };
 
   return (
-    <main className="min-h-[100dvh] bg-slate-100 pb-[env(safe-area-inset-bottom)]">
+    <main className="min-h-[100dvh] min-w-0 bg-slate-100 pb-[env(safe-area-inset-bottom)] [overflow-wrap:anywhere]">
       <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 pt-[max(env(safe-area-inset-top),0.75rem)]">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">
             {company?.naziv}{workerName ? ` · ${workerName}` : ''}
           </p>
           <h1 className="text-lg font-bold text-slate-900">Portal djelatnika</h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex shrink-0 gap-2">
           <button type="button" onClick={() => void refreshOrders().catch((reason: unknown) => setError(errorMessage(reason, 'Osvježavanje nije uspjelo.')))} className="rounded-lg p-2 text-slate-500" aria-label="Osvježi naloge">
             <RefreshCw className="h-5 w-5" />
           </button>
@@ -676,7 +676,7 @@ export function MobileWorkOrdersView() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-xl space-y-4 p-4">
+      <div className="mx-auto min-w-0 w-full max-w-xl space-y-4 p-3 sm:p-4 xl:max-w-4xl">
         {pushError && <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{pushError}</p>}
         {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
         {notice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
@@ -687,7 +687,7 @@ export function MobileWorkOrdersView() {
               <ChevronLeft className="h-5 w-5" /> Svi nalozi
             </button>
             <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 flex-col items-start justify-between gap-3 xl:flex-row">
                 <div className="min-w-0">
                   <p className="font-mono text-xs text-slate-500">{selected.broj}</p>
                   <h2 className="mt-1 text-xl font-bold text-slate-900">{selected.naslov}</h2>
@@ -845,7 +845,7 @@ export function MobileWorkOrdersView() {
                       <ReviewBlock title="Prilozi">
                         {details.dokumenti.length ? details.dokumenti.map((document) => <a key={document.id} href={document.url} target="_blank" rel="noreferrer" className="block min-h-10 py-2 text-sm font-medium text-sky-700 underline">{document.naziv}</a>) : <p className="text-sm text-slate-500">Nema priloženih dokumenata.</p>}
                         {details.foto.length > 0 && (
-                          <div className="mt-2 grid grid-cols-4 gap-2">
+                          <div className="mt-2 grid min-w-0 grid-cols-1 xl:grid-cols-2 2xl:grid-cols-4 gap-2">
                             {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.naziv ?? 'Slika naloga'} className="aspect-square w-full rounded-lg object-cover" /></a>)}
                           </div>
                         )}
@@ -968,7 +968,7 @@ export function MobileWorkOrdersView() {
 
                     <WorkOrderPanel title="Fotografije izvedenog rada" icon={<Camera className="h-5 w-5" />} tone="rose" summary={`${details.foto.length} fotografija`}>
                       {details.foto.length > 0 && (
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-2">
                           {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.naziv ?? 'Fotografija naloga'} className="aspect-square w-full rounded-lg object-cover" /></a>)}
                         </div>
                       )}
@@ -979,7 +979,7 @@ export function MobileWorkOrdersView() {
                               ? `Šaljem fotografije… (preostalo ${selectedPhotoQueue.filter((photo) => photo.status !== 'greska').length})`
                               : 'Neke fotografije nisu poslane.'}
                           </p>
-                          <div className="grid grid-cols-3 gap-2">
+                          <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-2">
                             {selectedPhotoQueue.map((photo) => (
                               <div key={photo.id} className="relative">
                                 <img src={photo.previewUrl} alt="Fotografija u slanju" className={`aspect-square w-full rounded-lg object-cover ${photo.status === 'greska' ? 'opacity-40' : 'opacity-60'}`} />
@@ -1002,7 +1002,7 @@ export function MobileWorkOrdersView() {
                           )}
                         </div>
                       )}
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 gap-2">
                         <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl bg-rose-600 px-3 text-sm font-semibold text-white active:bg-rose-700">
                           <Camera className="h-5 w-5" /> Fotografiraj
                           <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(event) => { queuePhotos(event.target.files); event.currentTarget.value = ''; }} />
@@ -1099,7 +1099,7 @@ export function MobileWorkOrdersView() {
                           return (
                             <div key={worker.radnik_id} className="rounded-xl border border-slate-200 p-3">
                               <p className="font-semibold text-slate-900">{worker.ime} {worker.prezime}</p>
-                              <div className="mt-2 grid grid-cols-2 gap-2">
+                              <div className="mt-2 grid min-w-0 grid-cols-1 xl:grid-cols-2 gap-2">
                                 <label className="block text-sm text-slate-700">Početak
                                   <input
                                     type="time"
@@ -1208,7 +1208,7 @@ export function MobileWorkOrdersView() {
                   {workerName?.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase() ?? 'TC'}
                 </span>
               </div>
-              <div className="mt-5 grid grid-cols-3 gap-2">
+              <div className="mt-5 grid min-w-0 grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-2">
                 {[
                   { value: orders.length, label: 'dodijeljeno' },
                   { value: orders.filter((order) => order.mobile_status === 'u_tijeku').length, label: 'u tijeku' },
@@ -1226,14 +1226,14 @@ export function MobileWorkOrdersView() {
                 Račun još nije povezan s djelatnikom. Zamoli administratora da ga poveže u „Korisnici i prava”.
               </p>
             )}
-            <nav aria-label="Portal djelatnika" className={`grid ${visiblePortalTabs.length === 4 ? 'grid-cols-4' : 'grid-cols-3'} gap-1 rounded-2xl bg-white p-1 shadow-sm`}>
+            <nav aria-label="Portal djelatnika" className="flex min-w-0 flex-wrap gap-1 rounded-2xl bg-white p-1 shadow-sm">
               {visiblePortalTabs.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   onClick={() => setPortalTab(tab.id)}
                   aria-current={portalTab === tab.id ? 'page' : undefined}
-                  className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-bold ${portalTab === tab.id ? 'bg-sky-700 text-white' : 'text-slate-600 active:bg-slate-100'}`}
+                  className={`flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-bold ${portalTab === tab.id ? 'bg-sky-700 text-white' : 'text-slate-600 active:bg-slate-100'}`}
                 >
                   {tab.icon}
                   {tab.label}
@@ -1479,7 +1479,7 @@ function SectionConfirm({
 }) {
   const base = 'inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border-2 px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60';
   return (
-    <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
+    <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 gap-2 border-t border-slate-100 pt-3">
       <button
         type="button"
         disabled={disabled}

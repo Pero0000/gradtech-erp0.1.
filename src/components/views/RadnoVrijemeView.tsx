@@ -157,7 +157,7 @@ export function RadnoVrijemeView() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex min-w-0 flex-col items-stretch justify-between gap-3 mb-6 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Radno vrijeme</h1>
           <p className="text-sm text-slate-500 mt-1">Evidencija radnih sati po radnicima i gradilištima</p>
@@ -180,7 +180,7 @@ export function RadnoVrijemeView() {
       )}
 
       {/* Filter + summary */}
-      <div className="mb-6 flex flex-wrap items-center gap-4">
+      <div className="mb-6 flex min-w-0 flex-col items-stretch gap-4 xl:flex-row xl:flex-wrap xl:items-center">
         <div className="flex items-center gap-2">
           <Calendar className="h-5 w-5 text-slate-400" />
           <input
@@ -221,7 +221,7 @@ export function RadnoVrijemeView() {
           }
         />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="min-w-0 max-w-full overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full min-w-[720px]">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
@@ -327,7 +327,7 @@ export function RadnoVrijemeView() {
               ))}
             </Select>
           </Field>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 gap-4">
             <Field label="Datum">
               <TextInput
                 type="date"

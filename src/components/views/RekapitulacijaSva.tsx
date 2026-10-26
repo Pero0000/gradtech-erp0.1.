@@ -192,19 +192,19 @@ export function RekapitulacijaSva({
         ))}
       </div>
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="mb-6 grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-1 flex items-center gap-2 text-sm text-slate-500"><TrendingDown className="h-4 w-4 text-red-500" /> Ukupni troškovi</div>
-          <p className="text-2xl font-bold text-slate-900">{eur(tot.troskovi)}</p>
+          <p className="break-words text-2xl font-bold text-slate-900">{eur(tot.troskovi)}</p>
           <p className="mt-1 text-xs text-slate-400">Direktni {eur(tot.direktni)} · rad {eur(tot.rad)} ({tot.sati.toFixed(0)}h)</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-1 flex items-center gap-2 text-sm text-slate-500"><Building2 className="h-4 w-4 text-sky-600" /> Ugovoreno</div>
-          <p className="text-2xl font-bold text-slate-900">{eur(tot.ugovoreno)}</p>
+          <p className="break-words text-2xl font-bold text-slate-900">{eur(tot.ugovoreno)}</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-1 flex items-center gap-2 text-sm text-slate-500"><FileText className="h-4 w-4 text-indigo-600" /> Fakture</div>
-          <p className="text-2xl font-bold text-slate-900">{eur(tot.fakture)}</p>
+          <p className="break-words text-2xl font-bold text-slate-900">{eur(tot.fakture)}</p>
           <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-slate-100">
             <div className="bg-emerald-500" style={{ width: `${tot.fakture ? (tot.placeno / tot.fakture) * 100 : 0}%` }} />
           </div>
@@ -212,9 +212,9 @@ export function RekapitulacijaSva({
         </div>
       </div>
 
-      <div className="mb-6 grid gap-6 lg:grid-cols-[1fr_20rem]">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex items-center justify-between">
+      <div className="mb-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h3 className="font-semibold text-slate-900">Troškovi po gradilištu</h3>
             <div className="flex items-center gap-3 text-xs text-slate-500">
               <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-sky-500" /> Troškovi</span>
@@ -225,7 +225,7 @@ export function RekapitulacijaSva({
               {visible.map((r) => (
                 <button key={r.g.id} type="button" onClick={() => onOpen(r.g.id)} className="block w-full text-left">
                   <div className="mb-1 flex justify-between gap-2 text-xs">
-                    <span className="truncate font-medium text-slate-700">{r.g.naziv}</span>
+                    <span className="min-w-0 truncate font-medium text-slate-700">{r.g.naziv}</span>
                     <span className="shrink-0 text-slate-500">{eur(r.troskovi)}</span>
                   </div>
                   <div className="relative h-4 rounded bg-slate-100">
@@ -237,7 +237,7 @@ export function RekapitulacijaSva({
           )}
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="mb-4 font-semibold text-slate-900">Troškovi po kategoriji</h3>
           {katSum === 0 ? <p className="text-sm text-slate-400">Nema troškova.</p> : (
             <>
@@ -250,8 +250,8 @@ export function RekapitulacijaSva({
               <ul className="space-y-1.5 text-xs">
                 {katTot.map(([k, v]) => (
                   <li key={k} className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: kategorijaColor[k] }} />
-                    <span className="flex-1 text-slate-600">{kategorijaLabel[k]}</span>
+                    <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ background: kategorijaColor[k] }} />
+                    <span className="min-w-0 flex-1 break-words text-slate-600">{kategorijaLabel[k]}</span>
                     <span className="font-semibold text-slate-800">{eur(v)}</span>
                     <span className="w-9 text-right text-slate-400">{Math.round((v / katSum) * 100)}%</span>
                   </li>
@@ -279,20 +279,20 @@ export function RekapitulacijaSva({
               return (
                 <tr key={r.g.id} onClick={() => onOpen(r.g.id)} className="cursor-pointer hover:bg-slate-50">
                   <td className="px-4 py-3 text-sm font-medium text-slate-900">
-                    <span className="inline-flex items-center gap-2"><Building2 className="h-4 w-4 text-slate-400" />{r.g.naziv}</span>
+                    <span className="inline-flex min-w-[10rem] items-center gap-2"><Building2 className="h-4 w-4 flex-shrink-0 text-slate-400" />{r.g.naziv}</span>
                   </td>
                   <td className="px-4 py-3"><Badge variant={sb.variant}>{sb.label}</Badge></td>
-                  <td className="px-4 py-3 text-right text-sm text-slate-700">{eur(r.troskovi)}</td>
-                  <td className="px-4 py-3 text-right text-sm text-slate-700">{eur(r.ugovoreno)}</td>
-                  <td className="px-4 py-3 text-right text-sm text-slate-700">{eur(r.fakture)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-slate-700">{eur(r.troskovi)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-slate-700">{eur(r.ugovoreno)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-slate-700">{eur(r.fakture)}</td>
                 </tr>
               );
             })}
             <tr className="bg-slate-50 font-bold">
               <td className="px-4 py-3 text-sm" colSpan={2}>Ukupno</td>
-              <td className="px-4 py-3 text-right text-sm">{eur(tot.troskovi)}</td>
-              <td className="px-4 py-3 text-right text-sm">{eur(tot.ugovoreno)}</td>
-              <td className="px-4 py-3 text-right text-sm">{eur(tot.fakture)}</td>
+              <td className="whitespace-nowrap px-4 py-3 text-right text-sm">{eur(tot.troskovi)}</td>
+              <td className="whitespace-nowrap px-4 py-3 text-right text-sm">{eur(tot.ugovoreno)}</td>
+              <td className="whitespace-nowrap px-4 py-3 text-right text-sm">{eur(tot.fakture)}</td>
             </tr>
           </tbody>
         </table>

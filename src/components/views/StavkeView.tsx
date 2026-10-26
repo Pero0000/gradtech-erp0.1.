@@ -75,8 +75,8 @@ function StavkaDetalji({ stavka, gradilista, onChanged }: { stavka: Stavka; grad
   };
 
   return (
-    <div className="grid gap-4 border-t border-slate-100 bg-slate-50 p-4 lg:grid-cols-2">
-      {error && <p className="rounded bg-red-50 p-2 text-xs text-red-700 lg:col-span-2">{error}</p>}
+    <div className="grid min-w-0 grid-cols-1 gap-4 border-t border-slate-100 bg-slate-50 p-4 xl:grid-cols-2">
+      {error && <p className="rounded bg-red-50 p-2 text-xs text-red-700 xl:col-span-2">{error}</p>}
       <div>
         <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-800"><History className="h-4 w-4" /> Povijest cijene</p>
         {stavka.opis && <p className="mb-2 text-xs text-slate-500">{stavka.opis}</p>}
@@ -85,7 +85,7 @@ function StavkaDetalji({ stavka, gradilista, onChanged }: { stavka: Stavka; grad
         ) : (
           <ul className="divide-y divide-slate-200 text-xs">
             {log.map((l) => (
-              <li key={l.id} className="flex items-center gap-2 py-1.5">
+              <li key={l.id} className="flex min-w-0 flex-wrap items-center gap-2 py-1.5">
                 <span className="w-20 text-slate-400">{dt(l.created_at)}</span>
                 <span className="text-slate-500">{l.stara_cijena != null ? eur(l.stara_cijena) : '—'} → <b className="text-slate-800">{eur(l.nova_cijena)}</b></span>
               </li>
@@ -98,9 +98,9 @@ function StavkaDetalji({ stavka, gradilista, onChanged }: { stavka: Stavka; grad
         ) : (
           <ul className="divide-y divide-slate-200 text-xs">
             {ponudeUses.map((u) => (
-              <li key={u.id} className="flex items-center gap-2 py-1.5">
+              <li key={u.id} className="flex min-w-0 flex-wrap items-center gap-2 py-1.5">
                 <span className="w-14 font-semibold text-slate-700">{u.ponude ? `${u.ponude.redni_broj}/${u.ponude.godina}` : '—'}</span>
-                <span className="flex-1 truncate text-slate-600">{u.ponude?.naslov}</span>
+                <span className="min-w-0 flex-1 truncate text-slate-600">{u.ponude?.naslov}</span>
                 <span className="text-slate-500">{u.kolicina} {u.jedinica} × <b className="text-slate-800">{eur(u.cijena)}</b></span>
                 <span className="text-slate-400">{u.ponude ? dt(u.ponude.datum) : ''}</span>
               </li>
@@ -110,7 +110,7 @@ function StavkaDetalji({ stavka, gradilista, onChanged }: { stavka: Stavka; grad
       </div>
       <div>
         <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-800"><MapPin className="h-4 w-4" /> Gdje je korištena ({uses.length})</p>
-        <div className="mb-2 grid grid-cols-[1fr_4.5rem_5.5rem_auto] items-center gap-2">
+        <div className="mb-2 grid min-w-0 grid-cols-1 items-center gap-2 xl:grid-cols-2 2xl:grid-cols-[minmax(0,1fr)_4.5rem_5.5rem_auto]">
           <Select value={form.gradiliste_id} onChange={(e) => setForm({ ...form, gradiliste_id: e.target.value })}>
             <option value="">Gradilište…</option>
             {gradilista.map((g) => <option key={g.id} value={g.id}>{g.naziv}</option>)}
@@ -124,8 +124,8 @@ function StavkaDetalji({ stavka, gradilista, onChanged }: { stavka: Stavka; grad
         ) : (
           <ul className="divide-y divide-slate-200 text-xs">
             {uses.map((u) => (
-              <li key={u.id} className="flex items-center gap-2 py-1.5">
-                <span className="flex-1 font-medium text-slate-700">{u.gradilista?.naziv ?? 'Gradilište'}</span>
+              <li key={u.id} className="flex min-w-0 flex-wrap items-center gap-2 py-1.5">
+                <span className="min-w-0 flex-1 break-words font-medium text-slate-700">{u.gradilista?.naziv ?? 'Gradilište'}</span>
                 <span className="text-slate-500">{u.kolicina} {stavka.jedinica} × {eur(u.cijena)} = <b className="text-slate-800">{eur(u.kolicina * u.cijena)}</b></span>
                 <span className="text-slate-400">{dt(u.created_at)}</span>
                 <button type="button" onClick={() => void remove(u.id)} className="text-slate-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
@@ -229,13 +229,13 @@ export function StavkeView() {
   if (loading) return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
 
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
+    <div className="min-w-0 max-w-full break-words">
+      <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Troškovničke stavke</h1>
           <p className="mt-1 text-sm text-slate-500">Baza stavki po vrstama poslova za izradu ponuda</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap">
           <ExportMenu
             disabled={grouped.length === 0}
             build={() => ({
@@ -261,12 +261,12 @@ export function StavkeView() {
 
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <div className="relative min-w-60 flex-1">
+      <div className="mb-4 flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap">
+        <div className="relative min-w-0 xl:min-w-60 xl:flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Traži stavku, šifru, vrstu posla…" className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm" />
         </div>
-        <select value={vrsta} onChange={(e) => setVrsta(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        <select value={vrsta} onChange={(e) => setVrsta(e.target.value)} className="min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
           <option value="">Sve vrste poslova</option>
           {vrste.map((v) => <option key={v} value={v}>{v}</option>)}
         </select>
@@ -284,16 +284,16 @@ export function StavkeView() {
                   const open = expanded === s.id;
                   return (
                     <div key={s.id} className="border-b border-slate-100 last:border-0">
-                      <div className="group flex items-center gap-3 px-4 py-3">
-                        <button type="button" onClick={() => setExpanded(open ? null : s.id)} className="flex flex-1 items-center gap-3 text-left">
+                      <div className="group flex min-w-0 flex-wrap items-center gap-3 px-4 py-3">
+                        <button type="button" onClick={() => setExpanded(open ? null : s.id)} className="flex min-w-0 w-full flex-col items-start gap-3 text-left xl:w-auto xl:flex-1 xl:flex-row xl:items-center">
                           {open ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
-                          {s.sifra && <span className="w-20 text-xs font-medium text-slate-400">{s.sifra}</span>}
-                          <span className="flex-1 font-medium text-slate-900">{s.naziv}</span>
+                          {s.sifra && <span className="min-w-0 max-w-full text-xs font-medium text-slate-400 xl:w-20">{s.sifra}</span>}
+                          <span className="min-w-0 flex-1 break-words font-medium text-slate-900">{s.naziv}</span>
                           <span className="text-xs text-slate-400">{counts.get(s.id) ?? 0}× korištena</span>
-                          <span className="w-36 text-right text-sm font-semibold text-slate-800">{eur(s.cijena)} / {s.jedinica}</span>
-                          <span className="w-28 text-right text-xs text-slate-400">{s.cijena_promijenjena_at ? `izmj. ${dt(s.cijena_promijenjena_at)}` : '—'}</span>
+                          <span className="max-w-full text-sm font-semibold text-slate-800 xl:w-36 xl:text-right">{eur(s.cijena)} / {s.jedinica}</span>
+                          <span className="max-w-full text-xs text-slate-400 xl:w-28 xl:text-right">{s.cijena_promijenjena_at ? `izmj. ${dt(s.cijena_promijenjena_at)}` : '—'}</span>
                         </button>
-                        <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                        <div className="flex gap-1 opacity-100 transition-opacity group-hover:opacity-100 xl:opacity-0">
                           <button onClick={() => openForm(s)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-600"><Pencil className="h-4 w-4" /></button>
                           <button onClick={() => setDeleteTarget(s)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
                         </div>
@@ -322,7 +322,7 @@ export function StavkeView() {
         )}
       >
         <div className="space-y-4">
-          <div className="grid grid-cols-[8rem_1fr] gap-3">
+          <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-[8rem_minmax(0,1fr)]">
             <Field label="Šifra"><TextInput value={form.sifra} onChange={(e) => setForm({ ...form, sifra: e.target.value })} /></Field>
             <Field label="Naziv stavke *"><TextInput value={form.naziv} onChange={(e) => setForm({ ...form, naziv: e.target.value })} /></Field>
           </div>
@@ -330,7 +330,7 @@ export function StavkeView() {
             <TextInput list="vrste-poslova" value={form.vrsta_posla} onChange={(e) => setForm({ ...form, vrsta_posla: e.target.value })} placeholder="npr. Gletanje, Bojanje, Fasada" />
             <datalist id="vrste-poslova">{vrste.map((v) => <option key={v} value={v} />)}</datalist>
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
             <Field label="Jedinica mjere">
               <Select value={form.jedinica} onChange={(e) => setForm({ ...form, jedinica: e.target.value })}>
                 {jedinice.map((j) => <option key={j} value={j}>{j}</option>)}

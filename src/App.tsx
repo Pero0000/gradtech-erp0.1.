@@ -163,7 +163,7 @@ function App() {
       <Sidebar
         current={view}
         onNavigate={navigate}
-        mobileOpen={mobileNavOpen && !(autoHideSidebar && hasHoverPointer)}
+        mobileOpen={mobileNavOpen}
         desktopHidden={autoHideSidebar && !hoverSidebarVisible}
         desktopOverlay={autoHideSidebar}
         onDesktopEnter={openHoverSidebar}
@@ -181,17 +181,17 @@ function App() {
           className="fixed inset-y-0 left-0 z-[60] w-3 cursor-pointer"
         />
       )}
-      <main className="min-h-0 min-w-0 flex-1 overflow-auto">
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4 lg:hidden">
-          <div>
+      <main className="min-h-0 min-w-0 max-w-full flex-1 overflow-y-auto">
+        <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4 xl:hidden">
+          <div className="min-w-0 break-words">
             <p className="text-sm font-bold text-slate-900">GradTech · {company?.naziv}</p>
             <p className="text-xs text-slate-500">{MODULES.find((module) => module.id === view)?.label ?? 'Aplikacija'}</p>
           </div>
-          <button type="button" onClick={() => setMobileNavOpen((open) => !open)} aria-label={mobileNavOpen ? 'Zatvori navigaciju' : 'Otvori navigaciju'} aria-expanded={mobileNavOpen} className={`rounded-lg p-2 text-slate-700 hover:bg-slate-100 ${autoHideSidebar ? '[@media(hover:hover)]:hidden' : ''}`}>
+          <button type="button" onClick={() => setMobileNavOpen((open) => !open)} aria-label={mobileNavOpen ? 'Zatvori navigaciju' : 'Otvori navigaciju'} aria-expanded={mobileNavOpen} className="shrink-0 rounded-lg p-2 text-slate-700 hover:bg-slate-100">
             {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
         </header>
-        <div className="mx-auto w-full px-3 py-4 sm:px-4 sm:py-6 lg:px-8 xl:px-10 2xl:px-12 lg:py-8">
+        <div className="mx-auto min-w-0 w-full max-w-[2560px] px-3 py-4 sm:px-4 sm:py-6 xl:px-8 2xl:px-12 xl:py-8">
           {!viewAuthorized && <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">Provjera prava pristupa…</p>}
           {viewAuthorized && module && !canAccess(module, 'edit') && (
             <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

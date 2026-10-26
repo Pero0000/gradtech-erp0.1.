@@ -146,7 +146,7 @@ export function TroskovnikAiImport({ open, onClose, gradilisteId, naziv, ponude,
               className="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-300 p-8 text-slate-500 hover:border-sky-400 hover:text-sky-600"
             >
               <Upload className="h-7 w-7" />
-              <span className="text-sm font-medium">{file ? file.name : 'Odaberi troškovnik (PDF, slika, CSV ili TXT)'}</span>
+              <span className="max-w-full break-words text-sm font-medium">{file ? file.name : 'Odaberi troškovnik (PDF, slika, CSV ili TXT)'}</span>
               <span className="text-xs text-slate-400">do {MAX_FILE_MB} MB · Excel prvo spremi kao PDF ili CSV</span>
             </button>
             <input ref={fileRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.txt,.tsv" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
@@ -154,19 +154,19 @@ export function TroskovnikAiImport({ open, onClose, gradilisteId, naziv, ponude,
           </>
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-3 text-sm">
+            <div className="flex flex-col gap-2 text-sm xl:flex-row xl:flex-wrap xl:items-center xl:gap-3">
               <span className="text-slate-600">Spremi u:</span>
-              <div className="w-72">
+              <div className="w-full min-w-0 xl:w-72">
                 <Select value={target} onChange={(e) => setTarget(e.target.value)}>
                   <option value="new">Nova ponuda / troškovnik</option>
                   {ponude.map((p) => <option key={p.ponuda.id} value={p.ponuda.id}>Dodaj u {p.ponuda.redni_broj}/{p.ponuda.godina} · {p.ponuda.naslov}</option>)}
                 </Select>
               </div>
-              <span className="ml-auto text-slate-500">Vrijednost: <b className="text-slate-800">{eur(total)}</b></span>
+              <span className="text-slate-500 xl:ml-auto">Vrijednost: <b className="text-slate-800">{eur(total)}</b></span>
             </div>
             <p className="text-xs text-slate-400">Cijene koje nisu u dokumentu su 0; ispuni ih ili ih kasnije uredi u tabu Ponude.</p>
             <div className="max-h-[50vh] overflow-auto rounded-xl border border-slate-200">
-              <table className="w-full text-xs">
+              <table className="w-full min-w-[40rem] text-xs">
                 <thead className="sticky top-0 bg-slate-50 text-left uppercase text-slate-500">
                   <tr>
                     <th className="px-2 py-2">Grupa</th><th className="px-2 py-2">Opis</th><th className="px-2 py-2 w-16">Jed.</th>

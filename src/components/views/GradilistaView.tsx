@@ -499,12 +499,12 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-6 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Gradilišta</h1>
           <p className="text-sm text-slate-500 mt-1">Upravljajte svim gradilištima firme</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <ExportMenu
             disabled={items.length === 0}
             build={() => ({
@@ -575,17 +575,17 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
           }
         />
       ) : (
-        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
+        <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
           <div className="min-w-0">
           {activeCategory === 'arhiva' ? (
             <div className="space-y-3">
-              <div className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 xl:grid-cols-2 2xl:grid-cols-3">
                 <TextInput
                   aria-label="Pretraži arhivu"
                   value={archiveFilter.query}
                   onChange={(event) => setArchiveFilter((f) => ({ ...f, query: event.target.value }))}
                   placeholder="Pretraži naziv, adresu, napomenu…"
-                  className="sm:col-span-2 xl:col-span-3"
+                  className="xl:col-span-2 2xl:col-span-3"
                 />
                 <Select
                   aria-label="Investitor"
@@ -619,15 +619,15 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                   <option value="datum_zavrsetka">Krajnji rok</option>
                   <option value="datum_pocetka">Početni rok</option>
                 </Select>
-                <label className="flex items-center gap-2 text-xs text-slate-500">
+                <label className="flex min-w-0 items-center gap-2 text-xs text-slate-500">
                   Od
-                  <TextInput type="date" value={archiveFilter.dateFrom} onChange={(event) => setArchiveFilter((f) => ({ ...f, dateFrom: event.target.value }))} />
+                  <TextInput type="date" className="min-w-0" value={archiveFilter.dateFrom} onChange={(event) => setArchiveFilter((f) => ({ ...f, dateFrom: event.target.value }))} />
                 </label>
-                <label className="flex items-center gap-2 text-xs text-slate-500">
+                <label className="flex min-w-0 items-center gap-2 text-xs text-slate-500">
                   Do
-                  <TextInput type="date" value={archiveFilter.dateTo} onChange={(event) => setArchiveFilter((f) => ({ ...f, dateTo: event.target.value }))} />
+                  <TextInput type="date" className="min-w-0" value={archiveFilter.dateTo} onChange={(event) => setArchiveFilter((f) => ({ ...f, dateTo: event.target.value }))} />
                 </label>
-                <div className="flex items-center justify-between gap-2 sm:col-span-2 xl:col-span-3">
+                <div className="flex items-center justify-between gap-2 xl:col-span-2 2xl:col-span-3">
                   <span className="text-xs text-slate-500">Prikazano {archiveItems.length} od {visibleItems.length}</span>
                   {archiveFilterActive && (
                     <button type="button" onClick={() => setArchiveFilter(emptyArchiveFilter)} className="text-xs font-medium text-sky-700 hover:text-sky-900">
@@ -709,7 +709,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
           {visibleItems.length === 0 && (
             <p className="mb-3 text-sm text-slate-500">Nema gradilišta u kategoriji {gradilisteCategories.find((category) => category.key === activeCategory)?.label.toLocaleLowerCase()}.</p>
           )}
-          <div className="grid items-start gap-4 md:grid-cols-3">
+          <div className="grid items-start gap-4 xl:grid-cols-2 2xl:grid-cols-3">
           {[0, 1, 2].map((columnIndex) => {
             const column = columnIds[columnIndex] ?? [];
             const columnItems = column
@@ -741,7 +741,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                   setDropTargetId(null);
                 }}
                 onDrop={(event) => handleDrop(event, columnIndex)}
-                className={`min-h-72 space-y-3 rounded-xl border border-dashed p-3 transition-colors ${dropTargetColumn === columnIndex && !dropTargetId ? 'border-sky-400 bg-sky-50/70' : 'border-slate-200 bg-slate-50/50'}`}
+                className={`min-h-72 min-w-0 space-y-3 rounded-xl border border-dashed p-3 transition-colors ${dropTargetColumn === columnIndex && !dropTargetId ? 'border-sky-400 bg-sky-50/70' : 'border-slate-200 bg-slate-50/50'}`}
               >
                 <div className="space-y-2 px-1 pb-1">
                   <div className="flex items-center justify-between">
@@ -850,7 +850,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                 })()}
 
                 {(g.datum_pocetka || g.datum_zavrsetka) && (
-                  <div className="mt-2 grid grid-cols-2 gap-2 border-t border-slate-100 pt-2">
+                  <div className="mt-2 grid grid-cols-1 gap-2 border-t border-slate-100 pt-2 xl:grid-cols-2">
                     {g.datum_pocetka && (
                       <div className="flex min-w-0 items-start gap-1.5">
                         <Calendar className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-sky-600" />
@@ -915,7 +915,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
             />
           )}
           {!selectedGradiliste && (
-            <div className="hidden min-h-72 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-sm text-slate-400 lg:flex">
+            <div className="hidden min-h-72 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-sm text-slate-400 xl:flex">
               Odaberite gradilište za prikaz detalja.
             </div>
           )}
@@ -950,7 +950,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
             {error}
           </div>
         )}
-        <div className="grid gap-x-6 gap-y-4 md:grid-cols-2">
+        <div className="grid gap-x-6 gap-y-4 xl:grid-cols-2">
           <Field label="Vrsta gradilišta *">
             <Select value={targetColumn} onChange={(event) => setTargetColumn(event.target.value)}>
               <option value="">Odaberi vrstu gradilišta</option>
@@ -1043,6 +1043,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                   </Select>
                   <div className="flex gap-2">
                     <TextInput
+                      className="min-w-0"
                       value={newInvestorName}
                       onChange={(e) => setNewInvestorName(e.target.value)}
                       placeholder="Naziv novog investitora"
@@ -1083,6 +1084,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
               {objectMode === 'manual' ? (
                 <div className="flex gap-2">
                   <TextInput
+                    className="min-w-0"
                     value={form.objektNaziv}
                     onChange={(e) => setForm((prev) => ({ ...prev, objektNaziv: e.target.value, objektId: '' }))}
                     placeholder="Naziv objekta"
@@ -1109,6 +1111,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                   </Select>
                   <div className="flex gap-2">
                     <TextInput
+                      className="min-w-0"
                       value={newObjectName}
                       onChange={(e) => setNewObjectName(e.target.value)}
                       placeholder="Naziv novog objekta"
@@ -1138,7 +1141,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
               <option value="zavrseno">Završeno</option>
             </Select>
           </Field>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Datum početka">
               <TextInput
                 type="date"
@@ -1165,10 +1168,10 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
           {!editing && ([['zadatak', 'Radni zadaci', 'Novi radni zadatak…'], ['dodatni', 'Dodatni radovi', 'Novi dodatni rad…']] as const).map(([vrsta, naslov, placeholder]) => {
             const lista = newZadaci.map((z, index) => ({ z, index })).filter(({ z }) => z.vrsta === vrsta);
             return (
-            <div key={vrsta} className="md:col-span-2">
+            <div key={vrsta} className="xl:col-span-2">
               <p className="mb-1 text-sm font-medium text-slate-700">{naslov}</p>
               {lista.length > 0 && (
-                <div className="mb-2 grid gap-1.5 md:grid-cols-2">
+                <div className="mb-2 grid gap-1.5 xl:grid-cols-2">
                   {lista.map(({ z, index }) => (
                     <div key={`${z.naziv}-${index}`} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
                       <span className="min-w-0 flex-1 truncate">{z.naziv}</span>
@@ -1185,8 +1188,8 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                   ))}
                 </div>
               )}
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="min-w-[12rem] flex-1">
+              <div className="flex flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
+                <div className="min-w-0 xl:min-w-[12rem] xl:flex-1">
                   <TextInput
                     value={zadatakNaziv[vrsta]}
                     onChange={(e) => setZadatakNaziv((prev) => ({ ...prev, [vrsta]: e.target.value }))}
@@ -1194,14 +1197,14 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                     placeholder={placeholder}
                   />
                 </div>
-                <div className="w-40">
+                <div className="w-full xl:w-40">
                   <TextInput type="date" value={zadatakRok[vrsta]} onChange={(e) => setZadatakRok((prev) => ({ ...prev, [vrsta]: e.target.value }))} title="Rok (neobavezno)" />
                 </div>
                 <button
                   type="button"
                   onClick={() => addNewZadatak(vrsta)}
                   disabled={!zadatakNaziv[vrsta].trim()}
-                  className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Dodaj

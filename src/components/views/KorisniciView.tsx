@@ -141,7 +141,7 @@ export function KorisniciView() {
   };
 
   return (
-    <section className="space-y-5">
+    <section className="min-w-0 max-w-full space-y-5 break-words">
       <header>
         <h1 className="text-2xl font-bold text-slate-900">Korisnici i prava</h1>
         <p className="mt-1 text-sm text-slate-600">Odobrite registracije i postavite zasebna prava pregleda i uređivanja za svaki modul.</p>
@@ -162,8 +162,8 @@ export function KorisniciView() {
           {users.map((user) => {
             const isCurrentUser = user.id === currentProfile?.id;
             return (
-              <article key={user.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4">
+              <article key={user.id} className="min-w-0 max-w-full break-words rounded-xl border border-slate-200 bg-white">
+                <div className="flex min-w-0 flex-col items-stretch justify-between gap-3 border-b border-slate-200 p-4 xl:flex-row xl:flex-wrap xl:items-center">
                   <div>
                     <h2 className="font-semibold text-slate-900">{user.email}</h2>
                     <p className="mt-1 text-xs text-slate-500">{user.is_admin ? 'Administrator' : !user.approved ? 'Čeka odobrenje' : user.is_voditelj || user.is_platform_owner ? 'Voditelj · ERP moduli' : 'Radnik · Portal djelatnika'}{isCurrentUser ? ' · Vaš račun' : ''}</p>
@@ -223,7 +223,7 @@ export function KorisniciView() {
                           {' · '}Uređivanje: {MODULES.filter(({ id }) => user.permissions[id].can_edit).length}/{MODULES.length}
                         </span>
                       </summary>
-                    <div className="overflow-x-auto">
+                    <div className="min-w-0 max-w-full overflow-x-auto">
                       <table className="w-full min-w-[600px] text-sm">
                         <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                           <tr><th className="px-4 py-2.5 font-semibold">Modul</th><th className="px-4 py-2.5 text-center font-semibold">Pregled</th><th className="px-4 py-2.5 text-center font-semibold">Uređivanje</th></tr>

@@ -219,14 +219,14 @@ export function VozilaView() {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="min-w-0 max-w-full break-words">
+      <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Vozila</h1>
           <p className="text-sm text-slate-500 mt-1">Upravljajte vozilnim parkom firme</p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+        <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
+          <div className="inline-flex self-start rounded-lg border border-slate-200 bg-white p-0.5">
             <button type="button" onClick={() => setView('kartice')} className={`rounded-md p-2 ${prikaz === 'kartice' ? 'bg-sky-100 text-sky-700' : 'text-slate-500 hover:bg-slate-50'}`} title="Kartice"><LayoutGrid className="h-4 w-4" /></button>
             <button type="button" onClick={() => setView('tablica')} className={`rounded-md p-2 ${prikaz === 'tablica' ? 'bg-sky-100 text-sky-700' : 'text-slate-500 hover:bg-slate-50'}`} title="Tablica"><Table2 className="h-4 w-4" /></button>
           </div>
@@ -280,7 +280,7 @@ export function VozilaView() {
           }
         />
       ) : prikaz === 'tablica' ? (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="min-w-0 max-w-full overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -338,20 +338,20 @@ export function VozilaView() {
           </table>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
           {sortedItems.map((v) => {
             const sb = statusBadge[v.status];
             return (
               <div
                 key={v.id}
-                className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-md transition-shadow"
+                className="group min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-md transition-shadow"
               >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
+                <div className="mb-3 flex min-w-0 flex-col items-start justify-between gap-3 xl:flex-row">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
                       <Truck className="h-5 w-5" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <h3 className="font-semibold text-slate-900 leading-tight">{v.marka} {v.model}</h3>
                     </div>
                   </div>
@@ -449,7 +449,7 @@ export function VozilaView() {
         }
       >
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Registracija *">
               <TextInput
                 value={form.registracija}
@@ -472,7 +472,7 @@ export function VozilaView() {
               placeholder="npr. Actros"
             />
           </Field>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Tip">
               <Select
                 value={form.tip}
@@ -495,7 +495,7 @@ export function VozilaView() {
               </Select>
             </Field>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Kilometraža (km)">
               <TextInput
                 type="number"
@@ -525,7 +525,7 @@ export function VozilaView() {
               placeholder="2"
             />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
             <Field label="Nosivost (kg)">
               <TextInput type="number" min="0" value={form.nosivost_kg} onChange={(e) => setForm({ ...form, nosivost_kg: e.target.value })} placeholder="1000" />
             </Field>
@@ -560,7 +560,7 @@ export function VozilaView() {
           </Field>
           <div className="rounded-lg border border-slate-200 p-3">
             <p className="mb-2 text-sm font-medium text-slate-700">Upozorenje za servis</p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
               <Field label="Servis svakih (km)">
                 <TextInput type="number" min="0" value={form.servis_interval_km} onChange={(e) => setForm({ ...form, servis_interval_km: e.target.value })} placeholder="npr. 15000" />
               </Field>

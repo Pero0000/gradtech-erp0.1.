@@ -341,7 +341,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
           ))}
         </div>
         <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-2">
             <Select value={documentForm.vrsta} onChange={(event) => setDocumentForm((previous) => ({ ...previous, vrsta: event.target.value as OpremaDokumentVrsta }))}>
               {Object.entries(documentLabels).map(([key, value]) => <option key={key} value={key}>{value}</option>)}
             </Select>
@@ -370,14 +370,14 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
   if (loading) return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
 
   return (
-    <div>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+    <div className="min-w-0 max-w-full break-words">
+      <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:flex-wrap xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">{label}</h1>
           <p className="mt-1 text-sm text-slate-500">Evidencija {label.toLocaleLowerCase()}, lokacije, stanja, nabave, servisa i rokova</p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+        <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
+          <div className="inline-flex self-start rounded-lg border border-slate-200 bg-white p-0.5">
             <button type="button" onClick={() => setView('cards')} className={`rounded-md p-2 ${view === 'cards' ? 'bg-sky-100 text-sky-700' : 'text-slate-500 hover:bg-slate-50'}`} title="Kartice"><LayoutGrid className="h-4 w-4" /></button>
             <button type="button" onClick={() => setView('table')} className={`rounded-md p-2 ${view === 'table' ? 'bg-sky-100 text-sky-700' : 'text-slate-500 hover:bg-slate-50'}`} title="Tablica"><Table2 className="h-4 w-4" /></button>
           </div>
@@ -409,7 +409,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
       </div>
 
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-      <div className="mb-4 flex items-center gap-3">
+      <div className="mb-4 flex min-w-0 flex-col items-stretch gap-3 xl:flex-row xl:items-center">
         <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Pretraži ${label.toLocaleLowerCase()}…`} className="max-w-md" />
         <span className="text-xs text-slate-500">{visibleItems.length} / {items.length} zapisa</span>
       </div>
@@ -424,7 +424,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
       ) : visibleItems.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-500">Nema rezultata za traženi pojam.</p>
       ) : view === 'table' ? (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="min-w-0 max-w-full overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
               <th className="px-4 py-3">Naziv</th><th className="px-4 py-3">Broj</th><th className="px-4 py-3">Status / stanje</th><th className="px-4 py-3">Gradilište</th><th className="px-4 py-3 text-right">Količina</th>
@@ -455,12 +455,12 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
           {visibleItems.map((item) => renderDetails(item))}
         </div>
       ) : (
-        <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-2 2xl:grid-cols-3">
           {visibleItems.map((item) => {
             const itemDocuments = documents[item.id] ?? [];
             const alert = itemServiceAlert(item, itemDocuments);
             return (
-              <article key={item.id} className={`rounded-2xl border bg-white p-4 shadow-sm transition-shadow hover:shadow-md ${expandedId === item.id ? 'border-sky-300 ring-1 ring-sky-100 md:col-span-2 xl:col-span-3' : 'border-slate-200'}`}>
+              <article key={item.id} className={`min-w-0 rounded-2xl border bg-white p-4 shadow-sm transition-shadow hover:shadow-md ${expandedId === item.id ? 'border-sky-300 ring-1 ring-sky-100 xl:col-span-2 2xl:col-span-3' : 'border-slate-200'}`}>
                 <div className="flex items-start justify-between gap-2">
                   <button type="button" onClick={() => void toggleDetails(item)} className="flex min-w-0 items-center gap-3 text-left">
                     <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-700"><Icon className="h-5 w-5" /></span>
@@ -472,7 +472,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2"><Badge variant={statusVariants[item.status]}>{statusLabels[item.status]}</Badge><Badge variant={item.stanje === 'osteceno' ? 'red' : item.stanje === 'novo' ? 'blue' : 'gray'}>{conditionLabels[item.stanje]}</Badge></div>
-                <div className="mt-3 grid gap-2 text-xs text-slate-500 sm:grid-cols-2">
+                <div className="mt-3 grid min-w-0 grid-cols-1 gap-2 text-xs text-slate-500 xl:grid-cols-2">
                   <span>{item.inventarski_broj ? `Inv. ${item.inventarski_broj}` : item.serijski_broj ? `Ser. ${item.serijski_broj}` : 'Bez inventarskog broja'}</span>
                   <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{item.gradilista?.naziv ?? 'Skladište'}</span>
                   <span>Količina: {item.kolicina.toLocaleString('hr-HR')}</span>
@@ -505,7 +505,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
       >
         {error && <p className="mb-3 rounded-md bg-red-50 p-2 text-xs text-red-700">{error}</p>}
         <div className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
             <Field label="Naziv *"><TextInput value={form.naziv} onChange={(event) => setForm((previous) => ({ ...previous, naziv: event.target.value }))} placeholder={kategorija === 'alat' ? 'npr. Bušilica' : 'npr. Mini bager'} /></Field>
             <Field label="Marka"><TextInput value={form.marka} onChange={(event) => setForm((previous) => ({ ...previous, marka: event.target.value }))} /></Field>
             <Field label="Model"><TextInput value={form.model} onChange={(event) => setForm((previous) => ({ ...previous, model: event.target.value }))} /></Field>

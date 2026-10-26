@@ -131,13 +131,13 @@ export function KooperantiView() {
   const grandTotal = troskovi.filter((t) => t.kooperant_id).reduce((sum, t) => sum + t.iznos, 0);
 
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
+    <div className="min-w-0 max-w-full break-words">
+      <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Kooperanti</h1>
           <p className="mt-1 text-sm text-slate-500">Baza kooperanata i njihovi troškovi po gradilištima · ukupno {eur(grandTotal)}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
           <ExportMenu
             disabled={filtered.length === 0}
             build={() => ({
@@ -192,7 +192,7 @@ export function KooperantiView() {
             const open = expanded === k.id;
             return (
               <div key={k.id} className="rounded-xl border border-slate-200 bg-white shadow-sm">
-                <div className="flex items-center gap-3 p-4">
+                <div className="flex min-w-0 flex-wrap items-center gap-3 p-4">
                   <button type="button" onClick={() => setExpanded(open ? null : k.id)} className="text-slate-400 hover:text-slate-700">
                     {open ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
                   </button>
@@ -217,13 +217,13 @@ export function KooperantiView() {
                       <div className="space-y-3">
                         {[...perSite.values()].map((site) => (
                           <div key={site.naziv}>
-                            <div className="flex justify-between text-sm font-semibold text-slate-800">
+                            <div className="flex flex-wrap justify-between gap-2 text-sm font-semibold text-slate-800">
                               <span>{site.naziv}</span>
                               <span>{eur(site.total)}</span>
                             </div>
                             <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
                               {site.rows.map((t) => (
-                                <li key={t.id} className="flex justify-between">
+                                <li key={t.id} className="flex flex-wrap justify-between gap-2">
                                   <span>{new Date(`${t.datum}T00:00:00`).toLocaleDateString('hr-HR')} · {t.opis}</span>
                                   <span>{eur(t.iznos)}</span>
                                 </li>
@@ -254,19 +254,19 @@ export function KooperantiView() {
           </>
         )}
       >
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2"><Field label="Naziv *"><TextInput value={form.naziv} onChange={set('naziv')} /></Field></div>
+        <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
+          <div className="min-w-0 xl:col-span-2"><Field label="Naziv *"><TextInput value={form.naziv} onChange={set('naziv')} /></Field></div>
           <Field label="Djelatnost"><TextInput value={form.djelatnost} onChange={set('djelatnost')} placeholder="npr. elektro, vodoinstalacije" /></Field>
           <Field label="OIB"><TextInput value={form.oib} onChange={set('oib')} /></Field>
-          <div className="col-span-2"><Field label="IBAN"><TextInput value={form.iban} onChange={set('iban')} /></Field></div>
-          <div className="col-span-2"><Field label="Adresa"><TextInput value={form.adresa} onChange={set('adresa')} /></Field></div>
+          <div className="min-w-0 xl:col-span-2"><Field label="IBAN"><TextInput value={form.iban} onChange={set('iban')} /></Field></div>
+          <div className="min-w-0 xl:col-span-2"><Field label="Adresa"><TextInput value={form.adresa} onChange={set('adresa')} /></Field></div>
           <Field label="Mjesto"><TextInput value={form.mjesto} onChange={set('mjesto')} /></Field>
           <Field label="Poštanski broj"><TextInput value={form.postanski_broj} onChange={set('postanski_broj')} /></Field>
           <Field label="Kontakt osoba"><TextInput value={form.kontakt_osoba} onChange={set('kontakt_osoba')} /></Field>
           <Field label="Telefon"><TextInput value={form.telefon} onChange={set('telefon')} /></Field>
           <Field label="Email"><TextInput value={form.email} onChange={set('email')} /></Field>
           <Field label="Web"><TextInput value={form.web} onChange={set('web')} /></Field>
-          <div className="col-span-2"><Field label="Napomena"><Textarea value={form.napomena} onChange={set('napomena')} rows={3} /></Field></div>
+          <div className="min-w-0 xl:col-span-2"><Field label="Napomena"><Textarea value={form.napomena} onChange={set('napomena')} rows={3} /></Field></div>
         </div>
       </Modal>
 

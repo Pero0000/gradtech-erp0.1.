@@ -280,13 +280,13 @@ export function FaktureView() {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="min-w-0 max-w-full break-words">
+      <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Fakture</h1>
           <p className="text-sm text-slate-500 mt-1">Izdane fakture po gradilištima</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
           <ExportMenu
             disabled={sortedItems.length === 0}
             build={() => ({
@@ -324,20 +324,20 @@ export function FaktureView() {
         </div>
       )}
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="relative min-w-56 flex-1">
+      <div className="mb-4 flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
+        <div className="relative min-w-0 xl:min-w-56 xl:flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Traži broj, kupca ili gradilište…" className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm" />
         </div>
-        <select value={filterInvestitor} onChange={(event) => setFilterInvestitor(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        <select value={filterInvestitor} onChange={(event) => setFilterInvestitor(event.target.value)} className="min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
           <option value="">Svi investitori</option>
           {investitori.map((investitor) => <option key={investitor.id} value={investitor.id}>{investitor.naziv}</option>)}
         </select>
-        <select value={filterGradiliste} onChange={(event) => setFilterGradiliste(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        <select value={filterGradiliste} onChange={(event) => setFilterGradiliste(event.target.value)} className="min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
           <option value="">Sva gradilišta</option>
           {gradilista.map((g) => <option key={g.id} value={g.id}>{g.naziv}</option>)}
         </select>
-        <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value as '' | FakturaStatus)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value as '' | FakturaStatus)} className="min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
           <option value="">Svi statusi</option>
           {Object.entries(statusInfo).map(([value, info]) => <option key={value} value={value}>{info.label}</option>)}
         </select>
@@ -346,15 +346,15 @@ export function FaktureView() {
         {hasFilters && <button type="button" onClick={resetFilters} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-2 text-sm text-slate-500 hover:bg-slate-100"><X className="h-4 w-4" /> Očisti</button>}
       </div>
 
-      <div className="mb-6 flex flex-wrap items-center gap-4">
-        <div className="flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-white">
+      <div className="mb-6 flex min-w-0 flex-col gap-4 xl:flex-row xl:flex-wrap xl:items-center">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-white">
           <Euro className="h-5 w-5" />
           <span className="text-sm text-slate-300">Ukupno{hasFilters ? ' (filtrirano)' : ''}:</span>
           <span className="font-bold">
             {ukupno.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
           </span>
         </div>
-        <div className="flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-white">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-white">
           <span className="text-sm text-emerald-200">Plaćeno:</span>
           <span className="font-bold">
             {placeno.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
@@ -379,7 +379,7 @@ export function FaktureView() {
           }
         />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="min-w-0 max-w-full overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full min-w-[1200px]">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
@@ -500,7 +500,7 @@ export function FaktureView() {
           </div>
         )}
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Broj fakture *">
               <TextInput
                 value={form.broj}
@@ -524,7 +524,7 @@ export function FaktureView() {
           </div>
           <Field label="Investitor">
             {newInv === null ? (
-              <div className="flex gap-2">
+              <div className="flex min-w-0 flex-col gap-2 xl:flex-row">
                 <Select value={form.investitor_id} onChange={(e) => handleInvestitorChange(e.target.value)}>
                   <option value="">— Odaberi investitora —</option>
                   {investitori.map((investitor) => <option key={investitor.id} value={investitor.id}>{investitor.naziv}</option>)}
@@ -538,7 +538,7 @@ export function FaktureView() {
                 </button>
               </div>
             ) : (
-              <div className="flex gap-2">
+              <div className="flex min-w-0 flex-col gap-2 xl:flex-row">
                 <TextInput
                   autoFocus
                   value={newInv}
@@ -589,7 +589,7 @@ export function FaktureView() {
           <p className="-mt-2 rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900">
             Ukupna izlazna faktura: <strong>{((Number(form.iznos) || 0) + (Number(form.rabat) || 0)).toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}</strong>
           </p>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Datum izdavanja">
               <TextInput
                 type="date"

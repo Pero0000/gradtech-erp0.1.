@@ -50,8 +50,8 @@ export function ObavijestiView({ onNavigate }: { onNavigate: (view: View) => voi
   const grupe = [...new Set(obavijestTipovi.map((t) => t.grupa))];
 
   return (
-    <div>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+    <div className="min-w-0 max-w-full break-words">
+      <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:flex-wrap xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Obavijesti</h1>
           <p className="mt-1 text-sm text-slate-500">Svi rokovi na jednom mjestu · što se prikazuje i koliko unaprijed, postavlja se u Postavkama</p>
@@ -71,7 +71,7 @@ export function ObavijestiView({ onNavigate }: { onNavigate: (view: View) => voi
 
       {error && <p className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}
 
-      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="mb-4 grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-4">
         {(['overdue', 'today', 'soon', 'upcoming'] as ObavijestLevel[]).map((l) => (
           <button key={l} type="button" onClick={() => setLevel(level === l ? '' : l)} className={`rounded-xl border-2 bg-white p-3 text-left ${level === l ? 'ring-2 ring-sky-400' : ''} ${levelStyle[l].row}`}>
             <p className="text-2xl font-bold text-slate-900">{countOf(l)}</p>
@@ -80,20 +80,20 @@ export function ObavijestiView({ onNavigate }: { onNavigate: (view: View) => voi
         ))}
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-3">
-        <div className="relative min-w-[220px] flex-1">
+      <div className="mb-4 flex min-w-0 flex-col gap-3 xl:flex-row xl:flex-wrap">
+        <div className="relative min-w-0 xl:min-w-[220px] xl:flex-1">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Pretraži…" className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm" />
         </div>
-        <select value={grupa} onChange={(event) => { setGrupa(event.target.value); setTip(''); }} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+        <select value={grupa} onChange={(event) => { setGrupa(event.target.value); setTip(''); }} className="min-w-0 max-w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
           <option value="">Sve grupe</option>
           {grupe.map((g) => <option key={g} value={g}>{g}</option>)}
         </select>
-        <select value={tip} onChange={(event) => setTip(event.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+        <select value={tip} onChange={(event) => setTip(event.target.value)} className="min-w-0 max-w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
           <option value="">Sve vrste</option>
           {obavijestTipovi.filter((t) => !grupa || t.grupa === grupa).map((t) => <option key={t.tip} value={t.tip}>{t.label}</option>)}
         </select>
-        <select value={level} onChange={(event) => setLevel(event.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+        <select value={level} onChange={(event) => setLevel(event.target.value)} className="min-w-0 max-w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
           <option value="">Sva hitnost</option>
           {(['overdue', 'today', 'soon', 'upcoming'] as ObavijestLevel[]).map((l) => <option key={l} value={l}>{levelStyle[l].label}</option>)}
         </select>
@@ -109,11 +109,11 @@ export function ObavijestiView({ onNavigate }: { onNavigate: (view: View) => voi
       ) : (
         <div className="space-y-2">
           {filtered.map((o) => (
-            <button key={o.id} type="button" onClick={() => onNavigate(o.view)} className={`flex w-full items-center gap-4 rounded-xl border-l-4 border bg-white p-3 text-left shadow-sm hover:bg-slate-50 ${levelStyle[o.level].row}`}>
+            <button key={o.id} type="button" onClick={() => onNavigate(o.view)} className={`flex min-w-0 w-full flex-col items-start gap-3 rounded-xl border-l-4 border bg-white p-3 text-left shadow-sm hover:bg-slate-50 xl:flex-row xl:items-center xl:gap-4 ${levelStyle[o.level].row}`}>
               <span className={`w-24 shrink-0 rounded-full px-2 py-1 text-center text-xs font-semibold ${levelStyle[o.level].badge}`}>
                 {o.days === null ? levelStyle[o.level].label : relativeLabel(o.days)}
               </span>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 w-full xl:flex-1">
                 <p className="truncate text-sm font-semibold text-slate-900">{o.title}</p>
                 <p className="truncate text-xs text-slate-500">{o.tipLabel} · {o.detail}</p>
               </div>

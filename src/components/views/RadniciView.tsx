@@ -232,13 +232,13 @@ export function RadniciView() {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="min-w-0 max-w-full">
+      <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Radnici</h1>
           <p className="text-sm text-slate-500 mt-1">Upravljajte radnicima i njihovim ulogama</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
           <ExportMenu
             disabled={sorted.length === 0}
             build={() => ({
@@ -291,14 +291,14 @@ export function RadniciView() {
         />
       ) : (
         <>
-        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+        <div className="mb-3 flex min-w-0 flex-col gap-2 text-sm xl:flex-row xl:flex-wrap xl:items-center">
           <button type="button" onClick={togglePrikaz} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50">
             {prikaz ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             {prikaz ? 'Sakrij cijene' : 'Prikaži cijene'}
           </button>
           <span className="text-xs text-slate-400">Ugovorene cijene: satnica €/h, noćna %, teren/praznik/godišnji/bolovanje €/dan, put €/h</span>
         </div>
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="min-w-0 max-w-full overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
@@ -414,7 +414,7 @@ export function RadniciView() {
         }
       >
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Ime *">
               <TextInput
                 value={form.ime}
@@ -471,7 +471,7 @@ export function RadniciView() {
               placeholder="0.00"
             />
           </Field>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Noćni dodatak (%) – rad 22:00–06:00">
               <TextInput
                 type="number"
@@ -494,7 +494,7 @@ export function RadniciView() {
           </div>
           <div className="rounded-lg border border-slate-200 p-3">
             <p className="mb-2 text-sm font-medium text-slate-700">Ostale cijene</p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
               <Field label="Praznik (EUR/dan)">
                 <TextInput type="number" step="0.50" min="0" value={form.cijena_praznik} onChange={(e) => setForm({ ...form, cijena_praznik: e.target.value })} placeholder="0.00" />
               </Field>
@@ -513,7 +513,7 @@ export function RadniciView() {
             <p className="mb-2 text-sm font-medium text-slate-700">Bonusi</p>
             <div className="space-y-2">
               {form.bonusi.map((b, i) => (
-                <div key={i} className="grid grid-cols-[1fr_5.5rem_7rem] gap-2">
+                <div key={i} className="grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-2 2xl:grid-cols-[minmax(0,1fr)_5.5rem_7rem]">
                   <TextInput value={b.naziv} onChange={(e) => setForm({ ...form, bonusi: form.bonusi.map((x, j) => (j === i ? { ...x, naziv: e.target.value } : x)) })} placeholder={`Bonus ${i + 1}`} />
                   <TextInput type="number" step="0.50" min="0" value={b.iznos} onChange={(e) => setForm({ ...form, bonusi: form.bonusi.map((x, j) => (j === i ? { ...x, iznos: e.target.value } : x)) })} placeholder="€" />
                   <Select value={b.tip} onChange={(e) => setForm({ ...form, bonusi: form.bonusi.map((x, j) => (j === i ? { ...x, tip: e.target.value as BonusTip } : x)) })}>

@@ -56,6 +56,7 @@ const emptyForm = {
   opis: '',
   iznos: '',
   datum: new Date().toISOString().split('T')[0],
+  placen: false,
 };
 
 export function TroskoviView() {
@@ -119,6 +120,7 @@ export function TroskoviView() {
       opis: t.opis,
       iznos: t.iznos.toString(),
       datum: t.datum,
+      placen: Boolean(t.placen),
     });
     setModalOpen(true);
   };
@@ -134,6 +136,8 @@ export function TroskoviView() {
         opis: form.opis.trim(),
         iznos: parseFloat(form.iznos),
         datum: form.datum,
+        placen: form.placen,
+        placeno_at: form.placen ? editing?.placeno_at ?? new Date().toISOString().slice(0, 10) : null,
       };
       if (editing) {
         await updateTrosak(editing.id, payload);
@@ -382,6 +386,7 @@ export function TroskoviView() {
                 <SortTh k="kategorija" label="Kategorija" />
                 <SortTh k="opis" label="Opis" />
                 <SortTh k="iznos" label="Iznos" right />
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Plaćanje</th>
                 <th className="px-5 py-3"></th>
               </tr>
             </thead>
@@ -390,8 +395,9 @@ export function TroskoviView() {
                 if (r.type === 'group') {
                   return (
                     <tr key={`g-${r.key}`} className="bg-slate-100">
-                      <td colSpan={4} className="px-5 py-2 text-sm font-semibold text-slate-800">{r.label} <span className="font-normal text-slate-400">· {r.count} stavki</span></td>
+                      <td colSpan={5} className="px-5 py-2 text-sm font-semibold text-slate-800">{r.label} <span className="font-normal text-slate-400">· {r.count} stavki</span></td>
                       <td className="px-5 py-2 text-right text-sm font-bold text-slate-900">{eur(r.sum)}</td>
+                      <td />
                       <td />
                     </tr>
                   );
@@ -415,6 +421,9 @@ export function TroskoviView() {
                     </td>
                     <td className="px-5 py-3.5 text-right text-sm font-semibold text-slate-900">
                       {t.iznos.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
+                    </td>
+                    <td className="px-5 py-3.5">
+                      {!t.obracunPlace && <Badge variant={t.placen ? 'green' : 'orange'}>{t.placen ? 'Plaćeno' : 'Otvoreno'}</Badge>}
                     </td>
                     <td className="px-5 py-3.5">
                       {!t.obracunPlace && (
@@ -526,6 +535,15 @@ export function TroskoviView() {
               />
             </Field>
           </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={form.placen}
+              onChange={(e) => setForm({ ...form, placen: e.target.checked })}
+              className="h-4 w-4 rounded border-slate-300 text-sky-600"
+            />
+            Trošak je plaćen
+          </label>
         </div>
       </Modal>
 

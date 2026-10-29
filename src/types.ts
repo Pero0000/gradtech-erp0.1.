@@ -45,12 +45,14 @@ export interface VoziloDokument {
   iznos: number | null;
   km: number | null;
   napomena: string | null;
+  serviser?: string | null;
+  dijelovi?: string | null;
   url?: string | null;
 }
-export type GradilisteStatus = 'ponuda' | 'planirano' | 'aktivno' | 'pauzirano' | 'zavrseno';
+export type GradilisteStatus = 'ponuda' | 'planirano' | 'aktivno' | 'pauzirano' | 'neplaceno' | 'zavrseno';
 export type GradilisteRegija = 'dalmacija' | 'istra_kvarner' | 'slavonija' | 'zagreb_i_okolica' | 'medimurje';
 export type RadnikStatus = 'aktivan' | 'neaktivan' | 'bolovanje';
-export type VoziloStatus = 'slobodno' | 'zauzeto' | 'servis';
+export type VoziloStatus = 'slobodno' | 'zauzeto' | 'servis' | 'neispravno';
 export type VoziloTip = 'teretno' | 'dostavno' | 'radno' | 'putnicko';
 export type OpremaKategorija = 'alat' | 'stroj';
 export type OpremaStatus = 'slobodno' | 'na_gradilistu' | 'servis' | 'neaktivno';
@@ -64,6 +66,8 @@ export interface Oprema {
   marka: string | null;
   model: string | null;
   inventarski_broj: string | null;
+  podkategorija?: string | null;
+  radnik_id?: string | null;
   serijski_broj: string | null;
   status: OpremaStatus;
   stanje: OpremaStanje;
@@ -110,6 +114,17 @@ export interface Investitor {
   napomena: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface InvestitorKontakt {
+  id: string;
+  investitor_id: string;
+  uloga: string;
+  ime: string;
+  telefon: string | null;
+  email: string | null;
+  napomena: string | null;
+  created_at: string;
 }
 
 export type InvestitorInput = Pick<Investitor, 'naziv'>
@@ -198,6 +213,7 @@ export interface DnevniRasporedRadnik {
                                                                   pravo_godisnji?: boolean;
                                                                   pravo_bolovanje?: boolean;
                                                                   portal_vrijeme?: boolean;
+                                                                  godisnji_dani_pravo?: number;
                                                                   bonusi?: RadnikBonus[];
                                                                     created_at: string;
                                                                       updated_at: string;
@@ -222,6 +238,7 @@ export interface DnevniRasporedRadnik {
                                                                                         servis_interval_mjeseci?: number | null;
                                                                                         servis_upozorenje_km?: number;
                                                                                         servis_upozorenje_dana?: number;
+                                                                                        sljedeci_servis_napomena?: string | null;
                                                                                           napomena: string | null;
                                                                                             created_at: string;
                                                                                               updated_at: string;
@@ -266,6 +283,34 @@ export interface DnevniRasporedRadnik {
                                                                                                                           updated_at: string;
                                                                                                                         }
 
+                                                                                                                        export type KooperantAngazmanStatus = 'aktivno' | 'zavrseno' | 'otkazano';
+
+                                                                                                                        export interface KooperantAngazman {
+                                                                                                                          id: string;
+                                                                                                                          kooperant_id: string;
+                                                                                                                          gradiliste_id: string;
+                                                                                                                          dogovoreni_iznos: number | null;
+                                                                                                                          status: KooperantAngazmanStatus;
+                                                                                                                          datum_pocetka: string | null;
+                                                                                                                          datum_zavrsetka: string | null;
+                                                                                                                          napomena: string | null;
+                                                                                                                          created_at: string;
+                                                                                                                          updated_at: string;
+                                                                                                                          gradilista?: Pick<Gradiliste, 'id' | 'naziv' | 'status' | 'datum_pocetka' | 'datum_zavrsetka' | 'ugovorena_vrijednost'> | null;
+                                                                                                                        }
+
+                                                                                                                        export type KooperantDokumentVrsta = 'ugovor' | 'licenca' | 'atest' | 'osiguranje' | 'ponuda' | 'racun';
+
+                                                                                                                        export interface KooperantDokument {
+                                                                                                                          id: string;
+                                                                                                                          kooperant_id: string;
+                                                                                                                          gradiliste_id?: string | null;
+                                                                                                                          vrsta: KooperantDokumentVrsta;
+                                                                                                                          naziv: string;
+                                                                                                                          putanja: string;
+                                                                                                                          created_at: string;
+                                                                                                                        }
+
                                                                                                                         export type KooperantInput = Pick<Kooperant, 'naziv'>
                                                                                                                           & Partial<Omit<Kooperant, 'id' | 'created_at' | 'updated_at' | 'naziv'>>;
 
@@ -278,6 +323,9 @@ export interface DnevniRasporedRadnik {
                                                                                                                                 kooperanti?: Pick<Kooperant, 'id' | 'naziv'> | null;
                                                                                                                                   iznos: number;
                                                                                                                                     datum: string;
+                                                                                                                                    placen?: boolean;
+                                                                                                                                    placeno_at?: string | null;
+                                                                                                                                    kooperant_racun_id?: string | null;
                                                                                                                                       created_at: string;
                                                                                                                                         gradilista?: Pick<Gradiliste, 'id' | 'naziv'> | null;
                                                                                                                                         }
@@ -313,6 +361,7 @@ export interface DnevniRasporedRadnik {
   mobile_status?: MobileNalogStatus;
   teren?: boolean;
   bez_troska?: boolean;
+  bez_izvrsenja?: boolean;
   poslovodja_id?: string | null;
   vozac_id?: string | null;
                                                                                                                                                                             rok: string | null;
@@ -362,8 +411,10 @@ export type FakturaStatus = 'izdana' | 'placena' | 'nep placena';
                                                                                                                                                                                                         kupac: string | null;
                                                                                                                                                                                                           iznos: number;
                                                                                                                                                                                                               rabat: number;
+                                                                                                                                                                                                              rabat_smjer?: 'pribroji' | 'oduzmi';
                                                                                                                                                                                                             datum_izdavanja: string;
                                                                                                                                                                                                               datum_dospjecja: string | null;
+                                                                                                                                                                                                              datum_naplate: string | null;
                                                                                                                                                                                                                 status: FakturaStatus;
                                                                                                                                                                                                                   opis: string | null;
                                                                                                                                                                                                                     created_at: string;

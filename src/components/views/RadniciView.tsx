@@ -1,14 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Users, Plus, Pencil, Trash2, Phone, Mail, HardHat, ArrowDown, ArrowUp, ArrowUpDown, Eye, EyeOff, History } from 'lucide-react';
-import type { Radnik, RadnikStatus, BonusTip, RadnikPovijest } from '@/types';
+import { Users, Plus, Pencil, Trash2, Phone, Mail, HardHat, ArrowDown, ArrowUp, ArrowUpDown, History } from 'lucide-react';
+import type { Radnik, RadnikStatus, BonusTip, RadnikPovijest, RadnikDokument, RadnikDokumentVrsta } from '@/types';
 import { RadnikDokumenti } from '@/components/views/RadnikDokumenti';
-import { fetchRadnici, createRadnik, updateRadnik, deleteRadnik, fetchRadnikPovijest, addRadnikPovijest } from '@/lib/api';
+import { fetchRadnici, createRadnik, updateRadnik, deleteRadnik, fetchRadnikPovijest, addRadnikPovijest, fetchSviRadnikDokumenti } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Field, TextInput, Select } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ExportMenu } from '@/components/ui/ExportMenu';
+import { RadnikDetalj } from '@/components/views/RadnikDetalj';
+import { todayISO } from '@/lib/rokovi';
 
 const statusBadge: Record<RadnikStatus, { variant: 'green' | 'gray' | 'orange'; label: string }> = {
   aktivan: { variant: 'green', label: 'Aktivan' },
@@ -41,12 +43,41 @@ const emptyForm = {
   cijena_godisnji: '',
   cijena_bolovanje: '',
   cijena_put_sat: '',
+  godisnji_dani_pravo: '20',
   bonusi: [emptyBonus(), emptyBonus(), emptyBonus()],
 };
 
-type SortKey = 'ime' | 'satnica' | 'nocna' | 'teren' | 'praznik' | 'godisnji' | 'bolovanje' | 'put';
+type SortKey = 'ime';
 
-const eur = (v: number | null | undefined) => (v ? `${v.toLocaleString('hr-HR', { minimumFractionDigits: 2 })} €` : '—');
+const requiredDocumentTypes: RadnikDokumentVrsta[] = ['lijecnicki', 'zastita_na_radu', 'atest'];
+const requiredDocumentLabels: Record<RadnikDokumentVrsta, string> = {
+  lijecnicki: 'Liječnički pregled',
+  zastita_na_radu: 'Zaštita na radu',
+  atest: 'Atest',
+  osposobljavanje: 'Osposobljavanje',
+  ostalo: 'Ostalo',
+};
+const documentSummary = (documents: RadnikDokument[], today: string) => {
+  const states = requiredDocumentTypes.map((type) => {
+    const latest = documents.filter((item) => item.vrsta === type)
+      .sort((a, b) => (b.datum_do ?? '').localeCompare(a.datum_do ?? ''))[0];
+    if (!latest) return 'red';
+    if (!latest.datum_do) return 'green';
+    const remaining = Math.round((new Date(`${latest.datum_do}T00:00:00`).getTime() - new Date(`${today}T00:00:00`).getTime()) / 86_400_000);
+    return remaining < 0 ? 'red' : remaining <= 30 ? 'orange' : 'green';
+  });
+  const label = states.includes('red') ? 'Isteklo / nedostaje' : states.includes('orange') ? 'Uskoro istječe' : 'Sve važi';
+  return {
+    label,
+    tone: states.includes('red') ? 'red' : states.includes('orange') ? 'orange' : 'green',
+    detail: requiredDocumentTypes.map((type, index) => `${requiredDocumentLabels[type]}: ${states[index] === 'red' ? 'isteklo ili nedostaje' : states[index] === 'orange' ? 'uskoro istječe' : 'važi'}`).join(' · '),
+  };
+};
+const documentTone: Record<string, string> = {
+  green: 'bg-emerald-100 text-emerald-800',
+  orange: 'bg-orange-100 text-orange-800',
+  red: 'bg-red-100 text-red-800',
+};
 
 const polja: Record<string, string> = {
   cijena_sata: 'Satnica (€/h)',
@@ -56,6 +87,7 @@ const polja: Record<string, string> = {
   cijena_godisnji: 'Godišnji (€/dan)',
   cijena_bolovanje: 'Bolovanje (€/dan)',
   cijena_put_sat: 'Plaćeni put (€/h)',
+  godisnji_dani_pravo: 'Pravo na godišnji (dana)',
   bonusi: 'Bonusi',
 };
 
@@ -64,7 +96,7 @@ const bonusText = (b: Radnik['bonusi'] | undefined) =>
 
 export function RadniciView() {
   const [items, setItems] = useState<Radnik[]>([]);
-  const [prikaz, setPrikaz] = useState(() => localStorage.getItem('tm_prikaz_cijene_radnika') !== '0');
+  const [documents, setDocuments] = useState<RadnikDokument[]>([]);
   const [povijest, setPovijest] = useState<RadnikPovijest[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>('ime');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -75,12 +107,7 @@ export function RadniciView() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-
-  const togglePrikaz = () => {
-    const next = !prikaz;
-    setPrikaz(next);
-    localStorage.setItem('tm_prikaz_cijene_radnika', next ? '1' : '0');
-  };
+  const [selectedRadnik, setSelectedRadnik] = useState<Radnik | null>(null);
 
   const loadPovijest = (id: string) => {
     fetchRadnikPovijest(id).then(setPovijest).catch(() => setPovijest([]));
@@ -90,7 +117,9 @@ export function RadniciView() {
     setLoading(true);
     setError(null);
     try {
-      setItems(await fetchRadnici());
+      const [workers, workerDocuments] = await Promise.all([fetchRadnici(), fetchSviRadnikDokumenti()]);
+      setItems(workers);
+      setDocuments(workerDocuments);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
     } finally {
@@ -125,6 +154,7 @@ export function RadniciView() {
       cijena_godisnji: r.cijena_godisnji ? r.cijena_godisnji.toString() : '',
       cijena_bolovanje: r.cijena_bolovanje ? r.cijena_bolovanje.toString() : '',
       cijena_put_sat: r.cijena_put_sat ? r.cijena_put_sat.toString() : '',
+      godisnji_dani_pravo: String(r.godisnji_dani_pravo ?? 20),
       bonusi: [0, 1, 2].map((i) => {
         const b = r.bonusi?.[i];
         return b ? { naziv: b.naziv, iznos: b.iznos ? b.iznos.toString() : '', tip: b.tip } : emptyBonus();
@@ -151,10 +181,12 @@ export function RadniciView() {
         cijena_godisnji: form.cijena_godisnji ? parseFloat(form.cijena_godisnji) : 0,
         cijena_bolovanje: form.cijena_bolovanje ? parseFloat(form.cijena_bolovanje) : 0,
         cijena_put_sat: form.cijena_put_sat ? parseFloat(form.cijena_put_sat) : 0,
+        godisnji_dani_pravo: Math.max(0, Math.floor(Number(form.godisnji_dani_pravo) || 0)),
         bonusi: form.bonusi.map((b) => ({ naziv: b.naziv.trim(), iznos: b.iznos ? parseFloat(b.iznos) : 0, tip: b.tip })),
       };
       if (editing) {
-        await updateRadnik(editing.id, payload);
+        const updated = await updateRadnik(editing.id, payload);
+        setSelectedRadnik(updated as Radnik);
         const before = editing as unknown as Record<string, number | null>;
         const after = payload as unknown as Record<string, number>;
         const rows = Object.keys(polja)
@@ -190,25 +222,14 @@ export function RadniciView() {
   };
 
   const sorted = useMemo(() => {
-    const val = (r: Radnik) => {
-      switch (sortKey) {
-        case 'ime': return `${r.prezime} ${r.ime}`.toLowerCase();
-        case 'satnica': return r.cijena_sata ?? 0;
-        case 'nocna': return r.nocni_dodatak ?? 0;
-        case 'teren': return r.teren_dnevnica ?? 0;
-        case 'praznik': return r.cijena_praznik ?? 0;
-        case 'godisnji': return r.cijena_godisnji ?? 0;
-        case 'bolovanje': return r.cijena_bolovanje ?? 0;
-        case 'put': return r.cijena_put_sat ?? 0;
-      }
-    };
+    const val = (r: Radnik) => `${r.prezime} ${r.ime}`.toLowerCase();
     const dir = sortDir === 'asc' ? 1 : -1;
     return [...items].sort((a, b) => {
       const x = val(a);
       const y = val(b);
       return (x < y ? -1 : x > y ? 1 : 0) * dir;
     });
-  }, [items, sortKey, sortDir]);
+  }, [items, sortDir]);
 
   const toggleSort = (k: SortKey) => {
     if (sortKey === k) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
@@ -273,6 +294,12 @@ export function RadniciView() {
           {error}
         </div>
       )}
+      <RadnikDetalj
+        radnik={selectedRadnik}
+        open={selectedRadnik !== null}
+        onClose={() => setSelectedRadnik(null)}
+        onEdit={openEdit}
+      />
 
       {items.length === 0 ? (
         <EmptyState
@@ -291,13 +318,6 @@ export function RadniciView() {
         />
       ) : (
         <>
-        <div className="mb-3 flex min-w-0 flex-col gap-2 text-sm xl:flex-row xl:flex-wrap xl:items-center">
-          <button type="button" onClick={togglePrikaz} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50">
-            {prikaz ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            {prikaz ? 'Sakrij cijene' : 'Prikaži cijene'}
-          </button>
-          <span className="text-xs text-slate-400">Ugovorene cijene: satnica €/h, noćna %, teren/praznik/godišnji/bolovanje €/dan, put €/h</span>
-        </div>
         <div className="min-w-0 max-w-full overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full">
             <thead>
@@ -305,24 +325,15 @@ export function RadniciView() {
                 {sortTh('ime', 'Radnik', 'left')}
                 <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Uloga</th>
                 <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Kontakt</th>
-                {prikaz && (
-                  <>
-                    {sortTh('satnica', 'Satnica')}
-                    {sortTh('nocna', 'Noćna')}
-                    {sortTh('teren', 'Teren')}
-                    {sortTh('praznik', 'Praznik')}
-                    {sortTh('godisnji', 'Godišnji')}
-                    {sortTh('bolovanje', 'Bolovanje')}
-                    {sortTh('put', 'Put')}
-                  </>
-                )}
                 <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Status</th>
+                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Dokumenti</th>
                 <th className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Akcije</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {sorted.map((r) => {
                 const sb = statusBadge[r.status];
+                const docs = documentSummary(documents.filter((item) => item.radnik_id === r.id), todayISO());
                 return (
                   <tr key={r.id} className="group hover:bg-slate-50 transition-colors">
                     <td className="px-5 py-3.5">
@@ -330,9 +341,9 @@ export function RadniciView() {
                         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500">
                           <HardHat className="h-4.5 w-4.5" />
                         </div>
-                        <span className="font-medium text-slate-900">
+                        <button type="button" onClick={() => setSelectedRadnik(r)} className="text-left font-medium text-slate-900 hover:text-sky-700 hover:underline">
                           {r.ime} {r.prezime}
-                        </span>
+                        </button>
                       </div>
                     </td>
                     <td className="px-5 py-3.5 text-sm text-slate-600">{r.uloga}</td>
@@ -352,30 +363,24 @@ export function RadniciView() {
                         )}
                       </div>
                     </td>
-                    {prikaz && (
-                      <>
-                        <td className="px-3 py-3.5 text-right text-sm font-semibold text-slate-800">{r.cijena_sata > 0 ? `${eur(r.cijena_sata)}/h` : '—'}</td>
-                        <td className="px-3 py-3.5 text-right text-sm text-indigo-700">{r.nocni_dodatak ? `${r.nocni_dodatak} %` : '—'}</td>
-                        <td className="px-3 py-3.5 text-right text-sm text-amber-700">{eur(r.teren_dnevnica)}</td>
-                        <td className="px-3 py-3.5 text-right text-sm text-slate-600">{eur(r.cijena_praznik)}</td>
-                        <td className="px-3 py-3.5 text-right text-sm text-emerald-700">{eur(r.cijena_godisnji)}</td>
-                        <td className="px-3 py-3.5 text-right text-sm text-red-600">{eur(r.cijena_bolovanje)}</td>
-                        <td className="px-3 py-3.5 text-right text-sm text-slate-600">{eur(r.cijena_put_sat)}</td>
-                      </>
-                    )}
                     <td className="px-5 py-3.5">
                       <Badge variant={sb.variant}>{sb.label}</Badge>
                     </td>
                     <td className="px-5 py-3.5">
-                      <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <span title={docs.detail} className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${documentTone[docs.tone]}`}>{docs.label}</span>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex justify-end gap-1 opacity-100 xl:opacity-0 xl:group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={() => openEdit(r)}
+                          aria-label={`Uredi ${r.ime} ${r.prezime}`}
                           className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-600 transition-colors"
                         >
                           <Pencil className="h-4 w-4" />
                         </button>
                         <button
                           onClick={() => setDeleteId(r.id)}
+                          aria-label={`Obriši ${r.ime} ${r.prezime}`}
                           className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600 transition-colors"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -395,6 +400,7 @@ export function RadniciView() {
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         title={editing ? 'Uredi radnika' : 'Novi radnik'}
+        wide="screen"
         footer={
           <>
             <button
@@ -461,6 +467,16 @@ export function RadniciView() {
               <option value="neaktivan">Neaktivan</option>
               <option value="bolovanje">Bolovanje</option>
             </Select>
+          </Field>
+          <Field label="Pravo na godišnji odmor (dana godišnje)">
+            <TextInput
+              type="number"
+              min="0"
+              step="1"
+              value={form.godisnji_dani_pravo}
+              onChange={(e) => setForm({ ...form, godisnji_dani_pravo: e.target.value })}
+              placeholder="20"
+            />
           </Field>
           <Field label="Cijena radnog sata (EUR/h)">
             <TextInput

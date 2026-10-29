@@ -10,7 +10,10 @@ import {
   fetchOprema,
   fetchOpremaDokumenti,
   fetchOpremaDokumentiZaResurse,
+  fetchOpremaKoristenjaZaResurse,
+  fetchStrojKoristenjaZaResurse,
   updateOprema,
+  type OpremaKoristenje,
 } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -52,6 +55,8 @@ const emptyForm = {
   marka: '',
   model: '',
   inventarski_broj: '',
+  podkategorija: '',
+  radnik_id: '',
   serijski_broj: '',
   status: 'slobodno' as OpremaStatus,
   stanje: 'dobro' as OpremaStanje,
@@ -66,11 +71,20 @@ const emptyForm = {
   napomena: '',
 };
 
-const dateLabel = (value: string | null) => value
-  ? new Date(`${value}T00:00:00`).toLocaleDateString('hr-HR')
+const dateLabel = (value: string | null | undefined) => value
+  ? new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString('hr-HR')
   : '—';
 const currency = (value: number) => value.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' });
 const errText = (reason: unknown) => reason instanceof Error ? reason.message : 'Dogodila se greška.';
+const statusTone = (tone: 'green' | 'orange' | 'red') => tone === 'green' ? 'green' : tone === 'orange' ? 'orange' : 'red';
+
+function itemLocation(item: Oprema, usage: OpremaKoristenje[]) {
+  if (item.radnik_id) {
+    const worker = usage.flatMap((entry) => entry.radnici).find((candidate) => candidate.id === item.radnik_id);
+    return `Kod radnika${worker ? ` · ${worker.ime} ${worker.prezime}` : ''}`;
+  }
+  return item.gradiliste_id ? `Gradilište · ${item.gradilista?.naziv ?? 'dodijeljeno gradilište'}` : 'Skladište';
+}
 
 function itemServiceAlert(item: Oprema, documents: OpremaDokument[]) {
   const dueDates = documents
@@ -98,12 +112,37 @@ function itemServiceAlert(item: Oprema, documents: OpremaDokument[]) {
   return null;
 }
 
+function inspectionState(documents: OpremaDokument[]) {
+  const inspections = documents
+    .filter((document) => document.vrsta === 'atest')
+    .sort((first, second) => (second.datum_do ?? second.datum_od ?? '').localeCompare(first.datum_do ?? first.datum_od ?? ''));
+  const latest = inspections[0];
+  if (!latest) return { label: 'Nije evidentiran', tone: 'red' as const };
+  if (!latest.datum_do) return { label: 'Evidentiran bez roka', tone: 'orange' as const };
+  const remaining = Math.ceil((new Date(`${latest.datum_do}T00:00:00`).getTime() - new Date(`${todayISO()}T00:00:00`).getTime()) / 86400000);
+  if (remaining < 0) return { label: `Istekao ${dateLabel(latest.datum_do)}`, tone: 'red' as const };
+  if (remaining <= 30) return { label: `Istječe za ${remaining} d`, tone: 'orange' as const };
+  return { label: `Vrijedi do ${dateLabel(latest.datum_do)}`, tone: 'green' as const };
+}
+
+function readinessState(item: Oprema, documents: OpremaDokument[]) {
+  const inspection = inspectionState(documents);
+  if (item.stanje === 'osteceno' || item.status === 'servis') {
+    return { label: 'Neispravan', tone: 'red' as const };
+  }
+  if (item.status === 'neaktivno' || inspection.tone !== 'green' || itemServiceAlert(item, documents)) {
+    return { label: 'Potreban pregled', tone: 'orange' as const };
+  }
+  return { label: 'Spreman za korištenje', tone: 'green' as const };
+}
+
 export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
   const label = kategorija === 'alat' ? 'Alat' : 'Strojevi';
   const Icon = kategorija === 'alat' ? Wrench : Cog;
   const [items, setItems] = useState<Oprema[]>([]);
   const [sites, setSites] = useState<Gradiliste[]>([]);
   const [documents, setDocuments] = useState<Record<string, OpremaDokument[]>>({});
+  const [usageHistory, setUsageHistory] = useState<Record<string, OpremaKoristenje[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -131,7 +170,12 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
     setError(null);
     try {
       const [resourceList, siteList] = await Promise.all([fetchOprema(kategorija), fetchGradilista()]);
-      const resourceDocuments = await fetchOpremaDokumentiZaResurse(resourceList.map((item) => item.id));
+      const [resourceDocuments, resourceUsage] = await Promise.all([
+        fetchOpremaDokumentiZaResurse(resourceList.map((item) => item.id)),
+        kategorija === 'stroj'
+          ? fetchStrojKoristenjaZaResurse(resourceList.map((item) => item.id))
+          : fetchOpremaKoristenjaZaResurse(resourceList.map((item) => item.id)),
+      ]);
       setItems(resourceList);
       setSites(siteList);
       setDocuments(resourceDocuments.reduce<Record<string, OpremaDokument[]>>((grouped, document) => {
@@ -139,6 +183,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
         grouped[document.oprema_id].push(document);
         return grouped;
       }, {}));
+      setUsageHistory(resourceUsage);
       setExpandedId(null);
     } catch (reason) {
       setError(errText(reason));
@@ -156,6 +201,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
     if (!normalizedQuery) return items;
     return items.filter((item) => [
       item.naziv,
+      item.podkategorija,
       item.marka,
       item.model,
       item.inventarski_broj,
@@ -178,6 +224,8 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
       marka: item.marka ?? '',
       model: item.model ?? '',
       inventarski_broj: item.inventarski_broj ?? '',
+      podkategorija: item.podkategorija ?? '',
+      radnik_id: item.radnik_id ?? '',
       serijski_broj: item.serijski_broj ?? '',
       status: item.status,
       stanje: item.stanje,
@@ -205,6 +253,8 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
       marka: form.marka.trim() || null,
       model: form.model.trim() || null,
       inventarski_broj: form.inventarski_broj.trim() || null,
+      podkategorija: form.podkategorija.trim() || null,
+      radnik_id: form.radnik_id || null,
       serijski_broj: form.serijski_broj.trim() || null,
       status: form.status,
       stanje: form.stanje,
@@ -307,36 +357,114 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
   const renderDetails = (item: Oprema) => {
     if (expandedId !== item.id) return null;
     const itemDocuments = documents[item.id] ?? [];
+    const itemUsage = usageHistory[item.id] ?? [];
+    const services = itemDocuments
+      .filter((document) => document.vrsta === 'servis')
+      .sort((first, second) => (second.datum_od ?? second.created_at).localeCompare(first.datum_od ?? first.created_at));
+    const serviceCost = services.reduce((sum, document) => sum + Number(document.iznos ?? 0), 0);
     const alert = itemServiceAlert(item, itemDocuments);
+    const lastUse = itemUsage[0];
+    const latestInspection = inspectionState(itemDocuments);
+    const readiness = readinessState(item, itemDocuments);
+    const location = itemLocation(item, itemUsage);
     return (
       <div className="mt-4 border-t border-slate-200 pt-4" onClick={(event) => event.stopPropagation()}>
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs text-slate-500">Nabavna vrijednost</p><p className="mt-1 font-semibold text-slate-900">{currency(item.nabavna_vrijednost)}</p></div>
+          <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs text-slate-500">Trošak servisa</p><p className="mt-1 font-semibold text-slate-900">{currency(serviceCost)}</p></div>
+          <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs text-slate-500">Broj korištenja</p><p className="mt-1 font-semibold text-slate-900">{itemUsage.length}</p></div>
+          <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs text-slate-500">Datum zadnjeg pregleda</p><p className="mt-1 font-semibold text-slate-900">{dateLabel(itemDocuments.filter((document) => document.vrsta === 'atest').sort((first, second) => (second.datum_od ?? '').localeCompare(first.datum_od ?? ''))[0]?.datum_od)}</p></div>
+        </section>
+        <section className="mt-3 grid gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+          <div><p className="text-xs text-slate-500">Spremnost</p><Badge variant={statusTone(readiness.tone)}>{readiness.label}</Badge></div>
+          <div><p className="text-xs text-slate-500">Trenutna lokacija</p><p className="font-medium text-slate-800">{location}</p></div>
+          <div><p className="text-xs text-slate-500">Zadnji korisnik</p><p className="font-medium text-slate-800">{lastUse?.radnici.map((worker) => `${worker.ime} ${worker.prezime}`).join(', ') || 'Nije evidentiran'}</p><p className="text-xs text-slate-500">{lastUse ? dateLabel(lastUse.datum) : '—'}</p></div>
+          <div><p className="text-xs text-slate-500">Status pregleda</p><Badge variant={statusTone(latestInspection.tone)}>{latestInspection.label}</Badge></div>
+        </section>
         {alert && (
           <p className="mb-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
             <AlertTriangle className="h-4 w-4 flex-shrink-0" /> {alert}
           </p>
         )}
         <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
-          <FileText className="h-4 w-4 text-slate-500" /> Dokumenti, servisi i pregledi ({itemDocuments.length})
+          <Wrench className="h-4 w-4 text-slate-500" /> Servisna povijest ({services.length})
         </h4>
         <div className="mb-3 space-y-2">
-          {itemDocuments.length === 0 && <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Nema zapisa.</p>}
-          {itemDocuments.map((document) => (
+          {services.length === 0 && <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Nema evidentiranih servisa.</p>}
+          {services.map((document) => (
             <div key={document.id} className="flex items-start gap-2 rounded-lg border border-slate-100 px-3 py-2 text-xs">
               <div className="min-w-0 flex-1">
                 <p className="font-medium text-slate-800">
                   {document.url ? <a href={document.url} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline">{document.naziv}</a> : document.naziv}
                 </p>
                 <p className="mt-0.5 text-slate-500">
-                  {documentLabels[document.vrsta]} · {dateLabel(document.datum_od)}
+                  {dateLabel(document.datum_od)} · {document.naziv}
                   {document.datum_do && ` – ${dateLabel(document.datum_do)}`}
                   {document.radni_sati != null && ` · ${document.radni_sati.toLocaleString('hr-HR')} h`}
                   {document.iznos != null && ` · ${currency(document.iznos)}`}
                 </p>
                 {document.napomena && <p className="mt-1 whitespace-pre-wrap text-slate-600">{document.napomena}</p>}
               </div>
-              <button type="button" onClick={() => void removeDocument(document)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Obriši zapis ${document.naziv}`}>
+              <button type="button" onClick={() => void removeDocument(document)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Obriši servis ${document.naziv}`}>
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
+            </div>
+          ))}
+        </div>
+        <h4 className="mb-2 mt-4 flex items-center gap-2 text-sm font-semibold text-slate-800">
+          <FileText className="h-4 w-4 text-slate-500" /> Povijest korištenja ({itemUsage.length})
+        </h4>
+        {kategorija === 'stroj' ? (
+          itemUsage.length === 0
+            ? <p className="mb-3 rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Dnevnik se automatski puni kada se stroj poveže s radnim nalogom. Radni sati se prikazuju nakon unosa na nalogu.</p>
+            : <div className="mb-3 overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full min-w-[68rem] text-left text-xs">
+                <thead className="bg-slate-50 text-slate-500"><tr>
+                  <th className="px-3 py-2">Datum</th>
+                  <th className="px-3 py-2">Gradilište</th>
+                  <th className="px-3 py-2">Radni nalog</th>
+                  <th className="px-3 py-2">Radnik</th>
+                  <th className="px-3 py-2 text-right">Radni sati</th>
+                  <th className="px-3 py-2 text-right">Cijena sata</th>
+                  <th className="px-3 py-2 text-right">Ukupan obračun</th>
+                  <th className="px-3 py-2">Napomena</th>
+                </tr></thead>
+                <tbody className="divide-y divide-slate-100">{itemUsage.map((usage) => (
+                  <tr key={usage.id}>
+                    <td className="whitespace-nowrap px-3 py-2">{dateLabel(usage.datum)}</td>
+                    <td className="px-3 py-2">{usage.gradiliste ?? '—'}</td>
+                    <td className="px-3 py-2">{usage.brojNaloga ? `${usage.brojNaloga} · ${usage.nalog ?? ''}` : '—'}</td>
+                    <td className="px-3 py-2">{usage.radnici.map((worker) => `${worker.ime} ${worker.prezime}`).join(', ') || 'Nije evidentiran'}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{usage.radniSati == null ? 'Nije uneseno' : `${Number(usage.radniSati).toLocaleString('hr-HR')} h`}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{currency(Number(usage.cijenaSata ?? 0))}/h</td>
+                    <td className="px-3 py-2 text-right font-medium tabular-nums">{usage.radniSati == null ? '—' : currency(Number(usage.ukupanObracun ?? 0))}</td>
+                    <td className="max-w-xs whitespace-pre-wrap px-3 py-2">{usage.napomena?.trim() || '—'}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+        ) : itemUsage.length === 0 ? <p className="mb-3 rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Korištenja će se bilježiti kada se alat doda na radni nalog. Stariji zapisi bez poveznice na inventar nisu dostupni.</p> : (
+          <ol className="mb-3 space-y-2 border-l border-slate-200 pl-4">
+            {itemUsage.map((usage) => (
+              <li key={usage.id} className="relative rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs">
+                <span className="absolute -left-[21px] top-3 h-2.5 w-2.5 rounded-full border-2 border-white bg-sky-600 ring-1 ring-sky-200" />
+                <p className="font-medium text-slate-800">{dateLabel(usage.datum)} · {usage.radnici.map((worker) => `${worker.ime} ${worker.prezime}`).join(', ') || 'Korisnik nije evidentiran'}</p>
+                <p className="mt-0.5 text-slate-500">{usage.gradiliste ?? 'Bez gradilišta'} · {usage.brojNaloga ? `${usage.brojNaloga} · ${usage.nalog ?? ''}` : 'Bez radnog naloga'}</p>
+              </li>
+            ))}
+          </ol>
+        )}
+        <h4 className="mb-2 mt-4 flex items-center gap-2 text-sm font-semibold text-slate-800">
+          <FileText className="h-4 w-4 text-slate-500" /> Dokumentacija i pregledi ({itemDocuments.filter((document) => document.vrsta !== 'servis').length})
+        </h4>
+        <div className="mb-3 space-y-2">
+          {itemDocuments.filter((document) => document.vrsta !== 'servis').map((document) => (
+            <div key={document.id} className="flex items-start gap-2 rounded-lg border border-slate-100 px-3 py-2 text-xs">
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-slate-800">{document.url ? <a href={document.url} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline">{document.naziv}</a> : document.naziv}</p>
+                <p className="mt-0.5 text-slate-500">{documentLabels[document.vrsta]} · {dateLabel(document.datum_od)}{document.datum_do && ` – ${dateLabel(document.datum_do)}`}</p>
+              </div>
+              <button type="button" onClick={() => void removeDocument(document)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Obriši dokument ${document.naziv}`}><Trash2 className="h-3.5 w-3.5" /></button>
             </div>
           ))}
         </div>
@@ -389,6 +517,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
               rows: items,
               columns: [
                 { header: 'Naziv', get: (item: Oprema) => item.naziv },
+                { header: 'Kategorija', get: (item: Oprema) => item.podkategorija ?? '' },
                 { header: 'Marka / model', get: (item: Oprema) => [item.marka, item.model].filter(Boolean).join(' ') },
                 { header: 'Inventarski broj', get: (item: Oprema) => item.inventarski_broj ?? '' },
                 { header: 'Serijski broj', get: (item: Oprema) => item.serijski_broj ?? '' },
@@ -427,29 +556,36 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
         <div className="min-w-0 max-w-full overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
-              <th className="px-4 py-3">Naziv</th><th className="px-4 py-3">Broj</th><th className="px-4 py-3">Status / stanje</th><th className="px-4 py-3">Gradilište</th><th className="px-4 py-3 text-right">Količina</th>
+              <th className="px-4 py-3">Naziv / kategorija</th><th className="px-4 py-3">Inventarski broj</th><th className="px-4 py-3">Status / spremnost</th><th className="px-4 py-3">Lokacija / zadnji korisnik</th><th className="px-4 py-3">Pregled</th><th className="px-4 py-3 text-right">Nabavna vrijednost</th>
               {kategorija === 'stroj' && <th className="px-4 py-3 text-right">Radni sati</th>}
-              <th className="px-4 py-3 text-right">Nabavna vrijednost</th><th className="px-4 py-3 text-right">Akcije</th>
+              <th className="px-4 py-3 text-right">Akcije</th>
             </tr></thead>
             <tbody className="divide-y divide-slate-100">
-              {visibleItems.map((item) => (
+              {visibleItems.map((item) => {
+                const itemDocuments = documents[item.id] ?? [];
+                const itemUsage = usageHistory[item.id] ?? [];
+                const readiness = readinessState(item, itemDocuments);
+                const inspection = inspectionState(itemDocuments);
+                const lastUse = itemUsage[0];
+                return (
                 <tr key={item.id} className="group hover:bg-slate-50">
                   <td className="px-4 py-3">
                     <button type="button" onClick={() => void toggleDetails(item)} className="text-left font-medium text-slate-900 hover:text-sky-700">{item.naziv}</button>
-                    <p className="text-xs text-slate-500">{[item.marka, item.model].filter(Boolean).join(' ') || '—'}</p>
+                    <p className="text-xs text-slate-500">{item.podkategorija || [item.marka, item.model].filter(Boolean).join(' ') || '—'}</p>
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{item.inventarski_broj || item.serijski_broj || '—'}</td>
-                  <td className="px-4 py-3"><Badge variant={statusVariants[item.status]}>{statusLabels[item.status]}</Badge><p className="mt-1 text-xs text-slate-500">Stanje: {conditionLabels[item.stanje]}</p></td>
-                  <td className="px-4 py-3 text-slate-600">{item.gradilista?.naziv ?? 'Skladište'}</td>
-                  <td className="px-4 py-3 text-right text-slate-600">{item.kolicina.toLocaleString('hr-HR')}</td>
-                  {kategorija === 'stroj' && <td className="px-4 py-3 text-right text-slate-600">{item.radni_sati.toLocaleString('hr-HR')} h · {currency(item.cijena_sata ?? 0)}/h</td>}
+                  <td className="px-4 py-3 text-slate-600">{item.inventarski_broj || '—'}</td>
+                  <td className="px-4 py-3"><Badge variant={statusVariants[item.status]}>{statusLabels[item.status]}</Badge><p className="mt-1 text-xs text-slate-600">{readiness.label}</p><p className="text-xs text-slate-500">Stanje: {conditionLabels[item.stanje]}</p></td>
+                  <td className="px-4 py-3 text-slate-600">{itemLocation(item, itemUsage)}<p className="mt-1 text-xs text-slate-500">{lastUse?.radnici.map((worker) => `${worker.ime} ${worker.prezime}`).join(', ') || 'Bez zadnjeg korisnika'}{lastUse ? ` · ${dateLabel(lastUse.datum)}` : ''}</p></td>
+                  <td className="px-4 py-3 text-slate-600">{inspection.label}</td>
                   <td className="px-4 py-3 text-right text-slate-600">{currency(item.nabavna_vrijednost)}</td>
+                  {kategorija === 'stroj' && <td className="px-4 py-3 text-right text-slate-600">{item.radni_sati.toLocaleString('hr-HR')} h · {currency(item.cijena_sata ?? 0)}/h</td>}
                   <td className="px-4 py-3"><div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100">
                     <button type="button" onClick={() => openEdit(item)} className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-700" aria-label={`Uredi ${item.naziv}`}><Pencil className="h-4 w-4" /></button>
                     <button type="button" onClick={() => setDeleteId(item.id)} className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Obriši ${item.naziv}`}><Trash2 className="h-4 w-4" /></button>
                   </div></td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
           {visibleItems.map((item) => renderDetails(item))}
@@ -458,23 +594,29 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
         <div className="grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-2 2xl:grid-cols-3">
           {visibleItems.map((item) => {
             const itemDocuments = documents[item.id] ?? [];
+            const itemUsage = usageHistory[item.id] ?? [];
             const alert = itemServiceAlert(item, itemDocuments);
+            const readiness = readinessState(item, itemDocuments);
+            const inspection = inspectionState(itemDocuments);
+            const lastUse = itemUsage[0];
             return (
               <article key={item.id} className={`min-w-0 rounded-2xl border bg-white p-4 shadow-sm transition-shadow hover:shadow-md ${expandedId === item.id ? 'border-sky-300 ring-1 ring-sky-100 xl:col-span-2 2xl:col-span-3' : 'border-slate-200'}`}>
                 <div className="flex items-start justify-between gap-2">
                   <button type="button" onClick={() => void toggleDetails(item)} className="flex min-w-0 items-center gap-3 text-left">
                     <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-700"><Icon className="h-5 w-5" /></span>
-                    <span className="min-w-0"><span className="block truncate font-semibold text-slate-900">{item.naziv}</span><span className="block truncate text-xs text-slate-500">{[item.marka, item.model].filter(Boolean).join(' ') || 'Bez marke/modela'}</span></span>
+                    <span className="min-w-0"><span className="block truncate font-semibold text-slate-900">{item.naziv}</span><span className="block truncate text-xs text-slate-500">{[item.podkategorija, [item.marka, item.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ') || 'Bez kategorije i marke/modela'}</span></span>
                   </button>
                   <div className="flex gap-1">
                     <button type="button" onClick={() => openEdit(item)} className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-700" aria-label={`Uredi ${item.naziv}`}><Pencil className="h-4 w-4" /></button>
                     <button type="button" onClick={() => setDeleteId(item.id)} className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Obriši ${item.naziv}`}><Trash2 className="h-4 w-4" /></button>
                   </div>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2"><Badge variant={statusVariants[item.status]}>{statusLabels[item.status]}</Badge><Badge variant={item.stanje === 'osteceno' ? 'red' : item.stanje === 'novo' ? 'blue' : 'gray'}>{conditionLabels[item.stanje]}</Badge></div>
+                <div className="mt-3 flex flex-wrap gap-2"><Badge variant={statusVariants[item.status]}>{statusLabels[item.status]}</Badge><Badge variant={item.stanje === 'osteceno' ? 'red' : item.stanje === 'novo' ? 'blue' : 'gray'}>{conditionLabels[item.stanje]}</Badge><Badge variant={statusTone(readiness.tone)}>{readiness.label}</Badge></div>
                 <div className="mt-3 grid min-w-0 grid-cols-1 gap-2 text-xs text-slate-500 xl:grid-cols-2">
                   <span>{item.inventarski_broj ? `Inv. ${item.inventarski_broj}` : item.serijski_broj ? `Ser. ${item.serijski_broj}` : 'Bez inventarskog broja'}</span>
-                  <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{item.gradilista?.naziv ?? 'Skladište'}</span>
+                  <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{itemLocation(item, itemUsage)}</span>
+                  <span>Pregled: {inspection.label}</span>
+                  <span>Zadnji korisnik: {lastUse?.radnici.map((worker) => `${worker.ime} ${worker.prezime}`).join(', ') || 'Nije evidentiran'}{lastUse ? ` · ${dateLabel(lastUse.datum)}` : ''}</span>
                   <span>Količina: {item.kolicina.toLocaleString('hr-HR')}</span>
                   <span>Nabava: {currency(item.nabavna_vrijednost)}{item.datum_nabave ? ` · ${dateLabel(item.datum_nabave)}` : ''}</span>
                   {kategorija === 'stroj' && <span className="flex items-center gap-1"><Wrench className="h-3.5 w-3.5" />{item.radni_sati.toLocaleString('hr-HR')} radnih sati</span>}
@@ -507,6 +649,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
         <div className="space-y-3">
           <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
             <Field label="Naziv *"><TextInput value={form.naziv} onChange={(event) => setForm((previous) => ({ ...previous, naziv: event.target.value }))} placeholder={kategorija === 'alat' ? 'npr. Bušilica' : 'npr. Mini bager'} /></Field>
+            <Field label={kategorija === 'alat' ? 'Kategorija alata' : 'Kategorija stroja'}><TextInput value={form.podkategorija} onChange={(event) => setForm((previous) => ({ ...previous, podkategorija: event.target.value }))} placeholder="npr. Aku alati, rezni alati" /></Field>
             <Field label="Marka"><TextInput value={form.marka} onChange={(event) => setForm((previous) => ({ ...previous, marka: event.target.value }))} /></Field>
             <Field label="Model"><TextInput value={form.model} onChange={(event) => setForm((previous) => ({ ...previous, model: event.target.value }))} /></Field>
             <Field label="Inventarski broj"><TextInput value={form.inventarski_broj} onChange={(event) => setForm((previous) => ({ ...previous, inventarski_broj: event.target.value }))} /></Field>
@@ -517,7 +660,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
             <Field label="Stanje"><Select value={form.stanje} onChange={(event) => setForm((previous) => ({ ...previous, stanje: event.target.value as OpremaStanje }))}>
               {Object.entries(conditionLabels).map(([key, value]) => <option key={key} value={key}>{value}</option>)}
             </Select></Field>
-            <Field label="Gradilište"><Select value={form.gradiliste_id} onChange={(event) => setForm((previous) => ({ ...previous, gradiliste_id: event.target.value }))}>
+            <Field label="Gradilište"><Select value={form.gradiliste_id} onChange={(event) => setForm((previous) => ({ ...previous, gradiliste_id: event.target.value, radnik_id: '' }))}>
               <option value="">Skladište / nije dodijeljeno</option>
               {sites.map((site) => <option key={site.id} value={site.id}>{site.naziv}</option>)}
             </Select></Field>

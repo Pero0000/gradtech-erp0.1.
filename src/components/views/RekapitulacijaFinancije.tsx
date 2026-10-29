@@ -12,7 +12,8 @@ import { ExportMenu } from '@/components/ui/ExportMenu';
 const eur = (value: number) => value.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' });
 const num = (value: number) => value.toLocaleString('hr-HR', { maximumFractionDigits: 2 });
 const statusLabels: Record<GradilisteStatus, string> = {
-  ponuda: 'Ponuda', planirano: 'Planirano', aktivno: 'Aktivno', pauzirano: 'Pauzirano', zavrseno: 'Završeno',
+  ponuda: 'Ponuda', planirano: 'Planirano', aktivno: 'Aktivno', pauzirano: 'Pauzirano',
+  neplaceno: 'Neplaćeno', zavrseno: 'Završeno',
 };
 const regijaLabels: Record<GradilisteRegija, string> = {
   dalmacija: 'Dalmacija', istra_kvarner: 'Istra i Kvarner', slavonija: 'Slavonija',
@@ -95,6 +96,10 @@ export function RekapitulacijaFinancije({ gradilista, satnica, nettoPoRadnicima,
     neplaceno: sum.neplaceno + row.neplaceno, saldo: sum.saldo + row.saldo, sati: sum.sati + row.sati,
     brojFaktura: sum.brojFaktura + row.brojFaktura,
   }), { trosak: 0, prihod: 0, placeno: 0, neplaceno: 0, saldo: 0, sati: 0, brojFaktura: 0 }), [rows]);
+  const najprofitabilnija = [...rows].filter((row) => row.brojZapisa > 0 && row.saldo > 0)
+    .sort((a, b) => b.saldo - a.saldo).slice(0, 5);
+  const najlosija = [...rows].filter((row) => row.brojZapisa > 0 && row.saldo < 0)
+    .sort((a, b) => a.saldo - b.saldo).slice(0, 5);
   const marza = totals.prihod !== 0 ? totals.saldo / totals.prihod * 100 : null;
   const ready = !loading && !error && !filterError && data !== null;
   const filterSummary = [
@@ -223,6 +228,28 @@ export function RekapitulacijaFinancije({ gradilista, satnica, nettoPoRadnicima,
           ].map(([label, value]) => <div key={label} className="rounded-xl border border-slate-200 bg-white p-4">
             <p className="text-sm text-slate-500">{label}</p><p className="mt-1 break-words text-xl font-bold text-slate-900">{eur(Number(value))}</p>
           </div>)}
+        </div>
+        <div className="grid gap-3 xl:grid-cols-2">
+          {[
+            { title: 'Najprofitabilnija gradilišta', items: najprofitabilnija, empty: 'Nema profitabilnih gradilišta u odabranom prikazu.', tone: 'text-emerald-700' },
+            { title: 'Najlošija gradilišta', items: najlosija, empty: 'Nema gradilišta s negativnim rezultatom u odabranom prikazu.', tone: 'text-red-700' },
+          ].map(({ title, items, empty, tone }) => (
+            <section key={title} className="rounded-xl border border-slate-200 bg-white p-4">
+              <h3 className="mb-2 text-sm font-semibold text-slate-900">{title} <span className="font-normal text-slate-500">(Top 5)</span></h3>
+              {items.length === 0 ? <p className="text-sm text-slate-500">{empty}</p> : (
+                <ol className="divide-y divide-slate-100">
+                  {items.map((row) => (
+                    <li key={row.gradiliste.id}>
+                      <button type="button" onClick={() => onOpen(row.gradiliste.id)} className="flex w-full items-center gap-3 py-2 text-left hover:bg-slate-50">
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{row.gradiliste.naziv}</span>
+                        <span className={`shrink-0 text-right text-sm font-semibold tabular-nums ${tone}`}>{eur(row.saldo)}<span className="ml-2 text-xs font-normal text-slate-500">{row.marza === null ? '—' : `${num(row.marza)} %`}</span></span>
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </section>
+          ))}
         </div>
         <p className="text-sm text-slate-600">Prikazano {rows.length} od {gradilista.length} gradilišta · {totals.brojFaktura} faktura · {num(totals.sati)} h. Svi zbrojevi odnose se samo na filtrirani prikaz.</p>
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Camera, ImagePlus, Trash2, Check, ChevronLeft, ChevronRight, ClipboardCheck, Clock3, CreditCard, FileText, Flag, Gauge, ListChecks, LogOut, Package, Play, Plus, RefreshCw, Truck, Wrench } from 'lucide-react';
+import { AlertTriangle, Camera, ImagePlus, Trash2, Check, ChevronLeft, ChevronRight, ClipboardCheck, Clock3, CreditCard, FileText, Flag, Gauge, ListChecks, LogOut, MapPin, Package, Play, Plus, RefreshCw, Truck, Wrench } from 'lucide-react';
 import { useAuth } from '@/auth/useAuth';
 import { usePushRegistration } from '@/components/mobile/usePushRegistration';
 import {
@@ -44,7 +44,7 @@ const portalTabs: Array<{ id: WorkerPortalTab; label: string; title: string; ico
   { id: 'dokumenti', label: 'Dokumenti', title: 'Moji dokumenti', icon: <FileText className="h-5 w-5" /> },
 ];
 
-// Pregled koji poslovođa potvrđuje pri pokretanju vremena (zahtjev RPC-a mobile_start_worker_time).
+// Pregled obaveznih dijelova naloga prije početka vremena.
 const reviewSectionIds = ['upute', 'zadaci', 'materijal', 'alat', 'dokumenti'];
 
 type PrepKey = 'napomena' | 'zadaci' | 'dodatni' | 'materijal_na' | 'alat_na' | 'dokumenti';
@@ -139,6 +139,10 @@ function visibleMobileOrders(orders: MobileRadniNalog[]) {
   );
 }
 
+function googleMapsDirectionsUrl(address: string) {
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
+}
+
 function Button({
   children,
   onClick,
@@ -192,7 +196,12 @@ export function MobileWorkOrdersView() {
   selectedIdRef.current = selectedId;
 
   const selected = orders.find((order) => order.id === selectedId) ?? null;
-  const isLeader = selected?.poslovodja_id === profile?.radnik_id;
+  const canEditOrder = Boolean(
+    selected
+    && selected.status !== 'zavrsen'
+    && selected.mobile_status !== 'odobren'
+    && selected.mobile_status !== 'zakljucen_bez_potvrde',
+  );
 
   useEffect(() => {
     if (!profile?.radnik_id) return;
@@ -514,9 +523,10 @@ export function MobileWorkOrdersView() {
   };
 
   const toggleItem = async (item: NalogStavka, field: 'gotovo' | 'uzeto' = 'gotovo') => {
+    const rijeseno = Boolean(item.gotovo || item.uzeto);
     await runAction(() => updateNalogStavka(item.id, item.tip === 'stroj'
       ? { [field]: !item[field] }
-      : { gotovo: !item.gotovo, uzeto: !item.gotovo }));
+      : { gotovo: !rijeseno, uzeto: !rijeseno }));
   };
 
   const numberOrNull = (value: string) => value.trim() === '' ? null : Number(value.replace(',', '.'));
@@ -525,8 +535,6 @@ export function MobileWorkOrdersView() {
     if (!selected || !details) return;
     await saveReport({ potvrde: [] });
     const notStarted = details.ekipa.filter((worker) => !worker.mobile_started_at);
-    // Poslovođa prvi, kako bi njegov pregled bio evidentiran prije ostatka ekipe.
-    notStarted.sort((a, b) => Number(b.radnik_id === selected.poslovodja_id) - Number(a.radnik_id === selected.poslovodja_id));
     for (const worker of notStarted) {
       await startMobileWorkerTime(selected.id, worker.radnik_id, reviewSectionIds);
     }
@@ -601,8 +609,10 @@ export function MobileWorkOrdersView() {
   const selectedPhotoQueue = photoQueue.filter((photo) => photo.nalogId === selectedId);
   const savMaterijal = details?.stavke.filter((item) => item.tip === 'materijal') ?? [];
   const savAlat = details?.stavke.filter((item) => item.tip === 'alat') ?? [];
-  const materijalStavke = savMaterijal.filter((item) => !item.gotovo);
-  const alatStavke = savAlat.filter((item) => !item.gotovo);
+  const materijalStavke = savMaterijal.filter((item) => !item.gotovo && !item.uzeto);
+  const alatStavke = savAlat.filter((item) => !item.gotovo && !item.uzeto);
+  const rijeseniMaterijal = savMaterijal.filter((item) => item.gotovo || item.uzeto);
+  const rijeseniAlat = savAlat.filter((item) => item.gotovo || item.uzeto);
   // Nakon pokretanja gradilišta prikazuju se samo stavke upisane za nastavak radova.
   const siteStartedAt = [selected?.mobile_started_at, ...(details?.ekipa ?? []).map((worker) => worker.mobile_started_at)]
     .filter((value): value is string => Boolean(value))
@@ -622,11 +632,11 @@ export function MobileWorkOrdersView() {
     { label: 'Dodatni radovi pregledani', ok: prep.includes('dodatni') },
     {
       label: 'Materijal riješen',
-      ok: savMaterijal.length ? savMaterijal.every((item) => item.gotovo) : prep.includes('materijal_na'),
+      ok: savMaterijal.length ? savMaterijal.every((item) => item.gotovo || item.uzeto) : prep.includes('materijal_na'),
     },
     {
       label: 'Alat riješen',
-      ok: savAlat.length ? savAlat.every((item) => item.gotovo) : prep.includes('alat_na'),
+      ok: savAlat.length ? savAlat.every((item) => item.gotovo || item.uzeto) : prep.includes('alat_na'),
     },
     { label: 'Dokumenti pregledani', ok: prep.includes('dokumenti') },
     {
@@ -692,9 +702,20 @@ export function MobileWorkOrdersView() {
                   <p className="font-mono text-xs text-slate-500">{selected.broj}</p>
                   <h2 className="mt-1 text-xl font-bold text-slate-900">{selected.naslov}</h2>
                   {selected.gradiliste_naziv && <p className="mt-1 text-sm font-medium text-sky-800">{selected.gradiliste_naziv}</p>}
+                  {selected.gradiliste_adresa && (
+                    <a
+                      href={googleMapsDirectionsUrl(selected.gradiliste_adresa)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-sky-700 underline decoration-sky-300 underline-offset-2"
+                    >
+                      <MapPin className="h-4 w-4 shrink-0" />
+                      {selected.gradiliste_adresa}
+                    </a>
+                  )}
                 </div>
                 <span className="shrink-0 rounded-full bg-sky-100 px-2.5 py-1 text-xs font-bold text-sky-800">
-                  {selected.mobile_status === 'dodijeljen' ? 'Čeka poslovođu' : selected.mobile_status === 'u_tijeku' ? 'U tijeku' : selected.mobile_status === 'predan' ? 'Čeka odobrenje' : selected.mobile_status === 'odobren' ? 'Odobren' : selected.mobile_status === 'zakljucen_bez_potvrde' ? 'Zaključen bez potvrde' : 'Nalog'}
+                  {selected.mobile_status === 'dodijeljen' ? 'Čeka početak' : selected.mobile_status === 'u_tijeku' ? 'U tijeku' : selected.mobile_status === 'predan' ? 'Čeka odobrenje' : selected.mobile_status === 'odobren' ? 'Odobren' : selected.mobile_status === 'zakljucen_bez_potvrde' ? 'Zaključen bez potvrde' : 'Nalog'}
                 </span>
               </div>
               {selected.opis && <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">{selected.opis}</p>}
@@ -718,7 +739,7 @@ export function MobileWorkOrdersView() {
                     </div>
                     <div className="space-y-3 p-4">
                       <p className="whitespace-pre-wrap text-base font-semibold leading-6 text-slate-900">{details.napomena}</p>
-                      {selected.mobile_status === 'dodijeljen' && isLeader && (
+                      {selected.mobile_status === 'dodijeljen' && canEditOrder && (
                         <CheckField
                           checked={prep.includes('napomena')}
                           onChange={(checked) => togglePrep('napomena', checked)}
@@ -731,7 +752,7 @@ export function MobileWorkOrdersView() {
 
                 {selected.mobile_status === 'dodijeljen' && (
                   <>
-                    {isLeader ? (
+                    {canEditOrder ? (
                       <>
                     <StepHeader step={1} title="Priprema prije polaska" text="Pregledaj nalog, preuzmi materijal i alat te upiši početne kilometre." />
 
@@ -747,7 +768,7 @@ export function MobileWorkOrdersView() {
                           }}
                           className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 disabled:bg-slate-100"
                         >
-                          <option value="">Poslovođa (zadano)</option>
+                          <option value="">Nije odabran (zadano)</option>
                           {details.ekipa.map((worker) => (
                             <option key={worker.radnik_id} value={worker.radnik_id}>{worker.ime} {worker.prezime}</option>
                           ))}
@@ -812,6 +833,11 @@ export function MobileWorkOrdersView() {
                         placeholder="Npr. boja bijela 15 l"
                         working={working}
                       />
+                      <ResolvedItemsHistory
+                        items={rijeseniMaterijal}
+                        onToggle={(item) => void toggleItem(item)}
+                        disabled={!canEditOrder || working}
+                      />
                     </WorkOrderPanel>
 
                     <WorkOrderPanel
@@ -839,6 +865,11 @@ export function MobileWorkOrdersView() {
                         placeholder="Npr. skela, brusilica"
                         working={working}
                       />
+                      <ResolvedItemsHistory
+                        items={rijeseniAlat}
+                        onToggle={(item) => void toggleItem(item)}
+                        disabled={!canEditOrder || working}
+                      />
                     </WorkOrderPanel>
 
                     <WorkOrderPanel title="Dokumenti i slike" icon={<FileText className="h-5 w-5" />} tone="slate">
@@ -865,7 +896,7 @@ export function MobileWorkOrdersView() {
                           className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-lg text-slate-900 disabled:bg-slate-100"
                         />
                       </label>
-                      {isLeader && (
+                      {canEditOrder && (
                         <CheckField
                           checked={report.kmNa}
                           onChange={(checked) => setReport((current) => ({ ...current, kmNa: checked, kmPocetak: checked ? '' : current.kmPocetak, kmKraj: checked ? '' : current.kmKraj }))}
@@ -883,9 +914,9 @@ export function MobileWorkOrdersView() {
                       </>
                     ) : (
                       <>
-                        <StepHeader step={1} title="Uvod u gradilište" text="Pregledaj početne informacije. Radni nalog otključava poslovođa nakon potvrde i pokretanja gradilišta." />
+                        <StepHeader step={1} title="Radni nalog je zaključen" text="Ovaj nalog više nije moguće uređivati." />
                         <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
-                          Nalog još nije pokrenut. Dok ga poslovođa ne potvrdi, možeš pregledavati uvodne informacije, ali ne možeš unositi ni mijenjati podatke.
+                          Ured je završno zaključio ovaj radni nalog. Izmjene više nisu dostupne.
                         </p>
                         <WorkOrderPanel title="Početne informacije" icon={<ClipboardCheck className="h-5 w-5" />} tone="slate">
                           <ReviewBlock title="Radni zadaci">
@@ -914,11 +945,11 @@ export function MobileWorkOrdersView() {
                   </>
                 )}
 
-                {selected.mobile_status === 'u_tijeku' && (
+                {(selected.mobile_status === 'u_tijeku' || selected.mobile_status === 'predan') && (
                   <>
-                    <StepHeader step={2} title="Rad na gradilištu" text="Za svaki dio odaberi „Potvrđujem” ili „Nije primjenjivo”." />
-                    {!isLeader && (
-                      <p className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm leading-6 text-sky-900">Možeš označavati obavljene poslove i dopisivati dodatne radove, fotografije, materijal, alat i strojeve. Potvrde i zaključivanje naloga radi poslovođa.</p>
+                    <StepHeader step={2} title="Rad na gradilištu" text="Svi dodijeljeni djelatnici mogu uređivati nalog i predati ga uredu na završno odobrenje." />
+                    {selected.mobile_status === 'predan' && (
+                      <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">Nalog je predan uredu, ali ga još možete uređivati. Nakon izmjena ponovno ga predajte; ured ga zaključuje tek završnim odobrenjem.</p>
                     )}
 
                     {([
@@ -962,7 +993,7 @@ export function MobileWorkOrdersView() {
                           </button>
                         </div>)}
                       </div>
-                      <SectionConfirm value={potvrdaOf(sekcija.key)} onChange={(value) => void setPotvrda(sekcija.key, value)} disabled={working || !isLeader} />
+                      <SectionConfirm value={potvrdaOf(sekcija.key)} onChange={(value) => void setPotvrda(sekcija.key, value)} disabled={working || !canEditOrder} />
                     </WorkOrderPanel>
                     ))}
 
@@ -1026,7 +1057,7 @@ export function MobileWorkOrdersView() {
                           }
                           void setPotvrda('foto', value);
                         }}
-                        disabled={working || !isLeader}
+                        disabled={working || !canEditOrder}
                       />
                     </WorkOrderPanel>
 
@@ -1047,7 +1078,12 @@ export function MobileWorkOrdersView() {
                         placeholder="Npr. boja bijela 15 l"
                         working={working}
                       />
-                      <SectionConfirm value={potvrdaOf('materijal')} onChange={(value) => void setPotvrda('materijal', value)} disabled={working || !isLeader} />
+                      <ResolvedItemsHistory
+                        items={rijeseniMaterijal}
+                        onToggle={(item) => void toggleItem(item)}
+                        disabled={!canEditOrder || working}
+                      />
+                      <SectionConfirm value={potvrdaOf('materijal')} onChange={(value) => void setPotvrda('materijal', value)} disabled={working || !canEditOrder} />
                     </WorkOrderPanel>
 
                     <WorkOrderPanel
@@ -1067,7 +1103,12 @@ export function MobileWorkOrdersView() {
                         placeholder="Npr. skela, brusilica"
                         working={working}
                       />
-                      <SectionConfirm value={potvrdaOf('alat')} onChange={(value) => void setPotvrda('alat', value)} disabled={working || !isLeader} />
+                      <ResolvedItemsHistory
+                        items={rijeseniAlat}
+                        onToggle={(item) => void toggleItem(item)}
+                        disabled={!canEditOrder || working}
+                      />
+                      <SectionConfirm value={potvrdaOf('alat')} onChange={(value) => void setPotvrda('alat', value)} disabled={working || !canEditOrder} />
                     </WorkOrderPanel>
 
                     <WorkOrderPanel title="Strojevi i radni sati" icon={<Wrench className="h-5 w-5" />} tone="amber">
@@ -1085,7 +1126,7 @@ export function MobileWorkOrdersView() {
                         placeholder=""
                         working={working}
                       />
-                      <SectionConfirm value={potvrdaOf('strojevi')} onChange={(value) => void setPotvrda('strojevi', value)} disabled={working || !isLeader} />
+                      <SectionConfirm value={potvrdaOf('strojevi')} onChange={(value) => void setPotvrda('strojevi', value)} disabled={working || !canEditOrder} />
                     </WorkOrderPanel>
 
                     <StepHeader step={3} title="Završetak dana" text="Potvrdi radno vrijeme, stanje ENC-a i kilometre povratka, zatim zaključi nalog." />
@@ -1095,7 +1136,7 @@ export function MobileWorkOrdersView() {
                       <div className="space-y-3">
                         {details.ekipa.map((worker) => {
                           const timeDraft = teamTimeDrafts[worker.radnik_id] ?? { vrijemeOd: DEFAULT_POCETAK_RADA, vrijemeDo: DEFAULT_KRAJ_RADA };
-                          const locked = !isLeader || potvrde.includes('vrijeme') || working;
+                          const locked = !canEditOrder || potvrde.includes('vrijeme') || working;
                           return (
                             <div key={worker.radnik_id} className="rounded-xl border border-slate-200 p-3">
                               <p className="font-semibold text-slate-900">{worker.ime} {worker.prezime}</p>
@@ -1123,7 +1164,7 @@ export function MobileWorkOrdersView() {
                           );
                         })}
                       </div>
-                      {isLeader && (
+                      {canEditOrder && (
                         <CheckField
                           checked={potvrde.includes('vrijeme')}
                           onChange={(checked) => void confirmWorkTime(checked)}
@@ -1140,12 +1181,12 @@ export function MobileWorkOrdersView() {
                           min="0"
                           step="0.01"
                           value={report.encStanje}
-                          disabled={!isLeader || potvrdaOf('enc') !== null || working}
+                          disabled={!canEditOrder || potvrdaOf('enc') !== null || working}
                           onChange={(event) => setReport((current) => ({ ...current, encStanje: event.target.value }))}
                           className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-lg text-slate-900 disabled:bg-slate-100"
                         />
                       </label>
-                      <SectionConfirm value={potvrdaOf('enc')} onChange={(value) => void confirmEnc(value)} disabled={working || !isLeader} />
+                      <SectionConfirm value={potvrdaOf('enc')} onChange={(value) => void confirmEnc(value)} disabled={working || !canEditOrder} />
                     </WorkOrderPanel>
 
                     <WorkOrderPanel title="Kilometri povratka" icon={<Gauge className="h-5 w-5" />} tone="amber">
@@ -1160,7 +1201,7 @@ export function MobileWorkOrdersView() {
                               type="number"
                               min="0"
                               value={report.kmKraj}
-                              disabled={!isLeader || potvrdaOf('km_kraj') !== null || working}
+                              disabled={!canEditOrder || potvrdaOf('km_kraj') !== null || working}
                               onChange={(event) => setReport((current) => ({ ...current, kmKraj: event.target.value }))}
                               className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-lg text-slate-900 disabled:bg-slate-100"
                             />
@@ -1168,28 +1209,28 @@ export function MobileWorkOrdersView() {
                           {report.kmPocetak && report.kmKraj && Number(report.kmKraj) >= Number(report.kmPocetak) && (
                             <p className="text-sm text-slate-600">Prijeđeno: <span className="font-semibold text-slate-900">{Number(report.kmKraj) - Number(report.kmPocetak)} km</span></p>
                           )}
-                          <SectionConfirm value={potvrdaOf('km_kraj')} onChange={(value) => void confirmKmKraj(value)} disabled={working || !isLeader} />
+                          <SectionConfirm value={potvrdaOf('km_kraj')} onChange={(value) => void confirmKmKraj(value)} disabled={working || !canEditOrder} />
                         </>
                       )}
                     </WorkOrderPanel>
 
                     <WorkOrderPanel title="Zaključi radni nalog" icon={<Flag className="h-5 w-5" />} tone="emerald">
                       <Checklist items={finishChecks} />
-                      {isLeader ? (
+                      {canEditOrder ? (
                         <Button
-                          onClick={() => void runAction(() => submitMobileNalog(selected.id, true), 'Radni nalog je zaključen i poslan u ured na odobrenje.')}
+                          onClick={() => void runAction(() => submitMobileNalog(selected.id), 'Radni nalog je potvrđen i poslan u ured na završni pregled.')}
                           disabled={working || !finishReady}
                         >
                           <Flag className="h-5 w-5" /> Zaključi radni nalog
                         </Button>
                       ) : (
-                        <p className="rounded-xl bg-sky-50 p-3 text-sm text-sky-900">Nalog zaključuje poslovođa.</p>
+                        <p className="rounded-xl bg-sky-50 p-3 text-sm text-sky-900">Ured je završno zaključio ovaj nalog.</p>
                       )}
                     </WorkOrderPanel>
                   </>
                 )}
 
-                {selected.mobile_status === 'predan' && <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-900">Nalog je zaključen i čeka završno odobrenje u uredu.</p>}
+                {selected.mobile_status === 'predan' && <p className="sr-only">Nalog čeka završno odobrenje u uredu.</p>}
                 {selected.mobile_status === 'odobren' && <p className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900">Nalog je pregledan i odobren.</p>}
                 {selected.mobile_status === 'zakljucen_bez_potvrde' && <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-900">Nalog je zaključen u uredu bez potvrde djelatnika.</p>}
               </>
@@ -1253,20 +1294,33 @@ export function MobileWorkOrdersView() {
                 <p className="mt-1 text-sm text-slate-500">Zaključani nalozi koje ti dodijeli ured pojavit će se ovdje.</p>
               </div>
             ) : orders.map((order) => (
-              <button key={order.id} type="button" onClick={() => setSelectedId(order.id)} className={`w-full rounded-2xl border bg-white p-4 text-left shadow-sm active:bg-indigo-50 ${order.mobile_status === 'u_tijeku' ? 'border-indigo-400' : 'border-slate-200'}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <p className="font-mono text-xs font-semibold text-indigo-600">{order.broj}</p>
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${order.mobile_status === 'u_tijeku' ? 'bg-amber-100 text-amber-800' : order.mobile_status === 'odobren' ? 'bg-emerald-100 text-emerald-800' : 'bg-indigo-50 text-indigo-700'}`}>
-                    {order.mobile_status === 'dodijeljen' ? 'Čeka poslovođu' : order.mobile_status === 'u_tijeku' ? 'U tijeku' : order.mobile_status === 'predan' ? 'Na odobrenju' : order.mobile_status === 'odobren' ? 'Odobren' : order.mobile_status === 'zakljucen_bez_potvrde' ? 'Zaključen bez potvrde' : 'Nalog'}
-                  </span>
-                </div>
-                <h3 className="mt-2 font-bold text-slate-900">{order.naslov}</h3>
-                {order.gradiliste_naziv && <p className="mt-1 text-sm text-slate-500">{order.gradiliste_naziv}</p>}
-                <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
-                  <span>{order.rok ? `Rok: ${new Date(`${order.rok}T00:00:00`).toLocaleDateString('hr-HR')}` : 'Otvori detalje naloga'}</span>
-                  <ChevronRight className="h-4 w-4 text-slate-400" />
-                </div>
-              </button>
+              <article key={order.id} className={`w-full rounded-2xl border bg-white p-4 text-left shadow-sm ${order.mobile_status === 'u_tijeku' ? 'border-indigo-400' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setSelectedId(order.id)} className="w-full text-left active:bg-indigo-50">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="font-mono text-xs font-semibold text-indigo-600">{order.broj}</p>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${order.mobile_status === 'u_tijeku' ? 'bg-amber-100 text-amber-800' : order.mobile_status === 'odobren' ? 'bg-emerald-100 text-emerald-800' : 'bg-indigo-50 text-indigo-700'}`}>
+                      {order.mobile_status === 'dodijeljen' ? 'Čeka početak' : order.mobile_status === 'u_tijeku' ? 'U tijeku' : order.mobile_status === 'predan' ? 'Na odobrenju' : order.mobile_status === 'odobren' ? 'Odobren' : order.mobile_status === 'zakljucen_bez_potvrde' ? 'Zaključen bez potvrde' : 'Nalog'}
+                    </span>
+                  </div>
+                  <h3 className="mt-2 font-bold text-slate-900">{order.naslov}</h3>
+                  {order.gradiliste_naziv && <p className="mt-1 text-sm text-slate-500">{order.gradiliste_naziv}</p>}
+                  <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
+                    <span>{order.rok ? `Rok: ${new Date(`${order.rok}T00:00:00`).toLocaleDateString('hr-HR')}` : 'Otvori detalje naloga'}</span>
+                    <ChevronRight className="h-4 w-4 text-slate-400" />
+                  </div>
+                </button>
+                {order.gradiliste_adresa && (
+                  <a
+                    href={googleMapsDirectionsUrl(order.gradiliste_adresa)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-3 inline-flex min-h-10 items-center gap-2 border-t border-slate-100 pt-3 text-sm font-semibold text-sky-700 underline decoration-sky-300 underline-offset-2"
+                  >
+                    <MapPin className="h-4 w-4 shrink-0" />
+                    {order.gradiliste_adresa}
+                  </a>
+                )}
+              </article>
             )))}
           </section>
         )}
@@ -1461,6 +1515,40 @@ function ItemEditor({
       )}
       {showNone && onNone && <CheckField checked={noneChecked} onChange={onNone} label={noneLabel} />}
     </div>
+  );
+}
+
+function ResolvedItemsHistory({
+  items,
+  onToggle,
+  disabled,
+}: {
+  items: NalogStavka[];
+  onToggle: (item: NalogStavka) => void;
+  disabled: boolean;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <details className="rounded-xl border border-slate-200 bg-slate-50">
+      <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-600">
+        Povijest riješenih stavki ({items.length})
+      </summary>
+      <div className="space-y-2 border-t border-slate-200 p-3">
+        {items.map((item) => (
+          <label key={item.id} className="flex min-h-11 items-center gap-3 rounded-lg bg-white px-3 py-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked
+              disabled={disabled}
+              onChange={() => onToggle(item)}
+              className="h-5 w-5 shrink-0 rounded border-slate-300 accent-emerald-600"
+            />
+            <span className="flex-1 line-through">{item.naziv}</span>
+            <span className="text-xs text-emerald-700">Riješeno</span>
+          </label>
+        ))}
+      </div>
+    </details>
   );
 }
 

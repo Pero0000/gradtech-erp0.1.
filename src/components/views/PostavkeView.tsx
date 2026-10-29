@@ -1,7 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { getAiKey, setAiKey } from '@/lib/ai';
 import { loadPostavke, obavijestTipovi, savePostavke, type ObavijestTip, type Postavke } from '@/lib/postavke';
+import { useAuth } from '@/auth/useAuth';
+import { DEFAULT_GRADILISTE_COLUMN_LABELS, manageCompany } from '@/lib/company';
+import { Field, TextInput } from '@/components/ui/Field';
 
 const toMin = (v: string) => {
   const [h, m] = v.split(':').map(Number);
@@ -19,8 +22,17 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (value: boolean) => v
 }
 
 export function PostavkeView() {
+  const { company, isAdmin, isPlatformOwner, refreshAccess } = useAuth();
   const [p, setP] = useState<Postavke>(loadPostavke);
   const [aiKey, setAiKeyState] = useState(getAiKey);
+  const [columnLabels, setColumnLabels] = useState<string[]>([...DEFAULT_GRADILISTE_COLUMN_LABELS]);
+  const [savingLabels, setSavingLabels] = useState(false);
+  const [labelsError, setLabelsError] = useState('');
+  const [labelsNotice, setLabelsNotice] = useState('');
+
+  useEffect(() => {
+    setColumnLabels(company?.postavke.gradiliste_column_labels ?? [...DEFAULT_GRADILISTE_COLUMN_LABELS]);
+  }, [company]);
 
   const update = (next: Postavke) => {
     setP(next);
@@ -40,16 +52,60 @@ export function PostavkeView() {
     update({ ...p, obavijesti: { ...p.obavijesti, [tip]: { ...p.obavijesti[tip], ...patch } } });
 
   const grupe = [...new Set(obavijestTipovi.map((t) => t.grupa))];
+  const canEditLabels = isAdmin || isPlatformOwner;
+  const saveLabels = async () => {
+    if (!company) return;
+    const labels = columnLabels.map((label) => label.trim());
+    setSavingLabels(true);
+    setLabelsError('');
+    setLabelsNotice('');
+    try {
+      await manageCompany({ action: 'update_board_labels', company_id: company.id, labels });
+      await refreshAccess();
+      setLabelsNotice('Nazivi vrsta gradilišta su spremljeni za cijelu tvrtku.');
+    } catch (reason) {
+      setLabelsError(reason instanceof Error ? reason.message : 'Nazivi vrsta gradilišta nisu spremljeni.');
+    } finally {
+      setSavingLabels(false);
+    }
+  };
 
   return (
     <div className="min-w-0 max-w-full break-words">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Postavke sustava</h1>
-        <p className="mt-1 text-sm text-slate-500">Obavijesti i dnevni/noćni rad · postavke se spremaju u ovom pregledniku</p>
+        <p className="mt-1 text-sm text-slate-500">Obavijesti i dnevni/noćni rad spremaju se u ovom pregledniku; nazivi vrsta gradilišta spremaju se za cijelu tvrtku.</p>
       </div>
 
       <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-2">
         <div className="min-w-0 space-y-5">
+          {canEditLabels && (
+            <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="font-semibold text-slate-900">Vrste gradilišta</h2>
+              <p className="mb-4 mt-1 text-xs text-slate-500">Nazivi stupaca primjenjuju se na Gradilišta i Dnevni raspored za sve korisnike vaše tvrtke.</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {columnLabels.map((label, index) => (
+                  <Field key={index} label={`Vrsta ${index + 1}`}>
+                    <TextInput
+                      maxLength={60}
+                      value={label}
+                      onChange={(event) => setColumnLabels((current) => current.map((value, i) => i === index ? event.target.value : value))}
+                    />
+                  </Field>
+                ))}
+              </div>
+              {labelsError && <p role="alert" className="mt-3 text-sm text-red-700">{labelsError}</p>}
+              {labelsNotice && <p role="status" className="mt-3 text-sm text-emerald-700">{labelsNotice}</p>}
+              <button
+                type="button"
+                disabled={savingLabels || !company}
+                onClick={() => void saveLabels()}
+                className="mt-4 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+              >
+                {savingLabels ? 'Spremanje…' : 'Spremi nazive'}
+              </button>
+            </section>
+          )}
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="font-semibold text-slate-900">Dnevni i noćni rad</h2>
             <p className="mb-4 text-xs text-slate-500">Odaberi sat početka dnevnog i noćnog rada · koristi se za obračun noćnih sati</p>

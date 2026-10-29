@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react';
+import { useAuth } from '@/auth/useAuth';
 import { companyStorage } from '@/lib/company';
 import { downloadFile } from '@/lib/downloadFile';
 import {
   Calendar,
   Camera,
+  CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  CircleAlert,
+  CircleDollarSign,
   Download,
   FileText,
   Pencil,
@@ -16,9 +20,11 @@ import {
   Receipt,
   Save,
   Trash2,
+  TrendingDown,
+  TrendingUp,
   X,
   ExternalLink,
-  FolderOpen,
+  Wrench,
 } from 'lucide-react';
 import type {
   Faktura,
@@ -113,15 +119,39 @@ function date(value: string | null) {
   return value ? new Date(`${value}T00:00:00`).toLocaleDateString('hr-HR') : '—';
 }
 
-function Section({ title, icon, children, action }: { title: string; icon: React.ReactNode; children: React.ReactNode; action?: React.ReactNode }) {
+type SectionTone = 'sky' | 'amber' | 'violet' | 'rose' | 'emerald' | 'slate';
+
+const sectionToneClasses: Record<SectionTone, { border: string; icon: string; title: string }> = {
+  sky: { border: 'border-l-sky-500', icon: 'bg-sky-100 text-sky-700', title: 'text-sky-950' },
+  amber: { border: 'border-l-amber-500', icon: 'bg-amber-100 text-amber-700', title: 'text-amber-950' },
+  violet: { border: 'border-l-violet-500', icon: 'bg-violet-100 text-violet-700', title: 'text-violet-950' },
+  rose: { border: 'border-l-rose-500', icon: 'bg-rose-100 text-rose-700', title: 'text-rose-950' },
+  emerald: { border: 'border-l-emerald-500', icon: 'bg-emerald-100 text-emerald-700', title: 'text-emerald-950' },
+  slate: { border: 'border-l-slate-400', icon: 'bg-slate-100 text-slate-600', title: 'text-slate-900' },
+};
+
+function Section({
+  title,
+  icon,
+  children,
+  action,
+  tone = 'sky',
+}: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  action?: React.ReactNode;
+  tone?: SectionTone;
+}) {
+  const styles = sectionToneClasses[tone];
   return (
-    <section className="border-t border-slate-200 py-4">
+    <section className={`mb-4 break-inside-avoid rounded-xl border border-slate-200 border-l-4 ${styles.border} bg-white p-3 shadow-sm sm:p-4`}>
       <div className="mb-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-        <h3 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-900">
-          <span className="inline-flex items-center gap-2 rounded-md bg-sky-50 px-2.5 py-1.5 text-sky-900">
-            <span className="text-sky-700">{icon}</span>
-            {title}
+        <h3 className={`flex min-w-0 items-center gap-2 text-sm font-bold ${styles.title}`}>
+          <span className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${styles.icon}`}>
+            {icon}
           </span>
+          <span>{title}</span>
         </h3>
         {action}
       </div>
@@ -131,6 +161,7 @@ function Section({ title, icon, children, action }: { title: string; icon: React
 }
 
 export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilisteUpdate, onRokoviChange, onOpenNalog }: GradilisteDetailsPanelProps) {
+  const { company } = useAuth();
   const [details, setDetails] = useState<GradilisteDetails | null>(null);
   const [radniNalogFoto, setRadniNalogFoto] = useState<GradilisteRadniNalogFoto[]>([]);
   const [loadingRadniNalogFoto, setLoadingRadniNalogFoto] = useState(true);
@@ -193,9 +224,11 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     rabat: '0',
     datum_izdavanja: new Date().toISOString().slice(0, 10),
     datum_dospjecja: '',
+    datum_naplate: '',
     status: 'izdana' as FakturaStatus,
     opis: '',
   });
+  const invoiceRabatSmjer = editingInvoice?.rabat_smjer ?? company?.postavke.invoice_rebate_mode ?? 'pribroji';
   const [costModalOpen, setCostModalOpen] = useState(false);
   const [editingCost, setEditingCost] = useState<Trosak | null>(null);
   const [savingCost, setSavingCost] = useState(false);
@@ -602,6 +635,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
       rabat: String(invoice?.rabat ?? 0),
       datum_izdavanja: invoice?.datum_izdavanja ?? new Date().toISOString().slice(0, 10),
       datum_dospjecja: invoice?.datum_dospjecja ?? '',
+      datum_naplate: invoice?.datum_naplate ?? '',
       status: invoice?.status ?? 'izdana',
       opis: invoice?.opis ?? '',
     });
@@ -612,7 +646,8 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const saveInvoice = async () => {
     const iznos = Number(invoiceForm.iznos || 0);
     const rabat = Number(invoiceForm.rabat || 0);
-    if (!invoiceForm.broj.trim() || !Number.isFinite(iznos) || !Number.isFinite(rabat) || iznos < 0 || rabat < 0 || iznos + rabat <= 0) return;
+    const total = invoiceRabatSmjer === 'oduzmi' ? iznos - rabat : iznos + rabat;
+    if (!invoiceForm.broj.trim() || !Number.isFinite(iznos) || !Number.isFinite(rabat) || iznos < 0 || rabat < 0 || total <= 0) return;
     setSavingInvoice(true);
     setError(null);
     const payload = {
@@ -624,6 +659,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
       rabat,
       datum_izdavanja: invoiceForm.datum_izdavanja,
       datum_dospjecja: invoiceForm.datum_dospjecja || null,
+      datum_naplate: invoiceForm.status === 'placena' ? invoiceForm.datum_naplate || null : null,
       status: invoiceForm.status,
       opis: invoiceForm.opis.trim() || null,
     };
@@ -641,12 +677,13 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
 
   const invoiceAmount = Number(invoiceForm.iznos || 0);
   const invoiceRabat = Number(invoiceForm.rabat || 0);
+  const invoiceTotal = invoiceRabatSmjer === 'oduzmi' ? invoiceAmount - invoiceRabat : invoiceAmount + invoiceRabat;
   const canSaveInvoice = Boolean(invoiceForm.broj.trim())
     && Number.isFinite(invoiceAmount)
     && Number.isFinite(invoiceRabat)
     && invoiceAmount >= 0
     && invoiceRabat >= 0
-    && invoiceAmount + invoiceRabat > 0;
+    && invoiceTotal > 0;
 
   const openVtrEditor = async () => {
     setError(null);
@@ -822,6 +859,8 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const costs = (details?.troskovi ?? []) as Trosak[];
   const workTime = (details?.radnoVrijeme ?? []) as RadnoVrijeme[];
   const deadlines = (details?.rokovi ?? []) as Rok[];
+  const openDeadlines = deadlines.filter((item) => item.status !== 'zavrsen');
+  const completedDeadlines = deadlines.filter((item) => item.status === 'zavrsen');
   const invoices = (details?.fakture ?? []) as Faktura[];
   const contractedWorks = (details?.ugovoreniRadovi ?? []) as UgovoreniRad[];
   const tasks = (details?.nalozi ?? []) as RadniNalog[];
@@ -849,23 +888,60 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const paid = invoices.filter((item) => item.status === 'placena').reduce((sum, item) => sum + iznosFakture(item), 0);
   const collectionDebt = invoiced - paid;
   const baseOffer = gradiliste.ugovorena_vrijednost ?? 0;
+  const renderDeadline = (item: Rok) => {
+    const late = item.status === 'otvoren' && item.datum < new Date().toISOString().slice(0, 10);
+    return (
+      <div key={item.id} className="group flex items-start gap-2 text-xs">
+        <input
+          type="checkbox"
+          checked={item.status === 'zavrsen'}
+          onChange={() => void toggleDeadline(item)}
+          disabled={!!item.zadatak_id}
+          title={item.zadatak_id ? 'Upravlja se iz radnog zadatka' : 'Označi kao završeno'}
+          className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300"
+        />
+        <div className="min-w-0 flex-1">
+          <p className={item.status === 'zavrsen' ? 'text-slate-400 line-through' : 'text-slate-700'}>{item.naziv}</p>
+          {item.opis && <p className="text-[11px] text-slate-500">{item.opis}</p>}
+        </div>
+        <span className={`flex-shrink-0 font-medium ${late ? 'text-red-600' : 'text-slate-600'}`}>{date(item.datum)}</span>
+        {item.zadatak_id ? (
+          <span className="flex-shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{item.opis === 'Dodatni rad' ? 'Dodatni rad' : 'Zadatak'}</span>
+        ) : (
+          <>
+            <button type="button" onClick={() => openDeadlineEditor(item)} className="flex-shrink-0 text-slate-400 hover:text-sky-600" aria-label="Uredi rok">
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+            <button type="button" onClick={() => void removeDeadline(item.id)} className="flex-shrink-0 text-slate-300 hover:text-red-600" aria-label="Obriši rok">
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </>
+        )}
+      </div>
+    );
+  };
   const vtrOffer = contractedWorks
     .filter((item) => item.vrsta === 'vtr')
     .reduce((sum, item) => sum + (item.ugovoreni_iznos ?? 0), 0);
   const offer = baseOffer + vtrOffer;
-  const baseOfferPct = offer > 0 ? (baseOffer / offer) * 100 : 0;
-  const vtrOfferPct = offer > 0 ? (vtrOffer / offer) * 100 : 0;
   const offerMargin = offer - totalCosts;
   const plannedMargin = gradiliste.predvidena_marza && gradiliste.predvidena_marza > 0
     ? gradiliste.predvidena_marza
     : offer * 0.3;
-  const marginVariance = offerMargin - plannedMargin;
-  const marginPct = offer > 0 ? (offerMargin / offer) * 100 : 0;
-  const plannedMarginPct = offer > 0 ? (plannedMargin / offer) * 100 : 0;
+  const plannedMarginPct = offer > 0 ? (plannedMargin / offer) * 100 : null;
   const invoicedBalance = invoiced - totalCosts;
-  const invoicedMarginPct = invoiced > 0 ? (invoicedBalance / invoiced) * 100 : 0;
+  const actualMarginPct = invoiced > 0 ? (invoicedBalance / invoiced) * 100 : null;
+  const marginVariancePct = plannedMarginPct !== null && actualMarginPct !== null
+    ? actualMarginPct - plannedMarginPct
+    : null;
   const invoicedPct = offer > 0 ? (invoiced / offer) * 100 : 0;
   const costPct = offer > 0 ? (totalCosts / offer) * 100 : 0;
+  const collectionPct = invoiced > 0 ? Math.min(100, Math.max(0, (paid / invoiced) * 100)) : 100;
+  const collectionProgressColor = collectionPct > 90
+    ? 'bg-emerald-500'
+    : collectionPct >= 50
+      ? 'bg-amber-500'
+      : 'bg-red-500';
   const costRow = (t: Trosak) => ({ id: t.id, title: t.opis, sub: `${t.kooperanti?.naziv ? `${t.kooperanti.naziv} · ` : kooperanti.find((k) => k.id === t.kooperant_id)?.naziv ? `${kooperanti.find((k) => k.id === t.kooperant_id)?.naziv} · ` : ''}${expenseLabels[t.kategorija]} · ${date(t.datum)}`, amount: t.iznos, trosak: t });
   const isTeren = (t: Trosak) => t.kategorija === 'place' && t.opis.startsWith('Teren');
   const isNight = (t: Trosak) => t.kategorija === 'place' && t.opis.startsWith('Noćni rad');
@@ -897,7 +973,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   ];
   const statusVariant = gradiliste.status === 'aktivno'
     ? 'green'
-    : gradiliste.status === 'ponuda' || gradiliste.status === 'pauzirano'
+    : gradiliste.status === 'ponuda' || gradiliste.status === 'pauzirano' || gradiliste.status === 'neplaceno'
       ? 'yellow'
       : gradiliste.status === 'zavrseno'
         ? 'gray'
@@ -907,6 +983,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     planirano: 'Planirano',
     aktivno: 'Aktivno',
     pauzirano: 'Pauzirano',
+    neplaceno: 'Neplaćeno',
     zavrseno: 'Završeno',
   }[gradiliste.status];
   return (
@@ -926,25 +1003,8 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               gradiliste.voditelj_gradilista ? `Voditelj: ${gradiliste.voditelj_gradilista}` : null,
             ].filter(Boolean).join(' · ') || 'Detalji gradilišta'}
           </p>
-          <p className="mt-1 text-xs text-slate-500">Za otvaranje u Exploreru instaliraj pomoćni program iz mape windows-helper.</p>
         </div>
         <div className="flex flex-shrink-0 flex-wrap items-center gap-1">
-          <a
-            href={`tmcolor-folder://open/${encodeURIComponent(gradiliste.id)}`}
-            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700 hover:bg-sky-100"
-            title="Otvori lokalnu mapu u Windows Exploreru"
-          >
-            <FolderOpen className="h-4 w-4" />
-            Otvori u Exploreru
-          </a>
-          <a
-            href={`tmcolor-folder://select/${encodeURIComponent(gradiliste.id)}`}
-            className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-sky-700"
-            aria-label="Odaberi ili promijeni mapu za Windows Explorer"
-            title="Odaberi ili promijeni mapu"
-          >
-            <Pencil className="h-4 w-4" />
-          </a>
           <button
             type="button"
             onClick={onEdit}
@@ -967,115 +1027,167 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4">
-        <section className="border-b border-slate-200 py-4">
-          <div className="mb-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-            <h3 className="text-sm font-semibold text-slate-900">Financije</h3>
+        <section className="mb-4 space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-base font-bold text-slate-900">Financije</h3>
             {editingFinancials ? (
               <div className="flex flex-wrap items-center gap-1">
-                <button type="button" onClick={() => setEditingFinancials(false)} className="rounded-md px-2 py-1 text-xs text-slate-600 hover:bg-slate-100">
+                <button type="button" onClick={() => setEditingFinancials(false)} className="rounded-lg px-3 py-2 text-xs text-slate-600 hover:bg-slate-100">
                   Odustani
                 </button>
-                <button type="button" onClick={saveFinancials} disabled={savingFinancials} className="inline-flex items-center gap-1 rounded-md bg-sky-700 px-2 py-1 text-xs font-medium text-white hover:bg-sky-800 disabled:opacity-50">
+                <button type="button" onClick={saveFinancials} disabled={savingFinancials} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-50">
                   <Save className="h-3.5 w-3.5" />
                   {savingFinancials ? 'Spremanje…' : 'Spremi'}
                 </button>
               </div>
             ) : (
-              <button type="button" onClick={beginFinancialEdit} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50">
+              <button type="button" onClick={beginFinancialEdit} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100">
                 <Pencil className="h-3.5 w-3.5" />
                 Uredi iznose
               </button>
             )}
           </div>
+
+          <div className="flex flex-wrap gap-2 border-b border-slate-100 pb-4" aria-label="Financijski sažetak">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${invoicedBalance < 0 ? 'bg-red-50 text-red-700' : invoicedBalance > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+              {invoicedBalance < 0 ? <TrendingDown className="h-3.5 w-3.5" /> : invoicedBalance > 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <CircleDollarSign className="h-3.5 w-3.5" />}
+              {`Trenutni rezultat: ${currency(invoicedBalance)}`}
+            </span>
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${invoiced <= 0 ? 'bg-slate-100 text-slate-600' : collectionDebt <= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
+              {invoiced <= 0 ? <CircleAlert className="h-3.5 w-3.5" /> : collectionDebt <= 0 ? <CheckCircle2 className="h-3.5 w-3.5" /> : <CircleAlert className="h-3.5 w-3.5" />}
+              {invoiced <= 0 ? 'Nema faktura za naplatu' : collectionDebt <= 0 ? 'Sve fakture naplaćene' : `Dug za naplatu ${currency(collectionDebt)}`}
+            </span>
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${offer > 0 ? 'bg-slate-100 text-slate-700' : 'bg-slate-100 text-slate-500'}`}>
+              <FileText className="h-3.5 w-3.5" />
+              {offer > 0 ? 'Postoji ugovorena ponuda' : 'Nema ugovorene ponude'}
+            </span>
+          </div>
+
           {editingFinancials ? (
-            <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Osnovna ugovorena ponuda">
                 <TextInput type="number" min="0" step="0.01" value={financialForm.ugovorena_vrijednost} onChange={(event) => setFinancialForm((previous) => ({ ...previous, ugovorena_vrijednost: event.target.value }))} />
               </Field>
               <Field label="Planirana marža (%)">
                 <TextInput type="number" min="0" step="0.1" value={financialForm.predvidena_marza} onChange={(event) => setFinancialForm((previous) => ({ ...previous, predvidena_marza: event.target.value }))} />
               </Field>
-              <div className="self-end pb-2 text-[10px] text-slate-500">Naplaćeno i troškovi računaju se iz povezanih zapisa.</div>
+              <p className="text-xs text-slate-500 sm:col-span-2">Naplaćeno i troškovi računaju se iz povezanih zapisa.</p>
             </div>
           ) : (
-            <div className="space-y-2">
-              <div className="grid grid-cols-1 gap-2 xl:grid-cols-2 2xl:grid-cols-3">
-                <div className="min-w-0 rounded-lg border border-sky-100 bg-sky-50 p-2 sm:p-3">
-                  <p className="text-[10px] font-bold uppercase text-sky-800">Ponuda (ugovoreno)</p>
-                  <p className="mt-1 break-words text-sm font-bold text-slate-900 sm:text-base">{currency(offer)}</p>
-                  <div className="mt-1 space-y-0.5 border-t border-sky-100 pt-1 text-[10px] text-sky-800">
-                    <p className="flex justify-between gap-2">
-                      <span>Osnovna ponuda ({baseOfferPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} %)</span>
-                      <span>{currency(baseOffer)}</span>
-                    </p>
-                    <p className="flex justify-between gap-2">
-                      <span>VTR ({vtrOfferPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} %)</span>
-                      <span>{currency(vtrOffer)}</span>
-                    </p>
+            <>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-4">
+                <div className="flex min-h-32 flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+                  <div className="flex items-center gap-2 text-slate-500"><FileText className="h-4 w-4" /><p className="text-xs font-semibold uppercase tracking-wide">Ponuda</p></div>
+                  <p className="mt-3 break-words text-xl font-bold tabular-nums text-slate-900">{currency(offer)}</p>
+                  <div className="mt-auto space-y-1 pt-3 text-xs text-slate-500">
+                    <p className="flex justify-between gap-2"><span>Osnovna</span><span className="font-medium tabular-nums text-slate-700">{currency(baseOffer)}</span></p>
+                    <p className="flex justify-between gap-2"><span>VTR</span><span className="font-medium tabular-nums text-slate-700">{currency(vtrOffer)}</span></p>
                   </div>
                 </div>
-                <div className="min-w-0 rounded-lg border border-red-100 bg-red-50 p-2 sm:p-3">
-                  <p className="text-[10px] font-bold uppercase text-red-800">Trošak</p>
-                  <p className="mt-1 break-words text-sm font-bold text-red-800 sm:text-base">{currency(totalCosts)}</p>
-                  <p className="mt-0.5 text-[10px] text-red-700">Direktno {currency(directCosts)} · Rad {currency(laborCosts)}</p>
+                <div className="flex min-h-32 flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+                  <div className="flex items-center gap-2 text-slate-500"><Wrench className="h-4 w-4" /><p className="text-xs font-semibold uppercase tracking-wide">Trošak</p></div>
+                  <p className="mt-3 break-words text-xl font-bold tabular-nums text-slate-900">{currency(totalCosts)}</p>
+                  <div className="mt-auto space-y-1 pt-3 text-xs text-slate-500">
+                    <p className="flex justify-between gap-2"><span>Rad</span><span className="font-medium tabular-nums text-slate-700">{currency(laborCosts)}</span></p>
+                    <p className="flex justify-between gap-2"><span>Direktni</span><span className="font-medium tabular-nums text-slate-700">{currency(directCosts)}</span></p>
+                  </div>
                 </div>
-                <div className={`min-w-0 rounded-lg border p-2 sm:p-3 ${offerMargin >= 0 ? 'border-emerald-100 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}>
-                  <p className={`text-[10px] font-bold uppercase ${offerMargin >= 0 ? 'text-emerald-900' : 'text-rose-800'}`}>Razlika ponuda − trošak</p>
-                  <p className={`mt-1 break-words text-sm font-bold sm:text-base ${offerMargin >= 0 ? 'text-emerald-800' : 'text-rose-800'}`}>{currency(offerMargin)}</p>
-                  <p className={`mt-0.5 text-[10px] ${offerMargin >= 0 ? 'text-emerald-800' : 'text-rose-700'}`}>
-                    Marža {offer > 0 ? `${marginPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} %` : '—'}
-                    {(gradiliste.predvidena_marza ?? 0) > 0 && ` · planirano ${currency(gradiliste.predvidena_marza ?? 0)}`}
-                  </p>
+                <div className="flex min-h-32 flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+                  <div className="flex items-center gap-2 text-slate-500"><Receipt className="h-4 w-4" /><p className="text-xs font-semibold uppercase tracking-wide">Fakturirano</p></div>
+                  <p className="mt-3 break-words text-xl font-bold tabular-nums text-slate-900">{currency(invoiced)}</p>
+                  <div className="mt-auto flex justify-between gap-2 pt-3 text-xs text-slate-500">
+                    <span>Za fakturirati</span><span className="font-medium tabular-nums text-slate-700">{currency(Math.max(0, offer - invoiced))}</span>
+                  </div>
                 </div>
-                <div className="min-w-0 rounded-lg border border-violet-100 bg-violet-50 p-2 sm:p-3">
-                  <p className="text-[10px] font-bold uppercase text-violet-900">Fakturirano</p>
-                  <p className="mt-1 break-words text-sm font-bold text-violet-800 sm:text-base">{currency(invoiced)}</p>
-                  <p className="mt-0.5 text-[10px] text-violet-800">
-                    {offer > 0 ? `${invoicedPct.toLocaleString('hr-HR', { maximumFractionDigits: 0 })} % ponude · ` : ''}za fakturirati {currency(Math.max(0, offer - invoiced))}
-                  </p>
-                </div>
-                <div className={`min-w-0 rounded-lg border p-2 sm:p-3 ${invoicedBalance >= 0 ? 'border-teal-100 bg-teal-50' : 'border-rose-200 bg-rose-50'}`}>
-                  <p className={`text-[10px] font-bold uppercase ${invoicedBalance >= 0 ? 'text-teal-900' : 'text-rose-800'}`}>Razlika fakturirano − trošak</p>
-                  <p className={`mt-1 break-words text-sm font-bold sm:text-base ${invoicedBalance >= 0 ? 'text-teal-800' : 'text-rose-800'}`}>{currency(invoicedBalance)}</p>
-                  <p className={`mt-0.5 text-[10px] ${invoicedBalance >= 0 ? 'text-teal-800' : 'text-rose-700'}`}>
-                    {invoiced > 0 ? `Marža na fakturirano ${invoicedMarginPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} %` : 'Nema faktura'}
-                  </p>
-                </div>
-                <div className="min-w-0 rounded-lg border border-amber-100 bg-amber-50 p-2 sm:p-3">
-                  <p className="text-[10px] font-bold uppercase text-amber-900">Preostalo za naplatu</p>
-                  <p className="mt-1 break-words text-sm font-bold text-amber-900 sm:text-base">{currency(offer - invoiced)}</p>
-                  <p className="mt-0.5 text-[10px] text-amber-800">Ponuda {currency(offer)} − fakturirano {currency(invoiced)}</p>
-                </div>
-                <div className="min-w-0 rounded-lg border border-emerald-100 bg-emerald-50 p-2 sm:p-3">
-                  <p className="text-[10px] font-bold uppercase text-emerald-900">Naplaćeno</p>
-                  <p className="mt-1 break-words text-sm font-bold text-emerald-800 sm:text-base">{currency(paid)}</p>
-                  <p className="mt-0.5 text-[10px] text-emerald-800">{offer > 0 ? `${((paid / offer) * 100).toLocaleString('hr-HR', { maximumFractionDigits: 1 })} % ponude` : 'Plaćene fakture'}</p>
-                </div>
-                <div className={`min-w-0 rounded-lg border p-2 sm:p-3 ${collectionDebt > 0 ? 'border-amber-100 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
-                  <p className={`text-[10px] font-bold uppercase ${collectionDebt > 0 ? 'text-amber-900' : 'text-slate-700'}`}>Dug za naplatu</p>
-                  <p className={`mt-1 break-words text-sm font-bold sm:text-base ${collectionDebt > 0 ? 'text-amber-900' : 'text-slate-800'}`}>{currency(collectionDebt)}</p>
-                  <p className={`mt-0.5 text-[10px] ${collectionDebt > 0 ? 'text-amber-800' : 'text-slate-600'}`}>Fakturirano {currency(invoiced)} − naplaćeno {currency(paid)}</p>
-                </div>
-                <div className={`min-w-0 rounded-lg border p-2 sm:p-3 ${marginVariance >= 0 ? 'border-teal-100 bg-teal-50' : 'border-rose-200 bg-rose-50'}`}>
-                  <p className={`text-[10px] font-bold uppercase ${marginVariance >= 0 ? 'text-teal-900' : 'text-rose-800'}`}>Planirana vs. stvarna marža</p>
-                  <p className={`mt-1 break-words text-sm font-bold sm:text-base ${marginVariance >= 0 ? 'text-teal-800' : 'text-rose-800'}`}>{currency(plannedMargin)} / {currency(offerMargin)}</p>
-                  <p className={`mt-0.5 text-[10px] ${marginVariance >= 0 ? 'text-teal-800' : 'text-rose-700'}`}>
-                    Planirana {plannedMarginPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} % · stvarna {marginPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} % · razlika {currency(marginVariance)}
-                  </p>
+                <div className="flex min-h-32 flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+                  <div className="flex items-center gap-2 text-slate-500"><CircleDollarSign className="h-4 w-4" /><p className="text-xs font-semibold uppercase tracking-wide">Naplaćeno</p></div>
+                  <p className="mt-3 break-words text-xl font-bold tabular-nums text-slate-900">{currency(paid)}</p>
+                  <div className="mt-auto flex justify-between gap-2 pt-3 text-xs text-slate-500">
+                    <span>Dug</span><span className={`font-semibold tabular-nums ${collectionDebt > 0 ? 'text-amber-700' : 'text-slate-700'}`}>{currency(Math.max(0, collectionDebt))}</span>
+                  </div>
                 </div>
               </div>
-              {offer > 0 && (
-                <div>
-                  <div className="flex h-2 overflow-hidden rounded-full bg-slate-100" title="Trošak, fakturirano i naplaćeno u odnosu na ponudu">
-                    <div className="bg-emerald-500" style={{ width: `${Math.min(100, (paid / offer) * 100)}%` }} />
-                    <div className="bg-violet-400" style={{ width: `${Math.max(0, Math.min(100, (invoiced / offer) * 100) - Math.min(100, (paid / offer) * 100))}%` }} />
+
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                <section className="rounded-xl border border-slate-200 p-4">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Profitabilnost</h4>
+                  <div className="mt-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+                    <div>
+                      <p className={`text-2xl font-bold tabular-nums ${invoicedBalance < 0 ? 'text-red-700' : invoicedBalance > 0 ? 'text-emerald-700' : 'text-slate-800'}`}>{currency(invoicedBalance)}</p>
+                      <p className="mt-1 text-xs text-slate-500">Trenutni rezultat</p>
+                    </div>
+                    <div className="text-left xl:text-right">
+                      <p className={`text-lg font-semibold tabular-nums ${actualMarginPct !== null && actualMarginPct < 0 ? 'text-red-700' : 'text-slate-800'}`}>{actualMarginPct !== null ? `${actualMarginPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} %` : '—'}</p>
+                      <p className="mt-1 text-xs text-slate-500">Marža</p>
+                    </div>
                   </div>
-                  <p className="mt-1 text-[10px] text-slate-500">
-                    Iskorišteno troškom {costPct.toLocaleString('hr-HR', { maximumFractionDigits: 0 })} % ponude · zeleno naplaćeno, ljubičasto fakturirano
+                  <p className={`mt-3 flex items-center gap-2 text-sm font-medium ${invoicedBalance < 0 ? 'text-red-700' : invoicedBalance > 0 ? 'text-emerald-700' : 'text-slate-600'}`}>
+                    {invoicedBalance < 0 ? <TrendingDown className="h-4 w-4" /> : invoicedBalance > 0 ? <TrendingUp className="h-4 w-4" /> : <CircleDollarSign className="h-4 w-4" />}
+                    {invoicedBalance < 0 ? 'Trenutni rezultat je negativan' : invoicedBalance > 0 ? 'Trenutni rezultat je pozitivan' : 'Trenutni rezultat je na točki pokrića'}
                   </p>
+                </section>
+
+                <section className="rounded-xl border border-slate-200 p-4">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Naplata</h4>
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                    <div><p className="text-xs text-slate-500">Fakturirano</p><p className="mt-1 font-semibold tabular-nums text-slate-800">{currency(invoiced)}</p></div>
+                    <div><p className="text-xs text-slate-500">Naplaćeno</p><p className="mt-1 font-semibold tabular-nums text-slate-800">{currency(paid)}</p></div>
+                  </div>
+                  <div className="mt-4 flex items-center gap-3">
+                    <div
+                      className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100"
+                      role="progressbar"
+                      aria-label="Postotak naplaćenih faktura"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.round(collectionPct)}
+                    >
+                      <div className={`h-full rounded-full transition-[width] ${collectionProgressColor}`} style={{ width: `${collectionPct}%` }} />
+                    </div>
+                    <span className="w-12 text-right text-sm font-semibold tabular-nums text-slate-700">{collectionPct.toLocaleString('hr-HR', { maximumFractionDigits: 0 })} %</span>
+                  </div>
+                  <p className="mt-3 flex justify-between gap-2 text-sm">
+                    <span className="text-slate-500">Dug</span>
+                    <span className={`font-semibold tabular-nums ${collectionDebt > 0 ? 'text-amber-700' : 'text-slate-800'}`}>{currency(Math.max(0, collectionDebt))}</span>
+                  </p>
+                </section>
+              </div>
+
+              <details className="group rounded-xl border border-slate-200">
+                <summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+                  <span>Detaljna financijska analiza</span>
+                  <ChevronDown className="ml-auto h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="grid grid-cols-1 gap-3 border-t border-slate-100 p-4 sm:grid-cols-2">
+                  <div className="rounded-lg border border-slate-200 p-3">
+                    <p className="text-xs text-slate-500">Razlika ponuda − trošak</p>
+                    <p className={`mt-1 font-semibold tabular-nums ${offerMargin < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{currency(offerMargin)}</p>
+                    <p className="mt-1 text-xs text-slate-500">Planirana marža: {plannedMarginPct !== null ? `${plannedMarginPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} %` : 'Nije moguće izračunati planiranu maržu'}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 p-3">
+                    <p className="text-xs text-slate-500">Razlika fakturirano − trošak</p>
+                    <p className={`mt-1 font-semibold tabular-nums ${invoicedBalance < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{currency(invoicedBalance)}</p>
+                    <p className="mt-1 text-xs text-slate-500">Stvarni rezultat (fakturirano − trošak)</p>
+                    <p className="mt-1 text-xs text-slate-500">{actualMarginPct !== null ? `Stvarna marža ${actualMarginPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} %` : 'Nije moguće izračunati stvarnu maržu bez fakturiranog iznosa'}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 p-3 sm:col-span-2">
+                    <p className="text-xs text-slate-500">Planirana vs. stvarna marža</p>
+                    <p className="mt-1 text-xs text-slate-700">Planirani rezultat (ponuda − trošak): <strong className={offerMargin < 0 ? 'text-red-700' : 'text-emerald-700'}>{currency(offerMargin)}</strong></p>
+                    <p className="mt-1 text-xs text-slate-700">Planirana marža: <strong>{plannedMarginPct !== null ? `${plannedMarginPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} %` : 'Nije moguće izračunati planiranu maržu (nema ugovorene ponude)'}</strong></p>
+                    <p className="mt-1 text-xs text-slate-700">Stvarna marža: <strong>{actualMarginPct !== null ? `${actualMarginPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} %` : 'Nije moguće izračunati bez fakturiranog iznosa'}</strong></p>
+                    <p className="mt-1 text-xs text-slate-500">Razlika marže: {marginVariancePct !== null ? `${marginVariancePct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} postotnih bodova` : 'Nije dostupna bez ponude i fakturiranog iznosa'}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 p-3">
+                    <p className="text-xs text-slate-500">Fakturirano od ponude</p>
+                    <p className="mt-1 font-semibold tabular-nums text-slate-800">{invoicedPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} %</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 p-3">
+                    <p className="text-xs text-slate-500">Trošak od ponude</p>
+                    <p className="mt-1 font-semibold tabular-nums text-slate-800">{costPct.toLocaleString('hr-HR', { maximumFractionDigits: 1 })} %</p>
+                  </div>
                 </div>
-              )}
-            </div>
+              </details>
+            </>
           )}
         </section>
 
@@ -1092,81 +1204,9 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
         {!loading && details && (
           <>
             <Section
-              title={`Fotografije radnika (${radniNalogFoto.length})`}
-              icon={<Camera className="h-4 w-4" />}
-              action={(
-                <div className="flex flex-wrap items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setPendingPhotoDelete('all')}
-                    disabled={sortedRadniNalogFoto.length === 0 || deletingPhotos}
-                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    Izbriši sve
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void downloadAllPhotos()}
-                    disabled={sortedRadniNalogFoto.length === 0 || downloadingPhotos}
-                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    {downloadingPhotos ? 'Priprema ZIP-a…' : 'Preuzmi sve'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void loadRadniNalogFoto(true)}
-                    disabled={loadingRadniNalogFoto}
-                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50"
-                  >
-                    <RefreshCw className={`h-3.5 w-3.5 ${loadingRadniNalogFoto ? 'animate-spin' : ''}`} />
-                    Osvježi
-                  </button>
-                </div>
-              )}
-            >
-              {loadingRadniNalogFoto && radniNalogFoto.length === 0 ? (
-                <p className="text-xs text-slate-400">Učitavanje fotografija…</p>
-              ) : radniNalogFoto.length === 0 ? (
-                <p className="text-xs text-slate-400">Još nema fotografija učitanih na radne naloge ovog gradilišta.</p>
-              ) : (
-                <div className="grid max-h-[34rem] auto-rows-[11rem] grid-cols-1 gap-2 overflow-y-auto overscroll-contain xl:grid-cols-2 2xl:grid-cols-5" tabIndex={0} role="region" aria-label="Fotografije radnika — pomaknite za ostale slike">
-                  {sortedRadniNalogFoto.map((foto, index) => (
-                    <div
-                      key={foto.id}
-                      className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setActivePhotoIndex(index)}
-                        className="block min-h-0 w-full flex-1 bg-slate-50"
-                        title={`${foto.nalog_broj}${foto.nalog_naslov ? ` · ${foto.nalog_naslov}` : ''}`}
-                      >
-                        <img loading="lazy" src={foto.url} alt={foto.naziv ?? `Fotografija naloga ${foto.nalog_broj}`} className="h-full w-full object-contain" />
-                      </button>
-                      <span className="block shrink-0 truncate px-2 py-1.5 text-[10px] text-slate-600">
-                        {foto.created_at ? new Date(foto.created_at).toLocaleDateString('hr-HR') : 'Bez datuma'}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => void downloadPhoto(foto)}
-                        disabled={downloadingPhotoId !== null}
-                        className="inline-flex w-full shrink-0 items-center justify-center gap-1 border-t border-slate-100 px-2 py-2 text-xs font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50"
-                        aria-label={`Preuzmi ${foto.naziv ?? `fotografiju naloga ${foto.nalog_broj}`}`}
-                      >
-                        <Download className="h-3.5 w-3.5" />
-                        {downloadingPhotoId === foto.id ? 'Preuzimanje…' : 'Preuzmi'}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Section>
-
-            <Section
               title="Rokovi i važni datumi"
               icon={<Calendar className="h-4 w-4" />}
+              tone="amber"
               action={(
                 <button type="button" onClick={() => openDeadlineEditor()} className="inline-flex items-center gap-1 text-xs font-medium text-sky-700 hover:text-sky-900">
                   <Plus className="h-3.5 w-3.5" />
@@ -1184,93 +1224,77 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                   <p className="mt-0.5 text-xs font-bold text-slate-900">{date(gradiliste.datum_zavrsetka)}</p>
                 </div>
               </div>
-              {deadlines.length === 0 ? <p className="text-xs text-slate-400">Nema dodatnih rokova.</p> : (
-                <div className="space-y-1.5">
-                  {deadlines.map((item) => {
-                    const late = item.status === 'otvoren' && item.datum < new Date().toISOString().slice(0, 10);
-                    return (
-                      <div key={item.id} className="group flex items-start gap-2 text-xs">
-                        <input
-                          type="checkbox"
-                          checked={item.status === 'zavrsen'}
-                          onChange={() => void toggleDeadline(item)}
-                          disabled={!!item.zadatak_id}
-                          title={item.zadatak_id ? 'Upravlja se iz radnog zadatka' : 'Označi kao završeno'}
-                          className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className={item.status === 'zavrsen' ? 'text-slate-400 line-through' : 'text-slate-700'}>{item.naziv}</p>
-                          {item.opis && <p className="text-[11px] text-slate-500">{item.opis}</p>}
-                        </div>
-                        <span className={`flex-shrink-0 font-medium ${late ? 'text-red-600' : 'text-slate-600'}`}>{date(item.datum)}</span>
-                        {item.zadatak_id ? (
-                          <span className="flex-shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{item.opis === 'Dodatni rad' ? 'Dodatni rad' : 'Zadatak'}</span>
-                        ) : (
-                          <>
-                            <button type="button" onClick={() => openDeadlineEditor(item)} className="flex-shrink-0 text-slate-400 hover:text-sky-600" aria-label="Uredi rok">
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                            <button type="button" onClick={() => void removeDeadline(item.id)} className="flex-shrink-0 text-slate-300 hover:text-red-600" aria-label="Obriši rok">
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+              {openDeadlines.length === 0 ? <p className="text-xs text-slate-400">Nema otvorenih rokova.</p> : (
+                <div className="space-y-1.5">{openDeadlines.map(renderDeadline)}</div>
+              )}
+              {completedDeadlines.length > 0 && (
+                <details className="mt-2 rounded-md border border-slate-200 bg-slate-50">
+                  <summary className="cursor-pointer px-2.5 py-2 text-xs font-medium text-slate-600">
+                    Povijest završenih rokova ({completedDeadlines.length})
+                  </summary>
+                  <div className="space-y-1.5 border-t border-slate-200 p-2">{completedDeadlines.map(renderDeadline)}</div>
+                </details>
               )}
             </Section>
 
             {ZADATAK_SEKCIJE.map((sekcija) => {
               const lista = zadaci.filter((z) => zadatakVrsta(z) === sekcija.vrsta);
+              const otvoreni = lista.filter((z) => !z.gotovo);
+              const rijeseni = lista.filter((z) => z.gotovo);
+              const renderZadatak = (z: GradilisteZadatak) => (
+                <div
+                  key={z.id}
+                  className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs transition-colors ${z.gotovo ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={z.gotovo}
+                    onChange={() => void toggleZadatak(z)}
+                    className="h-4 w-4 flex-shrink-0 accent-emerald-600"
+                    title={z.gotovo ? 'Vrati među zadatke za rješavanje' : 'Označi kao riješeno'}
+                  />
+                  {editingZadatakId === z.id ? (
+                    <input
+                      autoFocus
+                      value={editingZadatakText}
+                      onChange={(event) => setEditingZadatakText(event.target.value)}
+                      onBlur={() => void saveZadatakText(z)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') void saveZadatakText(z);
+                        if (event.key === 'Escape') setEditingZadatakId(null);
+                      }}
+                      className="min-w-0 flex-1 rounded border border-slate-300 px-1.5 py-0.5 text-xs"
+                    />
+                  ) : (
+                    <span className={`min-w-0 flex-1 break-words ${z.gotovo ? 'font-medium text-emerald-800 line-through decoration-emerald-400' : 'text-slate-800'}`}>{z.naziv}</span>
+                  )}
+                  <input
+                    type="date"
+                    value={z.rok ?? ''}
+                    onChange={(event) => void setZadatakRok(z, event.target.value)}
+                    title="Rok izvršenja"
+                    className={`w-[7.5rem] flex-shrink-0 rounded border px-1 py-0.5 text-[11px] ${z.gotovo ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : z.rok && z.rok < new Date().toISOString().slice(0, 10) ? 'border-red-300 text-red-600' : 'border-slate-200 text-slate-600'}`}
+                  />
+                  <button type="button" onClick={() => { setEditingZadatakId(z.id); setEditingZadatakText(z.naziv); }} className="flex-shrink-0 text-slate-400 hover:text-sky-600" aria-label="Uredi zadatak">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button type="button" onClick={() => void removeZadatak(z.id)} className="flex-shrink-0 text-slate-300 hover:text-red-600" aria-label="Obriši zadatak">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              );
               return (
-            <Section key={sekcija.vrsta} title={`${sekcija.naslov} (${lista.filter((z) => z.gotovo).length}/${lista.length})`} icon={<ClipboardList className="h-4 w-4" />}>
-              {lista.length === 0 && <p className="mb-2 text-xs text-slate-400">{sekcija.prazno}</p>}
-              <div className="space-y-1.5">
-                {lista.map((z) => (
-                  <div
-                    key={z.id}
-                    className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs transition-colors ${z.gotovo ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={z.gotovo}
-                      onChange={() => void toggleZadatak(z)}
-                      className="h-4 w-4 flex-shrink-0 accent-emerald-600"
-                      title="Označi kao riješeno"
-                    />
-                    {editingZadatakId === z.id ? (
-                      <input
-                        autoFocus
-                        value={editingZadatakText}
-                        onChange={(event) => setEditingZadatakText(event.target.value)}
-                        onBlur={() => void saveZadatakText(z)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') void saveZadatakText(z);
-                          if (event.key === 'Escape') setEditingZadatakId(null);
-                        }}
-                        className="min-w-0 flex-1 rounded border border-slate-300 px-1.5 py-0.5 text-xs"
-                      />
-                    ) : (
-                      <span className={`min-w-0 flex-1 break-words ${z.gotovo ? 'font-medium text-emerald-800 line-through decoration-emerald-400' : 'text-slate-800'}`}>{z.naziv}</span>
-                    )}
-                    <input
-                      type="date"
-                      value={z.rok ?? ''}
-                      onChange={(event) => void setZadatakRok(z, event.target.value)}
-                      title="Rok izvršenja"
-                      className={`w-[7.5rem] flex-shrink-0 rounded border px-1 py-0.5 text-[11px] ${z.gotovo ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : z.rok && z.rok < new Date().toISOString().slice(0, 10) ? 'border-red-300 text-red-600' : 'border-slate-200 text-slate-600'}`}
-                    />
-                    <button type="button" onClick={() => { setEditingZadatakId(z.id); setEditingZadatakText(z.naziv); }} className="flex-shrink-0 text-slate-400 hover:text-sky-600" aria-label="Uredi zadatak">
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button type="button" onClick={() => void removeZadatak(z.id)} className="flex-shrink-0 text-slate-300 hover:text-red-600" aria-label="Obriši zadatak">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
+            <Section key={sekcija.vrsta} title={`${sekcija.naslov} (${otvoreni.length} otvorenih)`} icon={<ClipboardList className="h-4 w-4" />} tone={sekcija.vrsta === 'dodatni' ? 'violet' : 'sky'}>
+              {otvoreni.length === 0 && <p className="mb-2 text-xs text-slate-400">{sekcija.prazno}</p>}
+              <div className="space-y-1.5">{otvoreni.map(renderZadatak)}</div>
+              {rijeseni.length > 0 && (
+                <details className="mt-2 rounded-md border border-slate-200 bg-slate-50">
+                  <summary className="cursor-pointer px-2.5 py-2 text-xs font-medium text-slate-600">
+                    Povijest riješenih {sekcija.vrsta === 'dodatni' ? 'radova' : 'zadataka'} ({rijeseni.length})
+                  </summary>
+                  <div className="space-y-1.5 border-t border-slate-200 p-2">{rijeseni.map(renderZadatak)}</div>
+                </details>
+              )}
               <div className="mt-2 flex flex-col gap-2 xl:flex-row xl:items-center">
                 <input
                   value={newZadatak[sekcija.vrsta]}
@@ -1300,33 +1324,15 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               );
             })}
 
-            <GradilisteMaterijalDokumenti gradilisteId={gradiliste.id} />
+            <GradilisteMaterijalDokumenti gradilisteId={gradiliste.id}>
+              {({ documents, materials }) => (
+                <>
+                  {documents}
 
-            <Section title={`Radni nalozi (${tasks.length})`} icon={<ClipboardList className="h-4 w-4" />}>
-              {tasks.length === 0 ? <p className="text-xs text-slate-400">Nema radnih naloga.</p> : (
-                <div className="space-y-2">
-                  {tasks.map((item) => (
-                    <button
-                      type="button"
-                      key={item.id}
-                      onClick={() => onOpenNalog?.(item.id)}
-                      className="flex w-full items-start justify-between gap-3 rounded-md px-1.5 py-1 text-left text-xs hover:bg-sky-50"
-                      title="Otvori radni nalog"
-                    >
-                      <div className="min-w-0">
-                        <p className="break-words font-medium text-slate-800">{item.broj} · {item.naslov}</p>
-                        <p className="text-slate-500">{item.prioritet} · rok {date(item.rok)}</p>
-                      </div>
-                      <span className="flex-shrink-0 text-slate-500">{item.status.replace('_', ' ')}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </Section>
-
-            <Section
+                  <Section
               title={`Obračun troškova (${currency(totalCosts)})`}
               icon={<Receipt className="h-4 w-4" />}
+              tone="rose"
               action={(
                 <button type="button" onClick={() => openCostEditor()} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50">
                   <Plus className="h-3.5 w-3.5" />
@@ -1417,9 +1423,12 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               </div>
             </Section>
 
-            <Section
+                  <GradilisteTroskovnik gradilisteId={gradiliste.id} naziv={gradiliste.naziv} />
+
+                  <Section
               title={`Ugovoreni radovi (${contractedWorks.length})`}
               icon={<FileText className="h-4 w-4" />}
+              tone="violet"
               action={(
                 <button type="button" onClick={() => void openVtrEditor()} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50">
                   <Plus className="h-3.5 w-3.5" />
@@ -1465,11 +1474,10 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               )}
             </Section>
 
-            <GradilisteTroskovnik gradilisteId={gradiliste.id} naziv={gradiliste.naziv} />
-
-            <Section
+                  <Section
               title={`Fakture (${invoices.length})`}
               icon={<Receipt className="h-4 w-4" />}
+              tone="emerald"
               action={(
                 <button type="button" onClick={() => openInvoiceEditor()} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50">
                   <Plus className="h-3.5 w-3.5" />
@@ -1484,7 +1492,9 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                       <span className="min-w-0 break-words text-slate-700">{item.broj} · {item.status === 'placena' ? 'Plaćena' : item.status === 'izdana' ? 'Izdana' : 'Neplaćena'}</span>
                       <span className="flex-shrink-0 text-right">
                         <span className="block font-medium text-slate-600">{currency(iznosFakture(item))}</span>
-                        {item.rabat > 0 && <span className="block text-[10px] text-slate-400">{currency(item.iznos)} + rabat {currency(item.rabat)}</span>}
+                        {item.rabat > 0 && <span className="block text-[10px] text-slate-400">
+                          {currency(item.iznos)} {item.rabat_smjer === 'oduzmi' ? '− rabat' : '+ rabat'} {currency(item.rabat)}
+                        </span>}
                       </span>
                       <button type="button" onClick={() => openInvoiceEditor(item)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-700" aria-label={`Uredi fakturu ${item.broj}`}>
                         <Pencil className="h-3.5 w-3.5" />
@@ -1493,7 +1503,114 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                   ))}
                 </div>
               )}
-            </Section>
+                  </Section>
+
+                  <Section
+                    title={`Fotografije radnika (${radniNalogFoto.length})`}
+                    icon={<Camera className="h-4 w-4" />}
+                    tone="rose"
+                    action={(
+                      <div className="flex flex-wrap items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setPendingPhotoDelete('all')}
+                          disabled={sortedRadniNalogFoto.length === 0 || deletingPhotos}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Izbriši sve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void downloadAllPhotos()}
+                          disabled={sortedRadniNalogFoto.length === 0 || downloadingPhotos}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          {downloadingPhotos ? 'Priprema ZIP-a…' : 'Preuzmi sve'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void loadRadniNalogFoto(true)}
+                          disabled={loadingRadniNalogFoto}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${loadingRadniNalogFoto ? 'animate-spin' : ''}`} />
+                          Osvježi
+                        </button>
+                      </div>
+                    )}
+                  >
+                    {loadingRadniNalogFoto && radniNalogFoto.length === 0 ? (
+                      <p className="text-xs text-slate-400">Učitavanje fotografija…</p>
+                    ) : radniNalogFoto.length === 0 ? (
+                      <p className="text-xs text-slate-400">Još nema fotografija učitanih na radne naloge ovog gradilišta.</p>
+                    ) : (
+                      <div className="grid max-h-[34rem] auto-rows-[11rem] grid-cols-1 gap-2 overflow-y-auto overscroll-contain xl:grid-cols-2 2xl:grid-cols-5" tabIndex={0} role="region" aria-label="Fotografije radnika — pomaknite za ostale slike">
+                        {sortedRadniNalogFoto.map((foto, index) => (
+                          <div key={foto.id} className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white">
+                            <button
+                              type="button"
+                              onClick={() => setActivePhotoIndex(index)}
+                              className="block min-h-0 w-full flex-1 bg-slate-50"
+                              title={`${foto.nalog_broj}${foto.nalog_naslov ? ` · ${foto.nalog_naslov}` : ''}`}
+                            >
+                              <img loading="lazy" src={foto.url} alt={foto.naziv ?? `Fotografija naloga ${foto.nalog_broj}`} className="h-full w-full object-contain" />
+                            </button>
+                            <span className="block shrink-0 truncate px-2 py-1.5 text-[10px] text-slate-600">
+                              {foto.created_at ? new Date(foto.created_at).toLocaleDateString('hr-HR') : 'Bez datuma'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void downloadPhoto(foto)}
+                              disabled={downloadingPhotoId !== null}
+                              className="inline-flex w-full shrink-0 items-center justify-center gap-1 border-t border-slate-100 px-2 py-2 text-xs font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+                              aria-label={`Preuzmi ${foto.naziv ?? `fotografiju naloga ${foto.nalog_broj}`}`}
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                              {downloadingPhotoId === foto.id ? 'Preuzimanje…' : 'Preuzmi'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Section>
+
+                  {materials}
+                </>
+              )}
+            </GradilisteMaterijalDokumenti>
+
+            <section className="border-t border-slate-200 py-4">
+              <details className="group rounded-lg border border-slate-200 bg-white">
+                <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 [&::-webkit-details-marker]:hidden">
+                  <ClipboardList className="h-4 w-4 flex-shrink-0 text-sky-700" />
+                  <span className="font-semibold">Radni nalozi ({tasks.length})</span>
+                  <ChevronDown className="ml-auto h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="border-t border-slate-200 px-3 py-2">
+                  {tasks.length === 0 ? <p className="text-xs text-slate-400">Nema radnih naloga.</p> : (
+                    <div className="space-y-2">
+                      {tasks.map((item) => (
+                        <button
+                          type="button"
+                          key={item.id}
+                          onClick={() => onOpenNalog?.(item.id)}
+                          className="flex w-full items-start justify-between gap-3 rounded-md px-1.5 py-1 text-left text-xs hover:bg-sky-50"
+                          title="Otvori radni nalog"
+                        >
+                          <div className="min-w-0">
+                            <p className="break-words font-medium text-slate-800">{item.broj} · {item.naslov}</p>
+                            <p className="text-slate-500">{item.prioritet} · rok {date(item.rok)}</p>
+                          </div>
+                          <span className="flex-shrink-0 text-slate-500">{item.status.replace('_', ' ')}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </details>
+            </section>
           </>
         )}
       </div>
@@ -1603,11 +1720,11 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
           <Field label="Osnovni iznos (EUR)">
             <TextInput type="number" min="0" step="0.01" value={invoiceForm.iznos} onChange={(event) => setInvoiceForm((previous) => ({ ...previous, iznos: event.target.value }))} />
           </Field>
-          <Field label="Rabat (EUR, pribraja se)">
+          <Field label={`Rabat (EUR, ${invoiceRabatSmjer === 'oduzmi' ? 'oduzima se' : 'pribraja se'})`}>
             <TextInput type="number" min="0" step="0.01" value={invoiceForm.rabat} onChange={(event) => setInvoiceForm((previous) => ({ ...previous, rabat: event.target.value }))} />
           </Field>
           <p className="-mt-2 rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-900">
-            Ukupna izlazna faktura: <strong>{((Number(invoiceForm.iznos) || 0) + (Number(invoiceForm.rabat) || 0)).toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}</strong>
+            Ukupna izlazna faktura: <strong>{invoiceTotal.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}</strong>
           </p>
           <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
             <Field label="Datum izdavanja">
@@ -1618,12 +1735,25 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
             </Field>
           </div>
           <Field label="Status naplate">
-            <Select value={invoiceForm.status} onChange={(event) => setInvoiceForm((previous) => ({ ...previous, status: event.target.value as FakturaStatus }))}>
+            <Select value={invoiceForm.status} onChange={(event) => {
+              const status = event.target.value as FakturaStatus;
+              setInvoiceForm((previous) => ({
+                ...previous,
+                status,
+                datum_naplate: status === 'placena' && !previous.datum_naplate && editingInvoice?.status !== 'placena'
+                  ? new Date().toISOString().slice(0, 10)
+                  : previous.datum_naplate,
+              }));
+            }}>
               <option value="izdana">Izdana</option>
               <option value="placena">Plaćena</option>
-              <option value="nep placena">Neplaćena</option>
             </Select>
           </Field>
+          {invoiceForm.status === 'placena' && (
+            <Field label="Datum naplate">
+              <TextInput type="date" value={invoiceForm.datum_naplate} onChange={(event) => setInvoiceForm((previous) => ({ ...previous, datum_naplate: event.target.value }))} />
+            </Field>
+          )}
           <Field label="Opis">
             <Textarea rows={2} value={invoiceForm.opis} onChange={(event) => setInvoiceForm((previous) => ({ ...previous, opis: event.target.value }))} />
           </Field>

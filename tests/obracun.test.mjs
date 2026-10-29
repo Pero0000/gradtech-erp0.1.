@@ -47,6 +47,7 @@ test('portal računa aktualne noćne sate i bez odobrene evidencije, a ručne sa
     } } },
     './postavke': { nocniInterval: () => ({ nocOd: 1320, danOd: 360 }) },
     './obracunSati': obracun,
+    './vehicleKmCosts': { calculateVehicleKmCosts: () => [] },
     './company': {},
     './pagination': {},
   };
@@ -222,7 +223,8 @@ test('evidencija obracuna ucitava gradiliste, nalog i smjenu odgovarajuceg radni
       };
       return query;
     } } },
-    './postavke': {}, './obracunSati': obracun, './company': {},
+    './postavke': {}, './obracunSati': obracun,
+    './vehicleKmCosts': { calculateVehicleKmCosts: () => [] }, './company': {},
     './pagination': { fetchAllRows: async (page) => {
       const result = await page(0, 499);
       if (result.error) throw result.error;

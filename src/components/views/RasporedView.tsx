@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useRef, useState } from 'react';
 import { CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, GripVertical, Hammer, Package, Plus, Send, Trash2, Truck, X } from 'lucide-react';
-import type { DnevniRasporedGradiliste, DnevniRasporedOstalo, DnevniRasporedRadnik, Gradiliste, GradilisteRegija, GradilisteZadatak, NalogPrioritet, NalogStatus, Radnik, RadnikOdsustvo, Rok, Vozilo, ZadatakVrsta } from '@/types';
+import type { DnevniRasporedGradiliste, DnevniRasporedOstalo, DnevniRasporedRadnik, Gradiliste, GradilisteRegija, GradilisteStatus, GradilisteZadatak, Investitor, NalogPrioritet, NalogStatus, Radnik, RadnikOdsustvo, Rok, Vozilo, ZadatakVrsta } from '@/types';
 import { zadatakVrsta } from '@/types';
 import { nextDeadline } from '@/lib/rokovi';
 import { Modal } from '@/components/ui/Modal';
@@ -46,6 +46,11 @@ import {
   removeRasporedGradiliste,
   removeRasporedRadnik,
   updateRasporedVrijemeVozila,
+  createGradiliste,
+  createInvestitor,
+  createObjekt,
+  fetchInvestitori,
+  fetchObjekti,
   addRasporedTekst,
   updateRasporedTekst,
   fetchRasporedObjava,
@@ -54,6 +59,7 @@ import {
   type RasporedObjavaVozilo,
 } from '@/lib/api';
 import { useAuth } from '@/auth/useAuth';
+import { DEFAULT_GRADILISTE_COLUMN_LABELS } from '@/lib/company';
 
 type DragPayload =
   | { type: 'gradiliste'; id: string; assignmentId?: string }
@@ -103,10 +109,36 @@ interface NalogForm {
   stavka_ids: string[];
   nove_stavke: { tip: 'materijal' | 'alat'; naziv: string }[];
 }
-type Category = 'arhiva' | 'aktivna' | 'planirana' | 'ponude';
+type Category = 'neplacena' | 'arhiva' | 'aktivna' | 'planirana' | 'ponude';
 
-const columnLabels = ['dm gradilišta', 'dm intervencije', 'ostala gradilišta'];
+interface NewGradilisteForm {
+  column: string;
+  naziv: string;
+  adresa: string;
+  regija: GradilisteRegija | '';
+  investitorNaziv: string;
+  objektNaziv: string;
+  status: GradilisteStatus;
+  datum_pocetka: string;
+  datum_zavrsetka: string;
+  opis: string;
+}
+
+const emptyNewGradilisteForm: NewGradilisteForm = {
+  column: '',
+  naziv: '',
+  adresa: '',
+  regija: '',
+  investitorNaziv: '',
+  objektNaziv: '',
+  status: 'planirano',
+  datum_pocetka: '',
+  datum_zavrsetka: '',
+  opis: '',
+};
+
 const categories: { key: Category; label: string; statuses: Gradiliste['status'][] }[] = [
+  { key: 'neplacena', label: 'Neplaćena', statuses: ['neplaceno'] },
   { key: 'arhiva', label: 'Arhiva', statuses: ['zavrseno'] },
   { key: 'aktivna', label: 'Aktivna', statuses: ['aktivno', 'pauzirano'] },
   { key: 'planirana', label: 'Planirana', statuses: ['planirano'] },
@@ -207,7 +239,13 @@ export function RasporedView() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [copyingSchedule, setCopyingSchedule] = useState(false);
-  const { profile, canAccess } = useAuth();
+  const { profile, canAccess, company } = useAuth();
+  const columnLabels = company?.postavke.gradiliste_column_labels ?? [...DEFAULT_GRADILISTE_COLUMN_LABELS];
+  const canCreateSite = canAccess('gradilista', 'edit');
+  const [newSiteOpen, setNewSiteOpen] = useState(false);
+  const [newSiteSaving, setNewSiteSaving] = useState(false);
+  const [newSiteForm, setNewSiteForm] = useState<NewGradilisteForm>(emptyNewGradilisteForm);
+  const [investitori, setInvestitori] = useState<Investitor[]>([]);
   const [objava, setObjava] = useState<RasporedObjava | null>(null);
   const [sendingSchedule, setSendingSchedule] = useState(false);
   const [rasporedTab, setRasporedTab] = useState<'slaganje' | 'posalji'>('slaganje');
@@ -235,7 +273,7 @@ export function RasporedView() {
   const [zadatakNalozi, setZadatakNalozi] = useState<Record<string, string>>({});
   // Otvoreni zadaci vidljivi su i kad ih drži drugi (nezavršeni) nalog, da se mogu prebaciti na ovaj.
   const visibleZadaci = nalogZadaci.filter((z) => !z.gotovo);
-  const visibleStavke = nalogStavke.filter((item) => !item.gotovo);
+  const visibleStavke = nalogStavke.filter((item) => !item.gotovo && !item.uzeto);
 
   useEffect(() => {
     if (!formGradilisteId && !formNalogId) {
@@ -273,7 +311,7 @@ export function RasporedView() {
         if (cancelled) return;
         setNalogStavke(list);
         setNalogForm((current) => current && current.gradiliste_id === formGradilisteId
-          ? { ...current, stavka_ids: list.filter((item) => !item.gotovo && item.nalog_id === current.nalogId).map((item) => item.id) }
+          ? { ...current, stavka_ids: list.filter((item) => !item.gotovo && !item.uzeto && item.nalog_id === current.nalogId).map((item) => item.id) }
           : current);
       })
       .catch(() => {
@@ -463,6 +501,72 @@ export function RasporedView() {
       await Promise.all([loadDay(selectedDate), loadOstalo()]);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri spremanju rasporeda');
+    }
+  };
+
+  const openNewSite = () => {
+    setError(null);
+    setNotice(null);
+    setNewSiteForm(emptyNewGradilisteForm);
+    setNewSiteOpen(true);
+    void fetchInvestitori()
+      .then(setInvestitori)
+      .catch((e: unknown) => setError(errMsg(e, 'Greška pri učitavanju investitora')));
+  };
+
+  const saveNewSite = async () => {
+    if (!newSiteForm.naziv.trim() || !newSiteForm.column) return;
+    const investorName = newSiteForm.investitorNaziv.trim();
+    const objectName = newSiteForm.objektNaziv.trim();
+    if (Boolean(investorName) !== Boolean(objectName)) {
+      setError('Investitor i objekt moraju biti uneseni zajedno.');
+      return;
+    }
+
+    setNewSiteSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      let objektId: string | null = null;
+      if (investorName && objectName) {
+        const investor = investitori.find((item) => item.naziv.trim().toLocaleLowerCase() === investorName.toLocaleLowerCase())
+          ?? await createInvestitor({ naziv: investorName });
+        if (!investitori.some((item) => item.id === investor.id)) {
+          setInvestitori((previous) => [...previous, investor].sort((a, b) => a.naziv.localeCompare(b.naziv)));
+        }
+        const objects = await fetchObjekti(investor.id);
+        const existingObject = objects.find((item) => item.naziv.trim().toLocaleLowerCase() === objectName.toLocaleLowerCase());
+        const object = existingObject ?? await createObjekt({ naziv: objectName, investitor_id: investor.id });
+        objektId = object.id;
+      }
+
+      const created: Gradiliste = await createGradiliste({
+        naziv: newSiteForm.naziv.trim(),
+        adresa: newSiteForm.adresa.trim() || null,
+        regija: newSiteForm.regija || null,
+        objekt_id: objektId,
+        voditelj_gradilista: null,
+        ugovorena_vrijednost: 0,
+        predvidena_marza: 0,
+        status: newSiteForm.status,
+        datum_pocetka: newSiteForm.datum_pocetka || null,
+        datum_zavrsetka: newSiteForm.datum_zavrsetka || null,
+        opis: newSiteForm.opis.trim() || null,
+      });
+      const nextSites = [...gradilista, created];
+      const nextColumns = reconcileColumns(nextSites, savedColumns).map((column) => column.filter((id) => id !== created.id));
+      nextColumns[Number(newSiteForm.column)].push(created.id);
+      setGradilista(nextSites);
+      setSavedColumns(nextColumns);
+      persistLayout(nextColumns, sortModes);
+      const category = categories.find((item) => item.statuses.includes(created.status));
+      if (category) setActiveCategory(category.key);
+      setNewSiteOpen(false);
+      setNotice('Novo gradilište je spremljeno. Povucite ga na vozilo da ga dodate u raspored.');
+    } catch (e) {
+      setError(errMsg(e, 'Greška pri spremanju novog gradilišta'));
+    } finally {
+      setNewSiteSaving(false);
     }
   };
 
@@ -872,8 +976,8 @@ export function RasporedView() {
   };
 
   return (
-    <div>
-      <div className="mb-5 flex flex-col gap-4 2xl:flex-row 2xl:items-center 2xl:justify-between">
+    <div className="daily-schedule-view min-w-0">
+    <div className="schedule-page-header mb-5 flex flex-col gap-4 2xl:flex-row 2xl:items-center 2xl:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold text-slate-900">Dnevni raspored</h1>
           <p className="mt-1 max-w-4xl text-sm text-slate-500">Gradilište možeš dodati na više vozila. Radnika s vozila na kojem je nalog zaključan povuci s popisa zaposlenika na drugo vozilo da ga tamo dodaš bez micanja s prvog.</p>
@@ -1019,29 +1123,41 @@ export function RasporedView() {
           </section>
         </div>
       ) : (
-      <div className="grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] 2xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1.9fr)_minmax(190px,0.4fr)]">
+      <div className="schedule-main-grid grid min-w-0 grid-cols-1 items-start gap-4">
         {/* Gradilišta */}
         <div className="min-w-0">
-          <div className="mb-2 flex flex-wrap gap-1" role="tablist" aria-label="Kategorije gradilišta">
-            {categories.map((category) => {
-              const count = gradilista.filter((g) => category.statuses.includes(g.status)).length;
-              const active = activeCategory === category.key;
-              return (
-                <button
-                  key={category.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => setActiveCategory(category.key)}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${active ? 'bg-sky-100 text-sky-800' : 'text-slate-600 hover:bg-slate-100'}`}
-                >
-                  {category.label}
-                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${active ? 'bg-white/70' : 'bg-slate-100 text-slate-500'}`}>{count}</span>
-                </button>
-              );
-            })}
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-1" role="tablist" aria-label="Kategorije gradilišta">
+              {categories.map((category) => {
+                const count = gradilista.filter((g) => category.statuses.includes(g.status)).length;
+                const active = activeCategory === category.key;
+                return (
+                  <button
+                    key={category.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setActiveCategory(category.key)}
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${active ? 'bg-sky-100 text-sky-800' : 'text-slate-600 hover:bg-slate-100'}`}
+                  >
+                    {category.label}
+                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${active ? 'bg-white/70' : 'bg-slate-100 text-slate-500'}`}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {canCreateSite && (
+              <button
+                type="button"
+                onClick={openNewSite}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-sky-700 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-sky-800"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Novo gradilište
+              </button>
+            )}
           </div>
-          <div className="grid min-w-0 grid-cols-1 items-start gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-2 xl:grid-cols-2 2xl:grid-cols-3">
+          <div className="schedule-sites-grid grid min-w-0 items-start gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-2">
             {columns.map((column, index) => {
               const mode = sortModes[index] ?? 'manual';
               const items = column
@@ -1095,7 +1211,7 @@ export function RasporedView() {
                         }}
                         onDrop={(e) => dropOnColumn(e, index, g.id)}
                         title={g.naziv}
-                        className={`cursor-grab rounded-lg border bg-white p-2 shadow-sm hover:border-sky-300 active:cursor-grabbing ${dropTarget === `site-${g.id}` ? 'border-sky-400 ring-2 ring-sky-400' : siteCount(g.id) > 1 ? 'border-red-200' : siteCount(g.id) === 1 ? 'border-emerald-200' : 'border-slate-200'}`}
+                        className={`schedule-site-card cursor-grab rounded-lg border bg-white p-2 shadow-sm hover:border-sky-300 active:cursor-grabbing ${dropTarget === `site-${g.id}` ? 'border-sky-400 ring-2 ring-sky-400' : siteCount(g.id) > 1 ? 'border-red-200' : siteCount(g.id) === 1 ? 'border-emerald-200' : 'border-slate-200'}`}
                       >
                         <div className="flex items-start justify-between gap-1">
                           <p className={`break-words text-[13px] font-semibold leading-tight ${siteCount(g.id) > 1 ? 'text-red-600' : siteCount(g.id) === 1 ? 'text-emerald-700' : 'text-slate-900'}`}>{g.naziv}</p>
@@ -1148,7 +1264,7 @@ export function RasporedView() {
             Nema vozila. Dodajte vozila na tabu Vozila i ona će se pojaviti ovdje kao auti.
           </div>
         ) : (
-          <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 items-start gap-2">
+          <div className="schedule-vehicle-grid grid min-w-0 items-start gap-2">
             {[...vozila].sort((a, b) => b.broj_mjesta - a.broj_mjesta || a.registracija.localeCompare(b.registracija)).map((vozilo) => {
               const carSites = siteAssignments.filter((a) => a.vozilo_id === vozilo.id);
               const carWorkers = workerAssignments.filter((a) => a.vozilo_id === vozilo.id);
@@ -1157,6 +1273,7 @@ export function RasporedView() {
               const siteSlots = Math.max(minSiteSlots, carSites.length + 2) - 1;
               const over = vozilo.broj_mjesta > 0 && carWorkers.length > vozilo.broj_mjesta;
               const vehicleLocked = isVehicleLocked(vozilo.id);
+              const vehicleHasLockedOrder = isVehicleOrderLocked(vozilo.id);
               const target = `car-${vozilo.id}`;
               return (
                 <section
@@ -1170,37 +1287,41 @@ export function RasporedView() {
                     if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null);
                   }}
                   onDrop={(e) => dropOnVehicle(e, vozilo.id)}
-                  title={vehicleLocked ? 'Zaključano zbog potvrđene stavke Ostalo ili zaključenog radnog naloga' : undefined}
-                  className={`min-w-0 rounded-lg border-2 p-2 transition-colors ${vehicleLocked ? 'border-emerald-500 bg-emerald-50/60' : dropTarget === target ? 'border-sky-400 bg-sky-50' : 'border-slate-400 bg-slate-200'}`}
+                  title={vehicleLocked ? 'Premještanje vozila ograničeno zbog potvrđene stavke ili zaključenog radnog naloga' : undefined}
+                  className={`schedule-vehicle-card min-w-0 rounded-lg border-2 p-2 transition-colors ${dropTarget === target ? 'border-sky-400 bg-sky-50' : 'border-slate-400 bg-slate-200'}`}
                 >
-                  <div className="mb-2 flex min-w-0 flex-wrap items-center gap-1.5">
+                  <div className="schedule-vehicle-header mb-2 flex min-w-0 flex-wrap items-center gap-1.5">
                     <span className="w-12 flex-shrink-0 truncate rounded border border-slate-800 bg-white px-1 py-0.5 text-[9px] text-slate-900">AUTO:</span>
                     <span className="min-w-0 flex-1 truncate rounded border border-slate-800 bg-amber-200 px-1 py-0.5 text-center text-xs font-bold uppercase text-slate-900" title={[vozilo.marka, vozilo.model].filter(Boolean).join(' ')}>
                       {[vozilo.marka, vozilo.model].filter(Boolean).join(' ')}
                     </span>
-                    {vehicleLocked && <span className="rounded bg-emerald-600 px-1 py-0.5 text-[8px] font-bold text-white">ZAKLJUČANO</span>}
+                    {vehicleLocked && (
+                      <span className="rounded bg-amber-200 px-1 py-0.5 text-[8px] font-bold text-amber-900">
+                        {vehicleHasLockedOrder ? 'PREMJEŠTANJE OGRANIČENO' : 'POTVRĐENA STAVKA'}
+                      </span>
+                    )}
                   </div>
 
-                  <div className="mb-2 flex gap-2">
-                    <span className="h-fit w-12 flex-shrink-0 truncate rounded border border-slate-800 bg-white px-1 py-0.5 text-[8px] text-slate-900" title="Gradilište">GRAD.:</span>
+                  <div className="schedule-vehicle-sites mb-2 flex min-w-0 gap-2">
+                    <span className="schedule-vehicle-row-label h-fit w-12 flex-shrink-0 truncate rounded border border-slate-800 bg-white px-1 py-0.5 text-[8px] text-slate-900" title="Gradilište">GRAD.:</span>
                     <div className="min-w-0 flex-1 bg-white px-1 py-0.5">
                       {carSites.map((a) => {
                         const g = a.gradiliste_id ? gradilista.find((item) => item.id === a.gradiliste_id) : undefined;
                         const isText = !a.gradiliste_id;
                         const hasNalog = Boolean(a.nalog_id);
-                        const nalogLocked = vehicleLocked;
+                        const nalogLocked = Boolean(a.nalog_id && lockedNalozi.includes(a.nalog_id));
                         return (
                           <div
                             key={a.id}
-                            draggable={!nalogLocked}
+                            draggable={!vehicleLocked}
                             onDragStart={(e) => {
-                              if (nalogLocked) {
+                              if (vehicleLocked) {
                                 e.preventDefault();
                                 return;
                               }
                               startDrag(e, { type: 'gradiliste', id: a.gradiliste_id ?? a.id, assignmentId: a.id });
                             }}
-                            className={`min-h-[2.25rem] border-b border-slate-100 pb-0.5 ${nalogLocked ? 'cursor-not-allowed bg-emerald-100' : 'cursor-grab'}`}
+                            className={`min-h-[2.25rem] border-b border-slate-100 pb-0.5 ${nalogLocked ? 'cursor-not-allowed bg-emerald-100' : vehicleLocked ? 'cursor-not-allowed' : 'cursor-grab'}`}
                           >
                             <div className="flex min-w-0 flex-wrap items-start justify-between gap-1">
                               {isText ? (
@@ -1225,9 +1346,13 @@ export function RasporedView() {
                               <button
                                 type="button"
                                 onClick={() => void run(() => removeRasporedGradiliste(a.id))}
-                                disabled={nalogLocked}
+                                disabled={vehicleLocked}
                                 aria-label="Ukloni gradilište"
-                                title={nalogLocked ? 'Nije moguće ukloniti gradilište sa zaključenim radnim nalogom' : 'Ukloni gradilište'}
+                                title={nalogLocked
+                                  ? 'Nije moguće ukloniti gradilište sa zaključenim radnim nalogom'
+                                  : vehicleLocked
+                                    ? 'Vozilo je zaključano zbog druge potvrde ili zaključenog radnog naloga'
+                                    : 'Ukloni gradilište'}
                                 className="flex-shrink-0 text-slate-300 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                               >
                                 <X className="h-3.5 w-3.5" />
@@ -1306,8 +1431,8 @@ export function RasporedView() {
                     </div>
                   </div>
 
-                  <div className="flex gap-2">
-                    <span className="h-fit w-12 flex-shrink-0 truncate rounded border border-slate-800 bg-white px-1 py-0.5 text-[8px] text-slate-900" title="Radnici">EKIPA:</span>
+                  <div className="schedule-vehicle-crew flex min-w-0 gap-2">
+                    <span className="schedule-vehicle-row-label h-fit w-12 flex-shrink-0 truncate rounded border border-slate-800 bg-white px-1 py-0.5 text-[8px] text-slate-900" title="Radnici">EKIPA:</span>
                     <div className="min-w-0 flex-1 bg-white px-1 py-0.5">
                       {carWorkers.map((a) => {
                         const r = radnici.find((item) => item.id === a.radnik_id);
@@ -1348,7 +1473,7 @@ export function RasporedView() {
                     </div>
                   </div>
                   {vozilo.broj_mjesta > 0 && (
-                    <p className={`mt-1 text-right text-[10px] ${over ? 'font-semibold text-red-600' : 'text-slate-500'}`}>
+                    <p className={`schedule-vehicle-capacity mt-1 text-right text-[10px] ${over ? 'font-semibold text-red-600' : 'text-slate-500'}`}>
                       {carWorkers.length}/{vozilo.broj_mjesta} mjesta{over ? ' – premašen kapacitet' : ''}
                     </p>
                   )}
@@ -1358,7 +1483,7 @@ export function RasporedView() {
           </div>
         )}
 
-        <div className="min-w-0 space-y-3 xl:col-span-2 xl:grid xl:grid-cols-2 xl:items-start xl:gap-4 xl:space-y-0 2xl:col-span-1 2xl:block 2xl:space-y-3">
+        <div className="schedule-support-grid min-w-0">
         {/* Radnici */}
         <aside
           onDragOver={(e) => allowDrop(e, 'panel-radnici')}
@@ -1759,12 +1884,16 @@ export function RasporedView() {
             </div>
             <div>
               <p className="mb-2 text-sm font-medium text-slate-700">Dodijeljeni radnici</p>
+              {nalogForm.status === 'zavrsen' && (
+                <p className="mb-2 text-xs text-slate-500">Ured je završno zaključio nalog; djelatnike više nije moguće mijenjati.</p>
+              )}
               <div className="max-h-40 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
                 {radnici.filter((r) => nalogForm.radnik_options.includes(r.id)).map((r) => (
                   <label key={r.id} className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50">
                     <input
                       type="checkbox"
                       checked={nalogForm.radnik_ids.includes(r.id)}
+                      disabled={nalogForm.status === 'zavrsen'}
                       onChange={() =>
                         setNalogForm({
                           ...nalogForm,
@@ -1801,6 +1930,127 @@ export function RasporedView() {
             </div>
           </div>
         )}
+      </Modal>
+      <Modal
+        open={newSiteOpen}
+        onClose={() => {
+          if (!newSiteSaving) setNewSiteOpen(false);
+        }}
+        title="Novo gradilište"
+        wide="md"
+        footer={(
+          <>
+            <button
+              type="button"
+              onClick={() => setNewSiteOpen(false)}
+              disabled={newSiteSaving}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+            >
+              Odustani
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveNewSite()}
+              disabled={newSiteSaving || !newSiteForm.naziv.trim() || !newSiteForm.column}
+              className="inline-flex items-center gap-2 rounded-lg bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:opacity-50"
+            >
+              {newSiteSaving ? 'Spremanje…' : 'Spremi gradilište'}
+            </button>
+          </>
+        )}
+      >
+        {error && <p role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+        <div className="grid gap-3 xl:grid-cols-2">
+          <Field label="Vrsta gradilišta *">
+            <Select
+              value={newSiteForm.column}
+              onChange={(event) => setNewSiteForm((previous) => ({ ...previous, column: event.target.value }))}
+            >
+              <option value="">Odaberi vrstu gradilišta</option>
+              {columnLabels.map((label, index) => <option key={label} value={String(index)}>{label}</option>)}
+            </Select>
+          </Field>
+          <Field label="Naziv *">
+            <TextInput
+              value={newSiteForm.naziv}
+              onChange={(event) => setNewSiteForm((previous) => ({ ...previous, naziv: event.target.value }))}
+              placeholder="npr. Stanovi Sunce 2"
+            />
+          </Field>
+          <Field label="Adresa">
+            <TextInput
+              value={newSiteForm.adresa}
+              onChange={(event) => setNewSiteForm((previous) => ({ ...previous, adresa: event.target.value }))}
+              placeholder="npr. Ul. Kralja Tomislava 15, Zagreb"
+            />
+          </Field>
+          <Field label="Regija">
+            <Select
+              value={newSiteForm.regija}
+              onChange={(event) => setNewSiteForm((previous) => ({ ...previous, regija: event.target.value as GradilisteRegija | '' }))}
+            >
+              <option value="">Odaberi regiju</option>
+              <option value="dalmacija">Dalmacija</option>
+              <option value="istra_kvarner">Istra i Kvarner</option>
+              <option value="slavonija">Slavonija</option>
+              <option value="zagreb_i_okolica">Zagreb i okolica</option>
+              <option value="medimurje">Međimurje</option>
+            </Select>
+          </Field>
+          <Field label="Investitor">
+            <TextInput
+              value={newSiteForm.investitorNaziv}
+              onChange={(event) => setNewSiteForm((previous) => ({ ...previous, investitorNaziv: event.target.value }))}
+              placeholder="npr. Sunce d.o.o."
+            />
+          </Field>
+          <Field label="Objekt">
+            <TextInput
+              value={newSiteForm.objektNaziv}
+              onChange={(event) => setNewSiteForm((previous) => ({ ...previous, objektNaziv: event.target.value }))}
+              placeholder="Naziv objekta"
+            />
+          </Field>
+          <Field label="Status">
+            <Select
+              value={newSiteForm.status}
+              onChange={(event) => setNewSiteForm((previous) => ({ ...previous, status: event.target.value as GradilisteStatus }))}
+            >
+              <option value="planirano">Planirano</option>
+              <option value="ponuda">Ponuda</option>
+              <option value="aktivno">Aktivno</option>
+              <option value="pauzirano">Pauzirano</option>
+              <option value="neplaceno">Neplaćeno</option>
+              <option value="zavrseno">Završeno</option>
+            </Select>
+          </Field>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Datum početka">
+              <TextInput
+                type="date"
+                value={newSiteForm.datum_pocetka}
+                onChange={(event) => setNewSiteForm((previous) => ({ ...previous, datum_pocetka: event.target.value }))}
+              />
+            </Field>
+            <Field label="Datum završetka">
+              <TextInput
+                type="date"
+                value={newSiteForm.datum_zavrsetka}
+                onChange={(event) => setNewSiteForm((previous) => ({ ...previous, datum_zavrsetka: event.target.value }))}
+              />
+            </Field>
+          </div>
+          <div className="xl:col-span-2">
+            <Field label="Napomena">
+              <Textarea
+                rows={3}
+                value={newSiteForm.opis}
+                onChange={(event) => setNewSiteForm((previous) => ({ ...previous, opis: event.target.value }))}
+              />
+            </Field>
+          </div>
+        </div>
+        <p className="mt-3 text-xs text-slate-500">Investitor i objekt moraju biti uneseni zajedno. Nakon spremanja gradilište će se pojaviti na popisu i možeš ga povući na vozilo.</p>
       </Modal>
     </div>
   );

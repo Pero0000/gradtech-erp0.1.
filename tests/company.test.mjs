@@ -22,6 +22,14 @@ function loadTypeScript(relativePath, mocks = {}, globals = {}) {
 }
 
 const pagination = loadTypeScript('../src/lib/pagination.ts');
+const api = loadTypeScript('../src/lib/api.ts', {
+  './supabase': { supabase: {} },
+  './postavke': {},
+  './obracunSati': {},
+  './vehicleKmCosts': {},
+  './company': {},
+  './pagination': {},
+});
 
 test('pagination returns all workers beyond the default 1000-row limit', async () => {
   const records = Array.from({ length: 1301 }, (_, id) => ({ id }));
@@ -33,6 +41,12 @@ test('pagination returns all workers beyond the default 1000-row limit', async (
   assert.equal(rows.length, 1301);
   assert.equal(rows[1300].id, 1300);
   assert.deepEqual(calls, [[0, 499], [500, 999], [1000, 1499]]);
+});
+
+test('faktura total follows the stored rebate direction and preserves legacy addition', () => {
+  assert.equal(api.iznosFakture({ iznos: 100, rabat: 10 }), 110);
+  assert.equal(api.iznosFakture({ iznos: 100, rabat: 10, rabat_smjer: 'pribroji' }), 110);
+  assert.equal(api.iznosFakture({ iznos: 100, rabat: 10, rabat_smjer: 'oduzmi' }), 90);
 });
 
 test('pagination propagates database errors instead of returning a partial list', async () => {
@@ -122,6 +136,7 @@ function provisioning({ owner = false, admin = true, approved = true, active = t
 for (const body of [
   { action: 'create_company', admin_email: 'new@example.test' },
   { action: 'set_active', company_id: 'company-b', aktivna: false },
+  { action: 'update_settings', company_id: 'company-b', postavke: { disabled_modules: [], invoice_rebate_mode: 'oduzmi' } },
   { action: 'invite', company_id: 'company-b', email: 'new@example.test' },
   { action: 'invite', company_id: 'company-a', email: 'new@example.test', is_admin: true },
 ]) {
@@ -170,6 +185,34 @@ test('owner creates a company and invites its first admin without modifying othe
   assert.equal(invitation.company_id, 'company-new');
   assert.equal(invitation.is_admin, true);
   assert.ok(app.writes.every((write) => write.table !== 'app_profiles'));
+});
+
+test('platform owner can update company module and invoice settings', async () => {
+  const app = provisioning({ owner: true });
+  const settings = {
+    disabled_modules: ['vozila', 'vozila', ''],
+    invoice_rebate_mode: 'oduzmi',
+    future_option: { enabled: true },
+  };
+  const result = await app.send({ action: 'update_settings', company_id: 'company-b', postavke: settings });
+  assert.equal(result.status, 200);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.writes.find((write) => write.table === 'tvrtke').value)), {
+    postavke: {
+      ...settings,
+      disabled_modules: ['vozila'],
+    },
+  });
+});
+
+test('invalid company settings are rejected without database changes', async () => {
+  const app = provisioning({ owner: true });
+  const result = await app.send({
+    action: 'update_settings',
+    company_id: 'company-b',
+    postavke: { disabled_modules: ['vozila', 7], invoice_rebate_mode: 'multiply' },
+  });
+  assert.equal(result.status, 400);
+  assert.equal(app.writes.length, 0);
 });
 
 test('missing invitation redirect configuration is an explicit failure', async () => {

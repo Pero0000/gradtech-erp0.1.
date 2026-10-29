@@ -24,12 +24,14 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { GradilisteDetailsPanel } from '@/components/views/GradilisteDetailsPanel';
 import { nextDeadline, deadlineAlert } from '@/lib/rokovi';
 import { useAuth } from '@/auth/useAuth';
+import { DEFAULT_GRADILISTE_COLUMN_LABELS } from '@/lib/company';
 
 const statusBadge: Record<GradilisteStatus, { variant: 'green' | 'yellow' | 'red' | 'blue' | 'gray'; label: string }> = {
   ponuda: { variant: 'yellow', label: 'Ponuda' },
   planirano: { variant: 'blue', label: 'Planirano' },
   aktivno: { variant: 'green', label: 'Aktivno' },
   pauzirano: { variant: 'yellow', label: 'Pauzirano' },
+  neplaceno: { variant: 'yellow', label: 'Neplaćeno' },
   zavrseno: { variant: 'gray', label: 'Završeno' },
 };
 
@@ -64,15 +66,16 @@ const emptyForm = {
 };
 
 type GradilisteSortMode = GradilisteBoardSortMode;
-type GradilisteCategory = 'arhiva' | 'aktivna' | 'planirana' | 'ponude';
-const gradilisteColumnLabels = ['dm gradilišta', 'dm intervencije', 'ostala gradilišta'];
+type GradilisteCategory = 'neplacena' | 'arhiva' | 'aktivna' | 'planirana' | 'ponude';
 const gradilisteCategories: { key: GradilisteCategory; label: string; statuses: GradilisteStatus[] }[] = [
+  { key: 'neplacena', label: 'Neplaćena', statuses: ['neplaceno'] },
   { key: 'arhiva', label: 'Arhiva', statuses: ['zavrseno'] },
   { key: 'aktivna', label: 'Aktivna', statuses: ['aktivno', 'pauzirano'] },
   { key: 'planirana', label: 'Planirana', statuses: ['planirano'] },
   { key: 'ponude', label: 'Ponude', statuses: ['ponuda'] },
 ];
 const categoryDefaultStatus: Record<GradilisteCategory, GradilisteStatus> = {
+  neplacena: 'neplaceno',
   arhiva: 'zavrseno',
   aktivna: 'aktivno',
   planirana: 'planirano',
@@ -134,8 +137,15 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
-export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string) => void } = {}) {
-  const { canAccess } = useAuth();
+export function GradilistaView({
+  onOpenNalog,
+  focusGradilisteId,
+}: {
+  onOpenNalog?: (nalogId: string) => void;
+  focusGradilisteId?: string | null;
+} = {}) {
+  const { canAccess, company } = useAuth();
+  const gradilisteColumnLabels = company?.postavke.gradiliste_column_labels ?? [...DEFAULT_GRADILISTE_COLUMN_LABELS];
   const canEditBoard = canAccess('gradilista', 'edit');
   const layoutSaveQueue = useRef<Promise<void>>(Promise.resolve());
   const [items, setItems] = useState<Gradiliste[]>([]);
@@ -212,6 +222,12 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    if (focusGradilisteId && items.some((item) => item.id === focusGradilisteId)) {
+      setSelectedGradilisteId(focusGradilisteId);
+    }
+  }, [focusGradilisteId, items]);
 
   useEffect(() => {
     const refreshBoardLayout = async () => {
@@ -498,8 +514,8 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
   }
 
   return (
-    <div>
-      <div className="mb-6 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+    <div className="gradilista-view-container min-w-0">
+      <div className="gradilista-page-header mb-6 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Gradilišta</h1>
           <p className="text-sm text-slate-500 mt-1">Upravljajte svim gradilištima firme</p>
@@ -537,6 +553,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
         {gradilisteCategories.map((category) => {
           const count = items.filter((item) => category.statuses.includes(item.status)).length;
           const active = activeCategory === category.key;
+          const hasUnpaidSites = category.key === 'neplacena' && count > 0;
           return (
             <button
               key={category.key}
@@ -544,10 +561,10 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
               role="tab"
               aria-selected={active}
               onClick={() => setActiveCategory(category.key)}
-              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${active ? 'bg-sky-100 text-sky-800' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
+              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${hasUnpaidSites ? active ? 'bg-red-100 text-red-800' : 'bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800' : active ? 'bg-sky-100 text-sky-800' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
             >
               {category.label}
-              <span className={`rounded-full px-2 py-0.5 text-xs ${active ? 'bg-white/70 text-sky-800' : 'bg-slate-100 text-slate-500'}`}>{count}</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs ${hasUnpaidSites ? 'bg-white/80 text-red-800' : active ? 'bg-white/70 text-sky-800' : 'bg-slate-100 text-slate-500'}`}>{count}</span>
             </button>
           );
         })}
@@ -575,7 +592,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
           }
         />
       ) : (
-        <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
+        <div className="gradilista-main-layout grid items-start gap-5 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
           <div className="min-w-0">
           {activeCategory === 'arhiva' ? (
             <div className="space-y-3">
@@ -709,7 +726,8 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
           {visibleItems.length === 0 && (
             <p className="mb-3 text-sm text-slate-500">Nema gradilišta u kategoriji {gradilisteCategories.find((category) => category.key === activeCategory)?.label.toLocaleLowerCase()}.</p>
           )}
-          <div className="grid items-start gap-4 xl:grid-cols-2 2xl:grid-cols-3">
+          <div className="gradilista-board-scroll min-w-0 overflow-x-auto">
+          <div className="gradilista-board-columns grid min-w-[610px] items-start gap-4">
           {[0, 1, 2].map((columnIndex) => {
             const column = columnIds[columnIndex] ?? [];
             const columnItems = column
@@ -792,7 +810,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                       }}
                       onDrop={(event) => handleDrop(event, columnIndex, g.id)}
                       onClick={() => setSelectedGradilisteId(g.id)}
-                      className={`group relative cursor-grab rounded-xl border bg-white p-3 shadow-sm transition-all active:cursor-grabbing hover:shadow-md ${selectedGradilisteId === g.id ? 'border-sky-500 ring-1 ring-sky-200' : 'border-slate-200'} ${draggedId === g.id ? 'opacity-50' : ''} ${dropTargetId === g.id ? 'ring-2 ring-sky-400' : ''}`}
+                      className={`gradiliste-board-card group relative cursor-grab rounded-xl border bg-white p-3 shadow-sm transition-all active:cursor-grabbing hover:shadow-md ${selectedGradilisteId === g.id ? 'border-sky-500 ring-1 ring-sky-200' : 'border-slate-200'} ${draggedId === g.id ? 'opacity-50' : ''} ${dropTargetId === g.id ? 'ring-2 ring-sky-400' : ''}`}
                     >
                       <div className="mb-2 flex min-w-0 items-center gap-2">
                         <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -850,23 +868,21 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
                 })()}
 
                 {(g.datum_pocetka || g.datum_zavrsetka) && (
-                  <div className="mt-2 grid grid-cols-1 gap-2 border-t border-slate-100 pt-2 xl:grid-cols-2">
+                  <div className="mt-2 grid grid-cols-2 gap-2 border-t border-slate-100 pt-2">
                     {g.datum_pocetka && (
-                      <div className="flex min-w-0 items-start gap-1.5">
-                        <Calendar className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-sky-600" />
-                        <div className="min-w-0">
-                          <p className="text-[9px] font-semibold uppercase text-slate-500">Početni rok</p>
-                          <p className="text-xs font-semibold text-slate-900">{new Date(g.datum_pocetka).toLocaleDateString('hr-HR')}</p>
-                        </div>
+                      <div className="flex min-w-0 items-center gap-1 whitespace-nowrap text-[10px]">
+                        <span className="flex-shrink-0 font-medium text-slate-500">Početak</span>
+                        <span className="truncate font-semibold text-slate-900" title={new Date(g.datum_pocetka).toLocaleDateString('hr-HR')}>
+                          {new Date(g.datum_pocetka).toLocaleDateString('hr-HR', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                        </span>
                       </div>
                     )}
                     {g.datum_zavrsetka && (
-                      <div className="flex min-w-0 items-start gap-1.5">
-                        <Calendar className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-emerald-600" />
-                        <div className="min-w-0">
-                          <p className="text-[9px] font-semibold uppercase text-slate-500">Krajnji rok</p>
-                          <p className="text-xs font-semibold text-slate-900">{new Date(g.datum_zavrsetka).toLocaleDateString('hr-HR')}</p>
-                        </div>
+                      <div className="flex min-w-0 items-center gap-1 whitespace-nowrap text-[10px]">
+                        <span className="flex-shrink-0 font-medium text-slate-500">Kraj</span>
+                        <span className="truncate font-semibold text-slate-900" title={new Date(g.datum_zavrsetka).toLocaleDateString('hr-HR')}>
+                          {new Date(g.datum_zavrsetka).toLocaleDateString('hr-HR', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                        </span>
                       </div>
                     )}
                   </div>
@@ -896,6 +912,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
               </section>
             );
           })}
+          </div>
           </div>
           </>
           )}
@@ -1138,6 +1155,7 @@ export function GradilistaView({ onOpenNalog }: { onOpenNalog?: (nalogId: string
               <option value="planirano">Planirano</option>
               <option value="aktivno">Aktivno</option>
               <option value="pauzirano">Pauzirano</option>
+              <option value="neplaceno">Neplaćeno</option>
               <option value="zavrseno">Završeno</option>
             </Select>
           </Field>

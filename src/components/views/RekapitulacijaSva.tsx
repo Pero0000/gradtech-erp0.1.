@@ -22,6 +22,7 @@ const statusBadge: Record<string, { variant: 'blue' | 'green' | 'red' | 'yellow'
   planirano: { variant: 'blue', label: 'Planirano' },
   aktivno: { variant: 'green', label: 'Aktivno' },
   pauzirano: { variant: 'yellow', label: 'Pauzirano' },
+  neplaceno: { variant: 'yellow', label: 'Neplaćeno' },
   zavrseno: { variant: 'blue', label: 'Završeno' },
 };
 
@@ -180,7 +181,7 @@ export function RekapitulacijaSva({
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
-        {['', 'aktivno', 'planirano', 'ponuda', 'pauzirano', 'zavrseno'].map((s) => (
+        {['', 'aktivno', 'planirano', 'ponuda', 'pauzirano', 'neplaceno', 'zavrseno'].map((s) => (
           <button
             key={s || 'sve'}
             type="button"

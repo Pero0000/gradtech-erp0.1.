@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { AuthContext, type AuthContextValue } from '@/auth/context';
 import type { AppProfile } from '@/auth/profile';
 import { type AppModule, type ModuleAction, type ModulePermissions } from '@/auth/permissions';
-import { setCurrentCompany, type Tvrtka } from '@/lib/company';
+import { normalizeTvrtkaPostavke, setCurrentCompany, type Tvrtka } from '@/lib/company';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -90,11 +90,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const { data: companyData, error: companyError } = await supabase
         .from('tvrtke')
-        .select('id,naziv,oib,adresa,aktivna')
+        .select('id,naziv,oib,adresa,aktivna,postavke')
         .eq('id', profileData.company_id)
         .single();
       if (companyError) throw companyError;
       if (!companyData.aktivna) throw new Error('Vaša tvrtka nije aktivna. Obratite se vlasniku sustava.');
+      const companyWithSettings = {
+        ...companyData,
+        postavke: normalizeTvrtkaPostavke(companyData.postavke),
+      };
       const nextPermissions: ModulePermissions = {};
       if (!profileData.approved || !profileData.is_admin) {
         const { data, error } = await supabase
@@ -110,8 +114,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
       if (version !== accessVersion.current) return;
-      setCurrentCompany(companyData);
-      setCompany(companyData);
+      setCurrentCompany(companyWithSettings);
+      setCompany(companyWithSettings);
       setProfile(profileData as AppProfile);
       setPermissions(nextPermissions);
     } catch (error) {
@@ -164,13 +168,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isPlatformOwner = profile?.approved === true && profile.is_platform_owner;
   const isWorker = profile?.approved === true && !profile.is_admin && !profile.is_voditelj && !profile.is_platform_owner;
   const canAccess = useCallback((module: AppModule, action: ModuleAction = 'view') => {
+    if (company?.postavke.disabled_modules.includes(module)) return false;
     if (isAdmin) return true;
     if (!profile?.approved || isWorker) return false;
     const permission = permissions[module];
     return action === 'edit'
       ? permission?.can_edit === true
       : permission?.can_view === true || permission?.can_edit === true;
-  }, [isAdmin, isWorker, permissions, profile?.approved]);
+  }, [company, isAdmin, isWorker, permissions, profile?.approved]);
 
   const value = useMemo<AuthContextValue>(() => ({
     session,

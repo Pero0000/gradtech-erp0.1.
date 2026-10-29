@@ -17,6 +17,7 @@ import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ExportMenu } from '@/components/ui/ExportMenu';
+import { useAuth } from '@/auth/useAuth';
 
 const statusInfo: Record<FakturaStatus, { variant: 'blue' | 'green' | 'red'; label: string }> = {
   izdana: { variant: 'blue', label: 'Izdana' },
@@ -48,6 +49,7 @@ const emptyForm = {
   rabat: '0',
   datum_izdavanja: new Date().toISOString().split('T')[0],
   datum_dospjecja: '',
+  datum_naplate: '',
   status: 'izdana' as FakturaStatus,
   opis: '',
 };
@@ -61,6 +63,7 @@ function getErrorMessage(error: unknown, fallback: string) {
 }
 
 export function FaktureView() {
+  const { company } = useAuth();
   const [items, setItems] = useState<Faktura[]>([]);
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [investitori, setInvestitori] = useState<Investitor[]>([]);
@@ -80,6 +83,7 @@ export function FaktureView() {
   const [doDatuma, setDoDatuma] = useState('');
   const [sortKey, setSortKey] = useState<FakturaSortKey>('datum_izdavanja');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const rabatSmjer = editing?.rabat_smjer ?? company?.postavke.invoice_rebate_mode ?? 'pribroji';
 
   const load = async () => {
     setLoading(true);
@@ -125,6 +129,7 @@ export function FaktureView() {
       rabat: String(f.rabat ?? 0),
       datum_izdavanja: f.datum_izdavanja,
       datum_dospjecja: f.datum_dospjecja ?? '',
+      datum_naplate: f.datum_naplate ?? '',
       status: f.status,
       opis: f.opis ?? '',
     });
@@ -163,7 +168,8 @@ export function FaktureView() {
   const save = async () => {
     const iznos = Number(form.iznos || 0);
     const rabat = Number(form.rabat || 0);
-    if (!form.broj.trim() || !Number.isFinite(iznos) || !Number.isFinite(rabat) || iznos < 0 || rabat < 0 || iznos + rabat <= 0) return;
+    const total = rabatSmjer === 'oduzmi' ? iznos - rabat : iznos + rabat;
+    if (!form.broj.trim() || !Number.isFinite(iznos) || !Number.isFinite(rabat) || iznos < 0 || rabat < 0 || total <= 0) return;
     setSaving(true);
     setError(null);
     try {
@@ -176,6 +182,7 @@ export function FaktureView() {
         rabat,
         datum_izdavanja: form.datum_izdavanja,
         datum_dospjecja: form.datum_dospjecja || null,
+        datum_naplate: form.status === 'placena' ? form.datum_naplate || null : null,
         status: form.status,
         opis: form.opis.trim() || null,
       };
@@ -234,12 +241,15 @@ export function FaktureView() {
   const placeno = filtered.filter((f) => f.status === 'placena').reduce((sum, f) => sum + iznosFakture(f), 0);
   const iznosZaSpremanje = Number(form.iznos || 0);
   const rabatZaSpremanje = Number(form.rabat || 0);
+  const ukupnoZaSpremanje = rabatSmjer === 'oduzmi'
+    ? iznosZaSpremanje - rabatZaSpremanje
+    : iznosZaSpremanje + rabatZaSpremanje;
   const mozeSpremitiFakturu = Boolean(form.broj.trim())
     && Number.isFinite(iznosZaSpremanje)
     && Number.isFinite(rabatZaSpremanje)
     && iznosZaSpremanje >= 0
     && rabatZaSpremanje >= 0
-    && iznosZaSpremanje + rabatZaSpremanje > 0;
+    && ukupnoZaSpremanje > 0;
   const hasFilters = Boolean(query || filterGradiliste || filterInvestitor || filterStatus || od || doDatuma);
   const resetFilters = () => {
     setQuery('');
@@ -576,7 +586,7 @@ export function FaktureView() {
               placeholder="0.00"
             />
           </Field>
-          <Field label="Rabat (EUR, pribraja se)">
+          <Field label={`Rabat (EUR, ${rabatSmjer === 'oduzmi' ? 'oduzima se' : 'pribraja se'})`}>
             <TextInput
               type="number"
               min="0"
@@ -587,7 +597,10 @@ export function FaktureView() {
             />
           </Field>
           <p className="-mt-2 rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900">
-            Ukupna izlazna faktura: <strong>{((Number(form.iznos) || 0) + (Number(form.rabat) || 0)).toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}</strong>
+            Ukupna izlazna faktura: <strong>{(rabatSmjer === 'oduzmi'
+              ? (Number(form.iznos) || 0) - (Number(form.rabat) || 0)
+              : (Number(form.iznos) || 0) + (Number(form.rabat) || 0)
+            ).toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}</strong>
           </p>
           <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Datum izdavanja">
@@ -608,13 +621,30 @@ export function FaktureView() {
           <Field label="Status">
             <Select
               value={form.status}
-              onChange={(e) => setForm({ ...form, status: e.target.value as FakturaStatus })}
+              onChange={(e) => {
+                const status = e.target.value as FakturaStatus;
+                setForm({
+                  ...form,
+                  status,
+                  datum_naplate: status === 'placena' && !form.datum_naplate && editing?.status !== 'placena'
+                    ? new Date().toISOString().slice(0, 10)
+                    : form.datum_naplate,
+                });
+              }}
             >
               <option value="izdana">Izdana</option>
               <option value="placena">Plaćena</option>
-              <option value="nep placena">Neplaćena</option>
             </Select>
           </Field>
+          {form.status === 'placena' && (
+            <Field label="Datum naplate">
+              <TextInput
+                type="date"
+                value={form.datum_naplate}
+                onChange={(e) => setForm({ ...form, datum_naplate: e.target.value })}
+              />
+            </Field>
+          )}
           <Field label="Opis">
             <Textarea
               rows={2}

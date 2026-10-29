@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, ChevronLeft, ChevronRight, Download, FileText, Hammer, Package, Plus, Trash2, Wrench } from 'lucide-react';
+import { Camera, ChevronLeft, ChevronRight, Download, FileText, Hammer, Package, Plus, Trash2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { downloadFile } from '@/lib/downloadFile';
 import {
@@ -26,14 +26,24 @@ function formatSize(bytes: number | null) {
   return bytes > 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
-function SectionBox({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+type SectionBoxTone = 'amber' | 'sky' | 'slate' | 'rose';
+
+const sectionBoxToneClasses: Record<SectionBoxTone, { border: string; icon: string; title: string }> = {
+  amber: { border: 'border-l-amber-500', icon: 'bg-amber-100 text-amber-700', title: 'text-amber-950' },
+  sky: { border: 'border-l-sky-500', icon: 'bg-sky-100 text-sky-700', title: 'text-sky-950' },
+  slate: { border: 'border-l-slate-400', icon: 'bg-slate-100 text-slate-600', title: 'text-slate-900' },
+  rose: { border: 'border-l-rose-500', icon: 'bg-rose-100 text-rose-700', title: 'text-rose-950' },
+};
+
+function SectionBox({ title, icon, children, tone }: { title: string; icon: React.ReactNode; children: React.ReactNode; tone: SectionBoxTone }) {
+  const styles = sectionBoxToneClasses[tone];
   return (
-    <section className="border-t border-slate-200 py-4">
-      <h3 className="mb-3 flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-900">
-        <span className="inline-flex items-center gap-2 rounded-md bg-sky-50 px-2.5 py-1.5 text-sky-900">
-          <span className="text-sky-700">{icon}</span>
-          {title}
+    <section className={`mb-4 break-inside-avoid rounded-xl border border-slate-200 border-l-4 ${styles.border} bg-white p-3 shadow-sm sm:p-4`}>
+      <h3 className={`mb-3 flex min-w-0 items-center gap-2 text-sm font-bold ${styles.title}`}>
+        <span className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${styles.icon}`}>
+          {icon}
         </span>
+        <span>{title}</span>
       </h3>
       {children}
     </section>
@@ -54,28 +64,56 @@ function StavkeList({
   onRemove: (s: GradilisteStavka) => void;
 }) {
   const [text, setText] = useState('');
+  const [activeTab, setActiveTab] = useState<'open' | 'history'>('open');
   const submit = () => {
     if (!text.trim() || !onAdd) return;
     onAdd(text.trim());
     setText('');
   };
+  const otvorene = items.filter((item) => !item.gotovo && !item.uzeto);
+  const rijesene = items.filter((item) => item.gotovo || item.uzeto);
+  const renderItem = (s: GradilisteStavka) => (
+    <div key={s.id} className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs ${s.gotovo || s.uzeto ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
+      <input type="checkbox" checked={Boolean(s.gotovo || s.uzeto)} onChange={() => onToggle(s)} className="h-4 w-4 flex-shrink-0 accent-emerald-600" title="Označi kao riješeno" />
+      <span className={`min-w-0 flex-1 break-words ${s.gotovo || s.uzeto ? 'font-medium text-emerald-800 line-through decoration-emerald-400' : 'text-slate-800'}`}>{s.naziv}</span>
+      {s.tip === 'stroj' && s.sati ? <span className="flex-shrink-0 text-[10px] text-slate-500">{s.sati} h</span> : null}
+      <span className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] ${s.nalog_id ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700'}`}>
+        {s.nalog_id ? 'na nalogu' : 'čeka nalog'}
+      </span>
+      <button type="button" onClick={() => onRemove(s)} className="flex-shrink-0 text-slate-300 hover:text-red-600" aria-label="Obriši stavku">
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
   return (
     <div>
-      <div className="space-y-1.5">
-        {items.length === 0 && <p className="text-xs text-slate-400">Nema stavki.</p>}
-        {items.map((s) => (
-          <div key={s.id} className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs ${s.gotovo ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
-            <input type="checkbox" checked={s.gotovo} onChange={() => onToggle(s)} className="h-4 w-4 flex-shrink-0 accent-emerald-600" title="Označi kao riješeno" />
-            <span className={`min-w-0 flex-1 break-words ${s.gotovo ? 'font-medium text-emerald-800 line-through decoration-emerald-400' : 'text-slate-800'}`}>{s.naziv}</span>
-            {s.tip === 'stroj' && s.sati ? <span className="flex-shrink-0 text-[10px] text-slate-500">{s.sati} h</span> : null}
-            <span className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] ${s.nalog_id ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700'}`}>
-              {s.nalog_id ? 'na nalogu' : 'čeka nalog'}
-            </span>
-            <button type="button" onClick={() => onRemove(s)} className="flex-shrink-0 text-slate-300 hover:text-red-600" aria-label="Obriši stavku">
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </div>
+      <div role="tablist" aria-label="Stanje stavki" className="mb-2 flex gap-1 border-b border-slate-200">
+        {([
+          { id: 'open', label: `Za riješiti (${otvorene.length})` },
+          { id: 'history', label: `Povijest (${rijesene.length})` },
+        ] as const).map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`border-b-2 px-2.5 py-2 text-xs font-semibold ${activeTab === tab.id ? 'border-sky-600 text-sky-800' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+          >
+            {tab.label}
+          </button>
         ))}
+      </div>
+      <div className="space-y-1.5">
+        {activeTab === 'open' ? (
+          otvorene.length === 0
+            ? <p className="text-xs text-slate-400">Nema otvorenih stavki.</p>
+            : otvorene.map(renderItem)
+        ) : (
+          rijesene.length === 0
+            ? <p className="text-xs text-slate-400">Povijest je prazna.</p>
+            : rijesene.map(renderItem)
+        )}
       </div>
       {onAdd && <div className="mt-2 flex flex-col gap-2 xl:flex-row xl:items-center">
         <input
@@ -104,7 +142,13 @@ function StavkeList({
   );
 }
 
-export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: string }) {
+export function GradilisteMaterijalDokumenti({
+  gradilisteId,
+  children,
+}: {
+  gradilisteId: string;
+  children: (sections: { documents: React.ReactNode; materials: React.ReactNode }) => React.ReactNode;
+}) {
   const [stavke, setStavke] = useState<GradilisteStavka[]>([]);
   const [dokumenti, setDokumenti] = useState<GradilisteDokument[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -165,8 +209,9 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
     }, 'Greška pri dodavanju stavke.');
 
   const toggleStavka = (s: GradilisteStavka) => {
-    setStavke((prev) => prev.map((x) => (x.id === s.id ? { ...x, gotovo: !s.gotovo } : x)));
-    void guard(() => updateNalogStavka(s.id, { gotovo: !s.gotovo }), 'Greška pri spremanju stavke.');
+    const rijeseno = Boolean(s.gotovo || s.uzeto);
+    setStavke((prev) => prev.map((x) => (x.id === s.id ? { ...x, gotovo: !rijeseno, uzeto: !rijeseno } : x)));
+    void guard(() => updateNalogStavka(s.id, { gotovo: !rijeseno }), 'Greška pri spremanju stavke.');
   };
 
   const removeStavka = (s: GradilisteStavka) =>
@@ -197,7 +242,6 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
 
   const materijal = stavke.filter((s) => s.tip === 'materijal');
   const alat = stavke.filter((s) => s.tip === 'alat');
-  const strojevi = stavke.filter((s) => s.tip === 'stroj');
   const docs = dokumenti.filter((d) => d.vrsta === 'dokument');
   const slike = dokumenti.filter((d) => d.vrsta === 'slika');
   const activePhotoIndex = slike.findIndex((photo) => photo.id === activePhotoId);
@@ -209,25 +253,25 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
     setDownloadingPhotoId(null);
   };
 
-  return (
+  const materialsSection = (
     <>
-      {error && <p className="my-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-      <div className="grid min-w-0 gap-x-6 xl:grid-cols-2">
-        <SectionBox title={`Materijal (${materijal.filter((s) => s.gotovo).length}/${materijal.length})`} icon={<Package className="h-4 w-4" />}>
+      <div className="grid min-w-0 gap-x-4 xl:grid-cols-2">
+        <SectionBox title={`Materijal (${materijal.filter((s) => !s.gotovo && !s.uzeto).length} otvorenih)`} icon={<Package className="h-4 w-4" />} tone="amber">
           <StavkeList items={materijal} placeholder="npr. boja bijela 15 l" onAdd={(n) => addStavka('materijal', n)} onToggle={toggleStavka} onRemove={removeStavka} />
         </SectionBox>
-        <SectionBox title={`Alat (${alat.filter((s) => s.gotovo).length}/${alat.length})`} icon={<Hammer className="h-4 w-4" />}>
+        <SectionBox title={`Alat (${alat.filter((s) => !s.gotovo && !s.uzeto).length} otvorenih)`} icon={<Hammer className="h-4 w-4" />} tone="sky">
           <StavkeList items={alat} placeholder="npr. skela, brusilica" onAdd={(n) => addStavka('alat', n)} onToggle={toggleStavka} onRemove={removeStavka} />
-        </SectionBox>
-        <SectionBox title={`Strojevi (${strojevi.filter((s) => s.gotovo).length}/${strojevi.length})`} icon={<Wrench className="h-4 w-4" />}>
-          <StavkeList items={strojevi} placeholder="" onToggle={toggleStavka} onRemove={removeStavka} />
-          <p className="mt-2 text-[11px] text-slate-500">Strojevi se dodaju na radni nalog iz popisa strojeva; radni sati × cijena sata ulaze u trošak gradilišta.</p>
         </SectionBox>
       </div>
       <p className="-mt-2 mb-1 text-[11px] text-slate-500">Materijal i alat s oznakom „čeka nalog” automatski ulaze u idući radni nalog ovog gradilišta.</p>
+    </>
+  );
 
-      <div className="grid min-w-0 gap-x-6 xl:grid-cols-2">
-        <SectionBox title={`Dokumenti (${docs.length})`} icon={<FileText className="h-4 w-4" />}>
+  const documentsSection = (
+    <>
+      {error && <p className="my-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+      <div className="grid min-w-0 gap-x-4 xl:grid-cols-2">
+        <SectionBox title={`Dokumenti (${docs.length})`} icon={<FileText className="h-4 w-4" />} tone="slate">
           <input ref={docRef} type="file" multiple className="hidden" onChange={(e) => void upload(e.target.files, 'dokument')} />
           <div className="mb-2 space-y-1.5">
             {docs.length === 0 && <p className="text-xs text-slate-400">Nema dokumenata.</p>}
@@ -253,7 +297,7 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
           </button>
         </SectionBox>
 
-        <SectionBox title={`Slike (${slike.length})`} icon={<Camera className="h-4 w-4" />}>
+        <SectionBox title={`Slike (${slike.length})`} icon={<Camera className="h-4 w-4" />} tone="rose">
           <input ref={imgRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void upload(e.target.files, 'slika')} />
           {slike.length > 0 && (
             <div className="mb-2 grid max-h-[34rem] auto-rows-[11rem] grid-cols-1 gap-2 overflow-y-auto xl:grid-cols-2 2xl:grid-cols-3 overscroll-contain" tabIndex={0} role="region" aria-label="Slike gradilišta — pomaknite za ostale slike">
@@ -296,6 +340,12 @@ export function GradilisteMaterijalDokumenti({ gradilisteId }: { gradilisteId: s
           </button>
         </SectionBox>
       </div>
+    </>
+  );
+
+  return (
+    <>
+      {children({ documents: documentsSection, materials: materialsSection })}
       <Modal
         open={Boolean(activePhoto)}
         onClose={() => setActivePhotoId(null)}

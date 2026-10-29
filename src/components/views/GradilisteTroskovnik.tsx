@@ -54,7 +54,13 @@ export function GradilisteTroskovnik({ gradilisteId, naziv }: { gradilisteId: st
 
   if (groups.length === 0) {
     return (
-      <section className="border-t border-slate-200 py-4">
+      <section className="mb-4 break-inside-avoid rounded-xl border border-orange-200 border-l-4 border-l-orange-500 bg-gradient-to-br from-orange-50/70 to-white p-3 shadow-sm sm:p-4">
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-bold text-orange-950">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 text-orange-700">
+            <FileSignature className="h-4 w-4" />
+          </span>
+          Troškovnik iz ponude
+        </h3>
         <button type="button" onClick={() => setImportOpen(true)} className="inline-flex items-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs font-medium text-slate-600 hover:border-sky-400 hover:text-sky-600">
           <Sparkles className="h-4 w-4" /> Učitaj troškovnik pomoću AI-a
         </button>
@@ -64,9 +70,12 @@ export function GradilisteTroskovnik({ gradilisteId, naziv }: { gradilisteId: st
   }
 
   return (
-    <section className="border-t border-slate-200 py-4">
+    <section className="mb-4 break-inside-avoid rounded-xl border border-orange-200 border-l-4 border-l-orange-500 bg-white p-3 shadow-sm sm:p-4">
       <div className="mb-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800"><FileSignature className="h-4 w-4" /> Troškovnik iz ponude</h3>
+        <h3 className="flex items-center gap-2 text-sm font-bold text-orange-950">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 text-orange-700"><FileSignature className="h-4 w-4" /></span>
+          Troškovnik iz ponude
+        </h3>
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" onClick={() => setImportOpen(true)} className="inline-flex items-center gap-1 text-xs text-sky-600 hover:underline"><Sparkles className="h-3.5 w-3.5" /> Učitaj AI-em</button>
           <button type="button" onClick={() => setOpen((v) => !v)} className="text-xs text-sky-600 hover:underline">{open ? 'Sažmi' : 'Prikaži stavke'}</button>

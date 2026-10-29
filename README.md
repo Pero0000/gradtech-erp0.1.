@@ -36,7 +36,7 @@ Za sigurno pokretanje:
    WHERE email = 'ivan.pericak@gmail.com';
    ```
 
-4. Deployajte funkcije za upravljanje tvrtkama/pozivnicama i obavijesti. Vlasnik otvara tvrtke na ekranu **Tvrtke**; njihovi administratori pozivaju korisnike i dodjeljuju prava u **Korisnici i prava**.
+4. Deployajte funkcije za upravljanje tvrtkama/pozivnicama i obavijesti. Vlasnik otvara tvrtke i podešava dostupne module te smjer obračuna rabata na ekranu **Tvrtke**; administratori pozivaju korisnike i dodjeljuju im prava u **Korisnici i prava**. Smjer rabata sprema se na svaku novu fakturu, pa promjena postavke ne mijenja ranije fakture.
 
 Detaljan plan, prijenos postojećih podataka, konfiguracija pozivnica i provjere opisani su u [Multi-company vodiču](docs/MULTI_COMPANY.md). Broj djelatnika i korisničkih računa po tvrtki nije aplikacijski ograničen.
 
@@ -79,8 +79,3 @@ Mobilna aplikacija za Android i iOS koristi postojeći Supabase Auth. Prije puš
 Pri prvom pokretanju djelatnik se prijavi, odobri push obavijesti i tako registrira uređaj. Zaključani nalog tada stiže kao push; dodirom se otvara taj nalog. Svi dodijeljeni djelatnici evidentiraju početak i završetak vremena za cijelu ekipu na istom nalogu. Samo poslovođa ispunjava zajednički izvještaj, potvrđuje pregled vremena ekipe i predaje nalog; trošak se obračunava tek nakon završnog odobrenja u ERP-u. Promjene vremena, izvještaja, zadataka, materijala/alata, fotografija i statusa bilježe se uz nalog, a povijest je vidljiva u web aplikaciji u detaljima naloga i osvježava se svakih 30 sekundi. Ako push konfiguracija nije spremna, nalog se svejedno zaključava i dostupan je u aplikaciji, a ERP prikazuje razlog zbog kojeg obavijest nije poslana.
 
 Uz radne zadatke gradilišta i naloga postoji odjeljak **Dodatni radovi** (migracija `20261021160000_dodatni_radovi.sql`, stupac `gradiliste_zadaci.vrsta`). Dodatni radovi ponašaju se jednako kao radni zadaci: prenose se na sljedeći nalog, nedovršeni se vraćaju na gradilište, imaju rokove i potvrdu u mobilnoj aplikaciji. Nalog s dodatnim radovima zahtijeva novu verziju mobilne aplikacije za predaju. Djelatnici u mobilnoj aplikaciji i Portalu djelatnika ne mogu dopisivati radne zadatke (samo ih označavaju kao obavljene), nego nove stavke upisuju u dodatne radove; to se provjerava i u bazi (migracija `20261021170000_radnik_samo_dodatni_radovi.sql`).
-## Otvaranje lokalne mape gradilišta
-
-Na svakom Windows računalu na kojem se mape otvaraju pokrenite `windows-helper\Instaliraj-pomocnik.bat` jednom. Zatim u detaljima gradilišta kliknite **Otvori u Exploreru**. Pri prvom otvaranju odaberite mapu; aplikacija će je zapamtiti za to gradilište i sljedeći put otvoriti izravno u Windows Exploreru. Ikona olovke služi za odabir ili promjenu mape.
-
-Pomoćni program povezuje prilagođenu `tmcolor-folder:` adresu s PowerShell skriptom, koju instalacijska skripta kopira u `%LOCALAPPDATA%\TmColor\LocalFolderHelper`. Putanje mapa spremaju se samo lokalno, u `%LOCALAPPDATA%\TmColor\site-folders.json`. Mape nisu učitane u aplikaciju niti dijeljene s drugim korisnicima; svaki korisnik/računalo odabire vlastitu lokalnu mapu. Za uklanjanje registracije pokrenite `windows-helper\Ukloni-pomocnik.bat`.

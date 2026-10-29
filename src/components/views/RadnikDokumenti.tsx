@@ -4,14 +4,7 @@ import type { RadnikDokument, RadnikDokumentVrsta } from '@/types';
 import { addRadnikDokument, deleteRadnikDokument, fetchRadnikDokumenti } from '@/lib/api';
 import { todayISO } from '@/lib/rokovi';
 import { TextInput, Select } from '@/components/ui/Field';
-
-export const dokumentVrste: Record<RadnikDokumentVrsta, string> = {
-  lijecnicki: 'Liječnički pregled',
-  atest: 'Atest',
-  zastita_na_radu: 'Zaštita na radu',
-  osposobljavanje: 'Osposobljavanje',
-  ostalo: 'Ostalo',
-};
+import { dokumentVrste } from '@/lib/radnikDokumenti';
 
 const errText = (e: unknown) => (e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : 'Greška');
 

@@ -61,6 +61,60 @@ Deno.serve(async (request) => {
       return response({ company_id: data.id });
     }
 
+    if (body.action === 'update_settings') {
+      if (!profile.is_platform_owner) return response({ error: 'Samo vlasnik sustava može mijenjati postavke tvrtke.' }, 403);
+      const companyId = text(body.company_id);
+      const settings = body.postavke;
+      if (!companyId || !settings || typeof settings !== 'object' || Array.isArray(settings)) {
+        return response({ error: 'Postavke tvrtke nisu valjane.' }, 400);
+      }
+      const candidate = settings as Record<string, unknown>;
+      if (
+        !Array.isArray(candidate.disabled_modules)
+        || candidate.disabled_modules.some((module) => typeof module !== 'string')
+        || !['pribroji', 'oduzmi'].includes(String(candidate.invoice_rebate_mode))
+      ) {
+        return response({ error: 'Postavke modula ili rabata nisu valjane.' }, 400);
+      }
+      const postavke = {
+        ...candidate,
+        disabled_modules: [...new Set((candidate.disabled_modules as string[]).map((module) => module.trim()).filter(Boolean))],
+        invoice_rebate_mode: candidate.invoice_rebate_mode,
+      };
+      const { data, error } = await service.from('tvrtke').update({ postavke })
+        .eq('id', companyId).select('id').single();
+      if (error) throw error;
+      return response({ company_id: data.id });
+    }
+
+    if (body.action === 'update_board_labels') {
+      const companyId = text(body.company_id);
+      if (!profile.is_platform_owner && companyId !== profile.company_id) {
+        return response({ error: 'Možete mijenjati nazive vrsta gradilišta samo u vlastitoj tvrtki.' }, 403);
+      }
+      if (!companyId || !Array.isArray(body.labels) || body.labels.length !== 3) {
+        return response({ error: 'Potrebna su točno tri naziva vrsta gradilišta.' }, 400);
+      }
+      const labels = body.labels.map(text);
+      if (
+        labels.some((label) => !label || label.length > 60)
+        || new Set(labels.map((label) => label.toLocaleLowerCase())).size !== labels.length
+      ) {
+        return response({ error: 'Nazivi moraju biti različiti, neprazni i kraći od 61 znaka.' }, 400);
+      }
+      const { data: current, error: settingsError } = await service.from('tvrtke')
+        .select('postavke').eq('id', companyId).single();
+      if (settingsError) throw settingsError;
+      const settings = current.postavke && typeof current.postavke === 'object' && !Array.isArray(current.postavke)
+        ? current.postavke as Record<string, unknown>
+        : {};
+      const { data, error } = await service.from('tvrtke')
+        .update({ postavke: { ...settings, gradiliste_column_labels: labels } })
+        .eq('id', companyId).select('id').single();
+      if (error) throw error;
+      return response({ company_id: data.id });
+    }
+
     if (body.action !== 'create_company' && body.action !== 'invite') {
       return response({ error: 'Nepoznata radnja.' }, 400);
     }

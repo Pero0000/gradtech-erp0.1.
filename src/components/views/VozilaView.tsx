@@ -1,22 +1,39 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Truck, Plus, Pencil, Trash2, Gauge, Calendar, Users, Weight, LayoutGrid, Table2, ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
-import type { Vozilo, VoziloStatus, VoziloTip, VoziloDokument } from '@/types';
+import { Truck, Plus, Pencil, Trash2, Gauge, Calendar, Users, Weight, LayoutGrid, Table2, ArrowDown, ArrowUp, ArrowUpDown, RefreshCw } from 'lucide-react';
+import type { DnevniRasporedGradiliste, Vozilo, VoziloStatus, VoziloTip, VoziloDokument } from '@/types';
 import { servisAlert, nextServis } from '@/lib/servis';
 import { AlertTriangle } from 'lucide-react';
 import { VoziloDokumenti } from '@/components/views/VoziloDokumenti';
-import { fetchVozila, createVozilo, updateVozilo, deleteVozilo, fetchSviServisi } from '@/lib/api';
+import { fetchVozila, createVozilo, updateVozilo, deleteVozilo, fetchSviServisi, fetchDnevniRaspored, recalculateVehicleKmCosts } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ExportMenu } from '@/components/ui/ExportMenu';
+import { VoziloFleetDetalji } from '@/components/views/VoziloFleetDetalji';
+import { todayISO } from '@/lib/rokovi';
 
-const statusBadge: Record<VoziloStatus, { variant: 'green' | 'red' | 'yellow'; label: string }> = {
+type VehicleDisplayStatus = VoziloStatus | 'na_gradilistu';
+
+const statusBadge: Record<VehicleDisplayStatus, { variant: 'green' | 'red' | 'yellow'; label: string }> = {
   slobodno: { variant: 'green', label: 'Slobodno' },
   zauzeto: { variant: 'red', label: 'Zauzeto' },
+  na_gradilistu: { variant: 'red', label: 'Na gradilištu' },
   servis: { variant: 'yellow', label: 'Servis' },
+  neispravno: { variant: 'red', label: 'Neispravno' },
 };
+
+function displayStatus(vehicle: Vozilo, todaysAssignments: DnevniRasporedGradiliste[]): VehicleDisplayStatus {
+  if (vehicle.status === 'servis' || vehicle.status === 'neispravno') return vehicle.status;
+  return todaysAssignments.some((assignment) =>
+    assignment.vozilo_id === vehicle.id && Boolean(assignment.gradiliste_id),
+  ) ? 'na_gradilistu' : vehicle.status;
+}
+
+function storedStatus(status: VehicleDisplayStatus): VoziloStatus {
+  return status === 'na_gradilistu' ? 'zauzeto' : status;
+}
 
 const tipLabel: Record<VoziloTip, string> = {
   teretno: 'Teretno',
@@ -45,6 +62,7 @@ const emptyForm = {
   servis_interval_mjeseci: '',
   servis_upozorenje_km: '1000',
   servis_upozorenje_dana: '30',
+  sljedeci_servis_napomena: '',
   napomena: '',
 };
 
@@ -56,7 +74,11 @@ export function VozilaView() {
   const [editing, setEditing] = useState<Vozilo | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [recalculatingKm, setRecalculatingKm] = useState(false);
+  const [kmRecalculationMessage, setKmRecalculationMessage] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [selectedVehicle, setSelectedVehicle] = useState<Vozilo | null>(null);
+  const [todaysAssignments, setTodaysAssignments] = useState<DnevniRasporedGradiliste[]>([]);
   const [prikaz, setPrikaz] = useState<'kartice' | 'tablica'>(() => (localStorage.getItem('tm_vozila_prikaz') === 'tablica' ? 'tablica' : 'kartice'));
   const [sortKey, setSortKey] = useState<SortKey>('vozilo');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -71,8 +93,14 @@ export function VozilaView() {
     setLoading(true);
     setError(null);
     try {
-      setItems(await fetchVozila());
-      await loadServisi();
+      const [vehicles, services, schedule] = await Promise.all([
+        fetchVozila(),
+        fetchSviServisi(),
+        fetchDnevniRaspored(todayISO()),
+      ]);
+      setItems(vehicles);
+      setServisi(services);
+      setTodaysAssignments(schedule.gradilista);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
     } finally {
@@ -87,11 +115,13 @@ export function VozilaView() {
   const openCreate = () => {
     setEditing(null);
     setForm(emptyForm);
+    setKmRecalculationMessage(null);
     setModalOpen(true);
   };
 
   const openEdit = (v: Vozilo) => {
     setEditing(v);
+    setKmRecalculationMessage(null);
     setForm({
       registracija: v.registracija,
       marka: v.marka,
@@ -110,9 +140,34 @@ export function VozilaView() {
       servis_interval_mjeseci: v.servis_interval_mjeseci ? v.servis_interval_mjeseci.toString() : '',
       servis_upozorenje_km: (v.servis_upozorenje_km ?? 1000).toString(),
       servis_upozorenje_dana: (v.servis_upozorenje_dana ?? 30).toString(),
+      sljedeci_servis_napomena: v.sljedeci_servis_napomena ?? '',
       napomena: v.napomena ?? '',
     });
     setModalOpen(true);
+  };
+
+  const recalculateKm = async () => {
+    if (!editing) return;
+    setRecalculatingKm(true);
+    setKmRecalculationMessage('Obračun je pokrenut. Provjeravam rasporede i završene naloge…');
+    setError(null);
+    try {
+      const summary = await recalculateVehicleKmCosts(editing.id);
+      const message = summary.createdCosts > 0
+        ? `Obrađeno ${summary.createdCosts} troškova kroz ${summary.dates} dana (${summary.eligibleOrders} završenih naloga s upisanim kilometrima).`
+        : summary.scheduledAssignments === 0
+          ? 'Nema povijesnih rasporeda za ovo vozilo.'
+          : summary.linkedOrders === 0
+            ? `Vozilo je pronađeno u ${summary.scheduledAssignments} rasporeda kroz ${summary.dates} dana, ali rasporedi nemaju povezane radne naloge.`
+          : summary.eligibleOrders === 0
+            ? `Pronađeno je ${summary.linkedOrders} povezanih naloga, ali nijedan nema status Završeno i upisane početne i završne kilometre.`
+            : `${summary.eligibleOrders} naloga ima upisane kilometre, ali iz njih nije nastao trošak. Provjerite cijenu/km i razliku kilometraže.`;
+      setKmRecalculationMessage(message);
+    } catch (reason) {
+      setKmRecalculationMessage(reason instanceof Error ? reason.message : 'Ponovni obračun kilometara nije uspio.');
+    } finally {
+      setRecalculatingKm(false);
+    }
   };
 
   const save = async () => {
@@ -137,6 +192,7 @@ export function VozilaView() {
         servis_interval_mjeseci: form.servis_interval_mjeseci ? parseInt(form.servis_interval_mjeseci) : null,
         servis_upozorenje_km: form.servis_upozorenje_km ? parseInt(form.servis_upozorenje_km) : 1000,
         servis_upozorenje_dana: form.servis_upozorenje_dana ? parseInt(form.servis_upozorenje_dana) : 30,
+        sljedeci_servis_napomena: form.sljedeci_servis_napomena.trim() || null,
         napomena: form.napomena.trim() || null,
       };
       if (editing) {
@@ -165,12 +221,14 @@ export function VozilaView() {
     }
   };
 
+  const openDetails = (vehicle: Vozilo) => setSelectedVehicle(vehicle);
+
   const sortedItems = useMemo(() => {
     const value = (vehicle: Vozilo): string | number => {
       switch (sortKey) {
         case 'vozilo': return `${vehicle.marka} ${vehicle.model ?? ''}`.trim();
         case 'tip': return tipLabel[vehicle.tip];
-        case 'status': return statusBadge[vehicle.status].label;
+        case 'status': return statusBadge[displayStatus(vehicle, todaysAssignments)].label;
         case 'kilometraza': return vehicle.kilometraza ?? 0;
         case 'godina': return vehicle.godina_proizvodnje ?? 0;
         case 'mjesta': return vehicle.broj_mjesta ?? 0;
@@ -195,7 +253,7 @@ export function VozilaView() {
         : String(firstValue).localeCompare(String(secondValue), 'hr', { numeric: true, sensitivity: 'base' });
       return comparison * direction;
     });
-  }, [items, servisi, sortKey, sortDir]);
+  }, [items, servisi, todaysAssignments, sortKey, sortDir]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((direction) => direction === 'asc' ? 'desc' : 'asc');
@@ -239,7 +297,7 @@ export function VozilaView() {
               columns: [
                 { header: 'Vozilo', get: (v: Vozilo) => [v.marka, v.model].filter(Boolean).join(' ') },
                 { header: 'Tip', get: (v: Vozilo) => tipLabel[v.tip] },
-                { header: 'Status', get: (v: Vozilo) => statusBadge[v.status].label },
+                { header: 'Status', get: (v: Vozilo) => statusBadge[displayStatus(v, todaysAssignments)].label },
                 { header: 'Kilometraža', kind: 'num', get: (v: Vozilo) => v.kilometraza },
                 { header: 'Godina', get: (v: Vozilo) => v.godina_proizvodnje?.toString() ?? '' },
                 { header: 'Mjesta', kind: 'num', get: (v: Vozilo) => v.broj_mjesta },
@@ -300,13 +358,13 @@ export function VozilaView() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {sortedItems.map((v) => {
-                const sb = statusBadge[v.status];
+                const sb = statusBadge[displayStatus(v, todaysAssignments)];
                 const ns = nextServis(v, servisi);
                 const alert = servisAlert(v, servisi);
                 const alertCls = alert?.level === 'overdue' ? 'text-red-600 font-semibold' : alert?.level === 'soon' ? 'text-red-500 font-medium' : 'text-slate-700';
                 return (
-                  <tr key={v.id} className="group hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-900">{v.marka} {v.model}</td>
+                  <tr key={v.id} role="button" tabIndex={0} onClick={() => openDetails(v)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openDetails(v); } }} className="group cursor-pointer hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-slate-900">{v.marka} {v.model} <span className="ml-1 text-xs text-slate-500">{v.registracija}</span></td>
                     <td className="px-4 py-3"><Badge variant="blue">{tipLabel[v.tip]}</Badge></td>
                     <td className="px-4 py-3"><Badge variant={sb.variant}>{sb.label}</Badge></td>
                     <td className="px-4 py-3 text-right text-slate-600">{v.kilometraza.toLocaleString('hr-HR')}</td>
@@ -327,8 +385,8 @@ export function VozilaView() {
                     <td className="max-w-xs truncate px-4 py-3 text-slate-600">{v.napomena || '—'}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => openEdit(v)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-600"><Pencil className="h-4 w-4" /></button>
-                        <button onClick={() => setDeleteId(v.id)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                        <button onClick={(event) => { event.stopPropagation(); openEdit(v); }} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-600" aria-label="Uredi vozilo"><Pencil className="h-4 w-4" /></button>
+                        <button onClick={(event) => { event.stopPropagation(); setDeleteId(v.id); }} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600" aria-label="Obriši vozilo"><Trash2 className="h-4 w-4" /></button>
                       </div>
                     </td>
                   </tr>
@@ -340,11 +398,15 @@ export function VozilaView() {
       ) : (
         <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
           {sortedItems.map((v) => {
-            const sb = statusBadge[v.status];
+            const sb = statusBadge[displayStatus(v, todaysAssignments)];
             return (
               <div
                 key={v.id}
-                className="group min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-md transition-shadow"
+                role="button"
+                tabIndex={0}
+                onClick={() => openDetails(v)}
+                onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openDetails(v); } }}
+                className="group min-w-0 cursor-pointer rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-md transition-shadow focus:outline-none focus:ring-2 focus:ring-sky-500"
               >
                 <div className="mb-3 flex min-w-0 flex-col items-start justify-between gap-3 xl:flex-row">
                   <div className="flex min-w-0 items-center gap-3">
@@ -353,17 +415,20 @@ export function VozilaView() {
                     </div>
                     <div className="min-w-0">
                       <h3 className="font-semibold text-slate-900 leading-tight">{v.marka} {v.model}</h3>
+                      <p className="mt-0.5 text-xs font-medium tracking-wide text-slate-500">{v.registracija}</p>
                     </div>
                   </div>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
-                      onClick={() => openEdit(v)}
+                      onClick={(event) => { event.stopPropagation(); openEdit(v); }}
+                      aria-label="Uredi vozilo"
                       className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-600 transition-colors"
                     >
                       <Pencil className="h-4 w-4" />
                     </button>
                     <button
-                      onClick={() => setDeleteId(v.id)}
+                      onClick={(event) => { event.stopPropagation(); setDeleteId(v.id); }}
+                      aria-label="Obriši vozilo"
                       className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600 transition-colors"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -430,6 +495,7 @@ export function VozilaView() {
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         title={editing ? 'Uredi vozilo' : 'Novo vozilo'}
+        wide="screen"
         footer={
           <>
             <button
@@ -448,7 +514,8 @@ export function VozilaView() {
           </>
         }
       >
-        <div className="space-y-4">
+        <div className="grid min-w-0 grid-cols-1 items-start gap-6 2xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+          <div className="min-w-0 space-y-4">
           <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Registracija *">
               <TextInput
@@ -492,6 +559,7 @@ export function VozilaView() {
                 <option value="slobodno">Slobodno</option>
                 <option value="zauzeto">Zauzeto</option>
                 <option value="servis">Servis</option>
+                <option value="neispravno">Neispravno</option>
               </Select>
             </Field>
           </div>
@@ -546,6 +614,24 @@ export function VozilaView() {
               onChange={(e) => setForm({ ...form, cijena_km: e.target.value })}
               placeholder="0,40"
             />
+            {editing && (
+              <div className="mt-2">
+                <button
+                  type="button"
+                  onClick={() => void recalculateKm()}
+                  disabled={recalculatingKm}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${recalculatingKm ? 'animate-spin' : ''}`} />
+                  {recalculatingKm ? 'Obračunavam povijesne naloge…' : 'Ponovno obračunaj stare naloge'}
+                </button>
+                {kmRecalculationMessage && (
+                  <p role="status" aria-live="polite" className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
+                    {kmRecalculationMessage}
+                  </p>
+                )}
+              </div>
+            )}
           </Field>
           <Field label="ENC (oznaka / broj uređaja)">
             <TextInput value={form.enc_broj} onChange={(e) => setForm({ ...form, enc_broj: e.target.value })} placeholder="npr. broj ENC uređaja" />
@@ -576,13 +662,34 @@ export function VozilaView() {
             </div>
             <p className="mt-2 text-[11px] text-slate-400">Računa se od zadnjeg upisanog servisa i trenutne kilometraže vozila. Ostavi prazno za isključeno.</p>
           </div>
+          <Field label="Što treba napraviti na sljedećem servisu">
+            <Textarea
+              rows={4}
+              value={form.sljedeci_servis_napomena}
+              onChange={(e) => setForm((previous) => ({ ...previous, sljedeci_servis_napomena: e.target.value }))}
+              placeholder={'npr. zamjena ulja i filtera\nprovjera kočnica\nprovjera guma'}
+            />
+            <p className="mt-1 text-xs text-slate-500">Popis ostaje uz vozilo dok ga ne promijeniš ili obrišeš.</p>
+          </Field>
+          </div>
           {editing ? (
-            <VoziloDokumenti voziloId={editing.id} onChange={() => void loadServisi()} />
+            <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+              <VoziloDokumenti voziloId={editing.id} onChange={() => void loadServisi()} />
+            </div>
           ) : (
-            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Dokumenti, servisi i rokovi mogu se dodati nakon prvog spremanja vozila.</p>
+            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-sm text-slate-500">Povijest servisa, troškove i dokumente možeš dodati nakon prvog spremanja vozila.</p>
           )}
         </div>
       </Modal>
+
+      {selectedVehicle && (
+        <VoziloFleetDetalji
+          vozilo={{ ...selectedVehicle, status: storedStatus(displayStatus(selectedVehicle, todaysAssignments)) }}
+          onClose={() => setSelectedVehicle(null)}
+          onEdit={() => { setSelectedVehicle(null); openEdit(selectedVehicle); }}
+          onDataChange={() => { void loadServisi(); }}
+        />
+      )}
 
       <ConfirmDialog
         open={deleteId !== null}

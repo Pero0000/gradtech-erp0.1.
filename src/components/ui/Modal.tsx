@@ -7,7 +7,7 @@ interface ModalProps {
   title: string;
   children: ReactNode;
   footer?: ReactNode;
-  wide?: boolean | 'md' | 'screen';
+  wide?: boolean | 'md' | 'screen' | 'full';
   headerSlotId?: string;
 }
 
@@ -15,9 +15,9 @@ export function Modal({ open, onClose, title, children, footer, wide, headerSlot
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex min-w-0 items-center justify-center p-2 sm:p-4">
+    <div className={`fixed inset-0 z-50 flex min-w-0 items-center justify-center ${wide === 'full' ? 'p-1' : 'p-2 sm:p-4'}`}>
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
-      <div role="dialog" aria-modal="true" aria-label={title} className={`relative z-10 flex min-h-0 min-w-0 w-full flex-col ${wide === 'screen' ? 'max-w-[min(96vw,1600px)]' : wide === 'md' ? 'max-w-4xl' : wide ? 'max-w-7xl' : 'max-w-lg'} ${wide === 'screen' ? 'max-h-[96dvh]' : 'max-h-[92dvh]'} rounded-2xl bg-white shadow-2xl`}>
+      <div role="dialog" aria-modal="true" aria-label={title} className={`relative z-10 flex min-h-0 min-w-0 w-full flex-col ${wide === 'full' ? 'max-w-[calc(100vw-1rem)]' : wide === 'screen' ? 'max-w-[min(96vw,1600px)]' : wide === 'md' ? 'max-w-4xl' : wide ? 'max-w-7xl' : 'max-w-lg'} ${wide === 'full' ? 'h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)]' : wide === 'screen' ? 'max-h-[96dvh]' : 'max-h-[92dvh]'} rounded-2xl bg-white shadow-2xl`}>
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-3 py-3 sm:px-6 sm:py-4">
           <h2 className="min-w-0 flex-1 break-words text-lg font-semibold text-slate-900">{title}</h2>
           {headerSlotId && <div id={headerSlotId} className="order-last flex w-full min-w-0 flex-wrap gap-2 xl:order-none xl:ml-auto xl:mr-3 xl:w-auto" />}

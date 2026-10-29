@@ -13,7 +13,7 @@ function daysBetween(from: string, to: string) {
 }
 
 export function deadlineAlert(g: Gradiliste, rokovi: Rok[]): DeadlineAlert | null {
-  if (g.status === 'zavrseno') return null;
+  if (g.status === 'zavrseno' || g.status === 'neplaceno') return null;
   const today = todayISO();
   const items: { datum: string; label: string }[] = [];
   if (g.datum_pocetka && g.status !== 'aktivno') items.push({ datum: g.datum_pocetka, label: 'Početak gradilišta' });

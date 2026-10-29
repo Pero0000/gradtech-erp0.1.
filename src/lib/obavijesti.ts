@@ -18,6 +18,8 @@ export type ObavijestLevel = 'overdue' | 'today' | 'soon' | 'upcoming';
 
 export interface Obavijest {
   id: string;
+  subjectId?: string;
+  gradilisteId?: string;
   tip: ObavijestTip;
   grupa: ObavijestGrupa;
   tipLabel: string;
@@ -96,13 +98,13 @@ export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
   const out: Obavijest[] = [];
   const meta = (tip: ObavijestTip) => obavijestTipovi.find((t) => t.tip === tip)!;
 
-  const push = (tip: ObavijestTip, id: string, title: string, detail: string, datum: string, view: Obavijest['view']) => {
+  const push = (tip: ObavijestTip, id: string, title: string, detail: string, datum: string, view: Obavijest['view'], gradilisteId?: string, subjectId?: string) => {
     const cfg = postavke.obavijesti[tip];
     if (!cfg?.on) return;
     const days = daysBetween(today, datum);
     if (days > cfg.dana) return;
     const m = meta(tip);
-    out.push({ id, tip, grupa: m.grupa, tipLabel: m.label, title, detail, datum, days, level: levelOf(days), view });
+    out.push({ id, subjectId, gradilisteId, tip, grupa: m.grupa, tipLabel: m.label, title, detail, datum, days, level: levelOf(days), view });
   };
 
   // Samo najnoviji dokument po osobi/vozilu i vrsti (obnovljeni dokument zamjenjuje stari)
@@ -121,7 +123,7 @@ export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
   latest(src.radnikDok, (d) => `${d.radnik_id}|${radnikTip(d.vrsta)}`).forEach((d) => {
     const r = radnikById.get(d.radnik_id);
     if (!r || r.status === 'neaktivan') return;
-    push(radnikTip(d.vrsta), `rd-${d.id}`, `${r.ime} ${r.prezime}`, d.naziv, d.datum_do as string, 'radnici');
+    push(radnikTip(d.vrsta), `rd-${d.id}`, `${r.ime} ${r.prezime}`, d.naziv, d.datum_do as string, 'radnici', undefined, d.radnik_id);
   });
 
   const voziloById = new Map(src.vozila.map((v) => [v.id, v]));
@@ -129,7 +131,7 @@ export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
     const v = voziloById.get(d.vozilo_id);
     const tip = voziloTip(d.vrsta);
     if (!v || !tip) return;
-    push(tip, `vd-${d.id}`, [v.marka, v.model].filter(Boolean).join(' ') || 'Vozilo', d.naziv, d.datum_do as string, 'vozila');
+    push(tip, `vd-${d.id}`, [v.marka, v.model].filter(Boolean).join(' ') || 'Vozilo', d.naziv, d.datum_do as string, 'vozila', undefined, d.vozilo_id);
   });
 
   if (postavke.obavijesti.vozilo_servis.on) {
@@ -139,6 +141,7 @@ export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
       const m = meta('vozilo_servis');
       out.push({
         id: `vs-${v.id}`,
+        subjectId: v.id,
         tip: 'vozilo_servis',
         grupa: m.grupa,
         tipLabel: m.label,
@@ -152,15 +155,15 @@ export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
     });
   }
 
-  src.gradilista.filter((g) => g.status !== 'zavrseno').forEach((g) => {
-    if (g.datum_zavrsetka) push('projekt_rok', `gk-${g.id}`, g.naziv, 'Kraj gradilišta', g.datum_zavrsetka, 'gradilista');
-    if (g.datum_pocetka && g.datum_pocetka >= today && g.status !== 'aktivno') push('projekt_rok', `gp-${g.id}`, g.naziv, 'Početak gradilišta', g.datum_pocetka, 'gradilista');
+  src.gradilista.filter((g) => g.status !== 'zavrseno' && g.status !== 'neplaceno').forEach((g) => {
+    if (g.datum_zavrsetka) push('projekt_rok', `gk-${g.id}`, g.naziv, 'Kraj gradilišta', g.datum_zavrsetka, 'gradilista', g.id);
+    if (g.datum_pocetka && g.datum_pocetka >= today && g.status !== 'aktivno') push('projekt_rok', `gp-${g.id}`, g.naziv, 'Početak gradilišta', g.datum_pocetka, 'gradilista', g.id);
   });
   const gradNaziv = new Map(src.gradilista.map((g) => [g.id, g]));
   src.rokovi.filter((r) => r.status !== 'zavrsen').forEach((r) => {
     const g = gradNaziv.get(r.gradiliste_id);
-    if (!g || g.status === 'zavrseno') return;
-    push('projekt_rok', `rk-${r.id}`, g.naziv, r.naziv, r.datum, 'gradilista');
+    if (!g || g.status === 'zavrseno' || g.status === 'neplaceno') return;
+    push('projekt_rok', `rk-${r.id}`, g.naziv, r.naziv, r.datum, 'gradilista', g.id);
   });
 
   src.fakture.filter((f) => f.status !== 'placena' && f.datum_dospjecja).forEach((f) => {

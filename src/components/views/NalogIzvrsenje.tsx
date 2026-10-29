@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, Check, ChevronDown, Clock, FileText, Gauge, Hammer, History, Package, Plus, Trash2, ListChecks, Wrench } from 'lucide-react';
+import { Camera, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, FileText, Gauge, Hammer, History, Package, Plus, Trash2, X, ListChecks, Wrench } from 'lucide-react';
 import type { GradilisteZadatak, Oprema, RadniNalog, ZadatakVrsta } from '@/types';
 import { zadatakVrsta } from '@/types';
 import {
@@ -56,10 +56,11 @@ const auditActions: Record<string, string> = {
   worker_finished: 'Završetak rada je evidentiran',
   order_reviewed: 'Potvrđen je pregled naloga',
   order_started: 'Rad na nalogu je započet',
-  order_submitted: 'Poslovođa je predao nalog na odobrenje',
+  order_submitted: 'Djelatnik je potvrdio i predao nalog',
   order_approved: 'Nalog je odobren',
   order_status_changed: 'Status naloga je promijenjen',
   report_updated: 'Završni izvještaj je izmijenjen',
+  report_confirmations_updated: 'Potvrde izvještaja su izmijenjene',
   item_added: 'Dodana je stavka materijala/alata',
   item_removed: 'Uklonjena je stavka materijala/alata',
   item_checked: 'Stavka materijala/alata je označena',
@@ -89,6 +90,8 @@ const auditDetailLabels: Record<string, string> = {
   mobile_alat_na: 'Alat nije potreban',
   old_status: 'Prethodni status',
   new_status: 'Novi status',
+  old_potvrde: 'Prethodne potvrde',
+  new_potvrde: 'Nove potvrde',
   tip: 'Vrsta',
   naziv: 'Naziv',
   gotovo: 'Završeno',
@@ -97,6 +100,7 @@ const auditDetailLabels: Record<string, string> = {
 function auditValue(value: unknown) {
   if (typeof value === 'boolean') return value ? 'Da' : 'Ne';
   if (value === null) return '—';
+  if (Array.isArray(value)) return value.join(', ') || '—';
   if (typeof value === 'string' || typeof value === 'number') return String(value);
   return JSON.stringify(value);
 }
@@ -127,6 +131,32 @@ function AuditLog({ entries }: { entries: MobileWorkOrderAuditEntry[] }) {
           ))}
         </ol>
       )}
+    </div>
+  );
+}
+
+function ResolvedStavkeHistory({ items, onToggle }: { items: NalogStavka[]; onToggle: (item: NalogStavka) => void }) {
+  const [showHistory, setShowHistory] = useState(false);
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        aria-expanded={showHistory}
+        onClick={() => setShowHistory((open) => !open)}
+        className="mb-2 border-b-2 border-transparent px-2.5 py-2 text-xs font-semibold text-slate-600 hover:border-sky-600 hover:text-sky-800"
+      >
+        {showHistory ? 'Sakrij povijest' : `Povijest (${items.length})`}
+      </button>
+      {showHistory && <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2">
+        {items.length === 0 && <p className="text-xs text-slate-400">Povijest je prazna.</p>}
+        {items.map((item) => (
+          <label key={item.id} className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm">
+            <input type="checkbox" checked onChange={() => onToggle(item)} className="h-4 w-4 rounded border-slate-300 accent-emerald-600" />
+            <span className="flex-1 text-emerald-800 line-through">{item.naziv}</span>
+            <span className="text-xs text-emerald-700">Riješeno</span>
+          </label>
+        ))}
+      </div>}
     </div>
   );
 }
@@ -262,13 +292,15 @@ export function NalogIzvrsenje({
   radnikIds,
   hideZadaci,
   hideStavke,
+  visualSections = false,
   onChange,
   slotId,
 }: {
-  nalog: Pick<RadniNalog, 'id' | 'gradiliste_id'> & Partial<Pick<RadniNalog, 'mobile_status'>>;
+  nalog: Pick<RadniNalog, 'id' | 'gradiliste_id'> & Partial<Pick<RadniNalog, 'status' | 'mobile_status'>>;
   radnikIds?: string[];
   hideZadaci?: boolean;
   hideStavke?: boolean;
+  visualSections?: boolean;
   slotId?: string;
   onChange?: (zavrsen: boolean) => void;
 }) {
@@ -277,6 +309,7 @@ export function NalogIzvrsenje({
     setSlot(slotId ? document.getElementById(slotId) : null);
   }, [slotId]);
   const [zavrsen, setZavrsen] = useState(false);
+  const [bezIzvrsenja, setBezIzvrsenja] = useState(false);
   const [teren, setTeren] = useState(false);
   const [poslovodja, setPoslovodja] = useState<string | null>(null);
   const [vozac, setVozac] = useState<string | null>(null);
@@ -310,9 +343,29 @@ export function NalogIzvrsenje({
   const [zadaci, setZadaci] = useState<GradilisteZadatak[]>([]);
   const [newZadatak, setNewZadatak] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
   const [foto, setFoto] = useState<NalogFoto[]>([]);
+  const [selectedFotoId, setSelectedFotoId] = useState<string | null>(null);
   const [audit, setAudit] = useState<MobileWorkOrderAuditEntry[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const selectedFotoIndex = foto.findIndex((f) => f.id === selectedFotoId);
+  const selectedFoto = selectedFotoIndex >= 0 ? foto[selectedFotoIndex] : null;
+
+  const navigateFoto = useCallback((direction: -1 | 1) => {
+    if (selectedFotoIndex < 0 || foto.length < 2) return;
+    const nextIndex = (selectedFotoIndex + direction + foto.length) % foto.length;
+    setSelectedFotoId(foto[nextIndex].id);
+  }, [foto, selectedFotoIndex]);
+
+  useEffect(() => {
+    if (!selectedFoto) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedFotoId(null);
+      if (event.key === 'ArrowLeft') navigateFoto(-1);
+      if (event.key === 'ArrowRight') navigateFoto(1);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [navigateFoto, selectedFoto]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -331,6 +384,7 @@ export function NalogIzvrsenje({
       setKm({ pocetak: izv.value.km_pocetak?.toString() ?? '', kraj: izv.value.km_kraj?.toString() ?? '' });
       setNapomena(izv.value.napomena ?? '');
       setZavrsen(izv.value.status === 'zavrsen');
+      setBezIzvrsenja(Boolean(izv.value.bez_izvrsenja));
       setTeren(Boolean(izv.value.teren));
       setPoslovodja(izv.value.poslovodja_id ?? null);
       setVozac(izv.value.vozac_id ?? null);
@@ -414,14 +468,26 @@ export function NalogIzvrsenje({
     }, 'Greška pri spremanju oznake teren.');
   };
 
-  const toggleZavrsen = (value: boolean, bezPotvrdeDjelatnika = false) => {
+  const toggleZavrsen = (value: boolean, bezPotvrdeDjelatnika = false, zavrsiBezIzvrsenja = false) => {
+    if (zavrsiBezIzvrsenja) {
+      const nijeZapoceo = !nalog.mobile_status
+        ? nalog.status === 'otvoren'
+        : nalog.mobile_status === 'dodijeljen'
+          && nalog.status !== 'zavrsen'
+          && nalog.status !== 'otkazan';
+      if (!nijeZapoceo) {
+        setError('Bez izvršenja može se završiti samo otvoren nalog ili poslan nalog na kojem djelatnik još nije započeo rad.');
+        return;
+      }
+      if (!window.confirm('Ovaj radni nalog bit će uklonjen iz otvorenih naloga djelatnika i označen kao završen bez izvršenja. Neće se obračunati sati ni troškovi, a nezavršeni zadaci vratit će se na gradilište. Nastaviti?')) return;
+    }
     if (value) {
-      if (!bezPotvrdeDjelatnika && (nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku')) {
+      if (!zavrsiBezIzvrsenja && !bezPotvrdeDjelatnika && (nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku')) {
         setError('Djelatnici još rade na nalogu. Zaključivanje je moguće tek nakon što poslovođa preda završni izvještaj.');
         return;
       }
       const radnici = radnikIds ? vremena.filter((v) => radnikIds.includes(v.radnik_id)) : vremena;
-      if (!bezPotvrdeDjelatnika && radnici.some((v) => !v.vrijeme_od || !v.vrijeme_do)) {
+      if (!zavrsiBezIzvrsenja && !bezPotvrdeDjelatnika && radnici.some((v) => !v.vrijeme_od || !v.vrijeme_do)) {
         setError('Nalog se ne može zaključiti dok nije upisan završetak rada (Do) za sve radnike.');
         return;
       }
@@ -433,17 +499,20 @@ export function NalogIzvrsenje({
       const detalji = missing.length > 0
         ? `Nije upisano: ${missing.join(', ')}. Kilometri se neće obračunati.`
         : 'Sati i kilometri upisat će se u trošak gradilišta, a neriješeni zadaci, materijal i alat prenose se na idući nalog.';
-      const poruka = [upozorenje, detalji, 'Zaključiti nalog?'].filter(Boolean).join('\n\n');
-      if (!window.confirm(poruka)) return;
+      if (!zavrsiBezIzvrsenja) {
+        const poruka = [upozorenje, detalji, 'Zaključiti nalog?'].filter(Boolean).join('\n\n');
+        if (!window.confirm(poruka)) return;
+      }
     }
     void guard(async () => {
-      if (value) {
+      if (value && !zavrsiBezIzvrsenja) {
         const pocetak = km.pocetak === '' ? null : Number(km.pocetak);
         const kraj = km.kraj === '' ? null : Number(km.kraj);
         await saveNalogIzvrsenje(nalog.id, { km_pocetak: pocetak, km_kraj: kraj, napomena: napomena.trim() || null });
       }
-      await setNalogZavrsen(nalog.id, value, bezPotvrdeDjelatnika);
+      await setNalogZavrsen(nalog.id, value, bezPotvrdeDjelatnika, zavrsiBezIzvrsenja);
       setZavrsen(value);
+      setBezIzvrsenja(value && zavrsiBezIzvrsenja);
       onChange?.(value);
     }, 'Greška pri zaključivanju naloga.');
   };
@@ -504,6 +573,7 @@ export function NalogIzvrsenje({
     void guard(async () => {
       await deleteNalogFoto(f);
       setFoto((prev) => prev.filter((x) => x.id !== f.id));
+      setSelectedFotoId((prev) => prev === f.id ? null : prev);
     }, 'Greška pri brisanju fotografije.');
 
   const reloadStavke = async () => setStavke(await fetchNalogStavke(nalog.id));
@@ -535,8 +605,9 @@ export function NalogIzvrsenje({
     void guard(() => updateNalogStavka(s.id, { sati: current?.sati ?? null }), 'Greška pri spremanju radnih sati stroja.');
   };
   const toggleStavka = (s: NalogStavka) => {
-    setStavke((prev) => prev.map((x) => (x.id === s.id ? { ...x, gotovo: !s.gotovo } : x)));
-    void guard(() => updateNalogStavka(s.id, { gotovo: !s.gotovo }), 'Greška pri spremanju stavke.');
+    const rijeseno = Boolean(s.gotovo || s.uzeto);
+    setStavke((prev) => prev.map((x) => (x.id === s.id ? { ...x, gotovo: !rijeseno, uzeto: !rijeseno } : x)));
+    void guard(() => updateNalogStavka(s.id, { gotovo: !rijeseno }), 'Greška pri spremanju stavke.');
   };
   const removeStavka = (id: string) =>
     void guard(async () => {
@@ -563,6 +634,7 @@ export function NalogIzvrsenje({
 
   const kmRazlika = km.pocetak !== '' && km.kraj !== '' && Number(km.kraj) >= Number(km.pocetak) ? Number(km.kraj) - Number(km.pocetak) : null;
   const inputCls = 'min-w-0 max-w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm';
+  const modulePanelCls = visualSections ? 'rounded-xl border border-slate-200 bg-white p-4 shadow-sm' : '';
   const visibleVremena = radnikIds ? vremena.filter((v) => radnikIds.includes(v.radnik_id)) : vremena;
 
   return (
@@ -573,7 +645,7 @@ export function NalogIzvrsenje({
         zavrsen ? (
           <div className="flex items-center gap-2 text-sm text-emerald-800">
             <Check className="h-4 w-4" />
-            Zaključen
+            {bezIzvrsenja ? 'Završen bez izvršenja' : 'Zaključen'}
             {nalog.mobile_status === 'zakljucen_bez_potvrde' && (
               <span className="rounded bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">Djelatnici nisu potvrdili</span>
             )}
@@ -589,6 +661,16 @@ export function NalogIzvrsenje({
               <Check className="h-4 w-4" />
               {nalog.mobile_status === 'predan' ? 'Odobri i zaključi nalog' : nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku' ? 'Čeka izvještaj djelatnika' : 'Zaključi radni nalog'}
             </button>
+            {((!nalog.mobile_status && nalog.status === 'otvoren')
+              || (nalog.mobile_status === 'dodijeljen' && nalog.status !== 'zavrsen' && nalog.status !== 'otkazan')) && (
+              <button
+                onClick={() => toggleZavrsen(true, false, true)}
+                className="ml-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <Check className="h-4 w-4" />
+                Završi bez izvršenja
+              </button>
+            )}
             {(nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku') && (
               <button
                 onClick={() => toggleZavrsen(true, true)}
@@ -602,7 +684,9 @@ export function NalogIzvrsenje({
         ),
         slot,
       )}
-      <div className="rounded-xl border-2 border-amber-400 bg-amber-50 p-4 shadow-md ring-2 ring-amber-200/70">
+      <div className={visualSections
+        ? 'rounded-xl border border-amber-200 bg-amber-50/70 p-4 shadow-sm'
+        : 'rounded-xl border-2 border-amber-400 bg-amber-50 p-4 shadow-md ring-2 ring-amber-200/70'}>
         <SectionTitle icon={<FileText className="h-5 w-5 text-amber-700" />}>Napomena uz radni nalog</SectionTitle>
         <textarea
           rows={4}
@@ -610,14 +694,14 @@ export function NalogIzvrsenje({
           onChange={(event) => setNapomena(event.target.value)}
           onBlur={() => void saveDetails()}
           placeholder="Dodatne napomene i važne upute uz nalog…"
-          className={`${inputCls} w-full border-amber-400 bg-white text-base font-semibold text-slate-900 placeholder:font-normal`}
+          className={`${inputCls} w-full ${visualSections ? 'border-amber-200' : 'border-amber-400'} bg-white text-base font-semibold text-slate-900 placeholder:font-normal`}
         />
         {!napomena.trim() && <p className="text-sm font-medium text-amber-900">Napomena nije upisana.</p>}
       </div>
       {([['zadatak', 'Radni zadaci', 'Nema zadataka na ovom nalogu.', 'Novi radni zadatak'], ['dodatni', 'Dodatni radovi', 'Nema dodatnih radova na ovom nalogu.', 'Novi dodatni rad']] as const).map(([vrsta, naslov, prazno, placeholder]) => {
         const lista = zadaci.filter((z) => !z.gotovo && zadatakVrsta(z) === vrsta);
         return (
-      <div key={vrsta} className={hideZadaci ? 'hidden' : undefined}>
+      <div key={vrsta} className={`${hideZadaci ? 'hidden' : ''} ${modulePanelCls}`}>
         <SectionTitle icon={<ListChecks className="h-4 w-4" />}>
           {naslov} ({lista.length})
         </SectionTitle>
@@ -650,7 +734,7 @@ export function NalogIzvrsenje({
         );
       })}
 
-      <div>
+      <div className={modulePanelCls}>
         <SectionTitle icon={<Clock className="h-4 w-4" />}>Radno vrijeme radnika</SectionTitle>
         <label className={`mb-2 flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium ${teren ? 'border-sky-300 bg-sky-50 text-sky-900' : 'border-slate-200 text-slate-700'}`}>
           <input type="checkbox" checked={teren} onChange={(e) => changeTeren(e.target.checked)} className="h-4 w-4 rounded border-slate-300" />
@@ -729,7 +813,7 @@ export function NalogIzvrsenje({
         )}
       </div>
 
-      <div>
+      <div className={modulePanelCls}>
         <SectionTitle icon={<Gauge className="h-4 w-4" />}>Kilometri</SectionTitle>
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-1.5 text-xs text-slate-500">
@@ -744,25 +828,29 @@ export function NalogIzvrsenje({
         </div>
       </div>
 
-      {!hideStavke && <div className="grid gap-4">
-        <div>
+      {!hideStavke && <div className={`grid gap-4 ${modulePanelCls}`}>
+        <div className={visualSections ? 'rounded-lg bg-slate-50 p-3' : undefined}>
           <SectionTitle icon={<Package className="h-4 w-4" />}>
-            Materijal potreban za dalje ({stavke.filter((s) => s.tip === 'materijal' && !s.gotovo).length})
+            Materijal potreban za dalje ({stavke.filter((s) => s.tip === 'materijal' && !s.gotovo && !s.uzeto).length})
           </SectionTitle>
           <Checklist
-            items={stavke.filter((s) => s.tip === 'materijal' && !s.gotovo)}
+            items={stavke.filter((s) => s.tip === 'materijal' && !s.gotovo && !s.uzeto)}
             placeholder="npr. boja bijela 15 l"
             onAdd={(n) => addStavka('materijal', n)}
             onToggle={toggleStavka}
             onRemove={removeStavka}
           />
+          <ResolvedStavkeHistory
+            items={stavke.filter((s) => s.tip === 'materijal' && (s.gotovo || s.uzeto))}
+            onToggle={toggleStavka}
+          />
         </div>
-        <div>
+        <div className={visualSections ? 'rounded-lg bg-slate-50 p-3' : undefined}>
           <SectionTitle icon={<Hammer className="h-4 w-4" />}>
-            Alat potreban za dalje ({stavke.filter((s) => s.tip === 'alat' && !s.gotovo).length})
+            Alat potreban za dalje ({stavke.filter((s) => s.tip === 'alat' && !s.gotovo && !s.uzeto).length})
           </SectionTitle>
           <Checklist
-            items={stavke.filter((s) => s.tip === 'alat' && !s.gotovo)}
+            items={stavke.filter((s) => s.tip === 'alat' && !s.gotovo && !s.uzeto)}
             placeholder="npr. skela, brusilica"
             onAdd={(n) => addStavka('alat', n)}
             equipment={alati}
@@ -770,8 +858,12 @@ export function NalogIzvrsenje({
             onToggle={toggleStavka}
             onRemove={removeStavka}
           />
+          <ResolvedStavkeHistory
+            items={stavke.filter((s) => s.tip === 'alat' && (s.gotovo || s.uzeto))}
+            onToggle={toggleStavka}
+          />
         </div>
-        <div>
+        <div className={visualSections ? 'rounded-lg bg-slate-50 p-3' : undefined}>
           <SectionTitle icon={<Wrench className="h-4 w-4" />}>
             Strojevi ({stavke.filter((s) => s.tip === 'stroj' && s.gotovo).length}/{stavke.filter((s) => s.tip === 'stroj').length}) — unesi radne sate za trošak gradilišta
           </SectionTitle>
@@ -788,7 +880,7 @@ export function NalogIzvrsenje({
           />
         </div>
       </div>}
-      <div className="flex items-center gap-3">
+      <div className={`${modulePanelCls} flex items-center gap-3`}>
         <button onClick={() => void saveDetails()} className="rounded-lg bg-sky-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-sky-700">
           Spremi kilometre i napomenu
         </button>
@@ -799,8 +891,9 @@ export function NalogIzvrsenje({
         )}
       </div>
 
+      <div>
       {pickerDocs.length > 0 && (
-        <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-3">
+        <div className={visualSections ? modulePanelCls : 'rounded-xl border border-sky-200 bg-sky-50/60 p-3'}>
           <SectionTitle icon={<FileText className="h-4 w-4" />}>Dokumenti i slike gradilišta — označi one koji se prikazuju na ovom nalogu ({gradLinked.length}/{pickerDocs.length})</SectionTitle>
           <div className="grid gap-1.5 xl:grid-cols-2">
             {pickerDocs.map((d) => (
@@ -814,7 +907,7 @@ export function NalogIzvrsenje({
         </div>
       )}
 
-      <div>
+      <div className={modulePanelCls}>
         <SectionTitle icon={<FileText className="h-4 w-4" />}>Dokumenti ({dokumenti.length})</SectionTitle>
         <input ref={docRef} type="file" multiple className="hidden" onChange={(e) => void onDocs(e.target.files)} />
         <div className="mb-2 space-y-1.5">
@@ -841,7 +934,7 @@ export function NalogIzvrsenje({
         </button>
       </div>
 
-      <div>
+      <div className={modulePanelCls}>
         <SectionTitle icon={<Camera className="h-4 w-4" />}>Fotografije ({foto.length})</SectionTitle>
         <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onFiles(e.target.files)} />
         <button
@@ -856,9 +949,14 @@ export function NalogIzvrsenje({
           <div className="grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-2 2xl:grid-cols-4">
             {foto.map((f) => (
               <div key={f.id} className="group relative overflow-hidden rounded-lg border border-slate-200">
-                <a href={f.url} target="_blank" rel="noreferrer">
+                <button
+                  type="button"
+                  onClick={() => setSelectedFotoId(f.id)}
+                  aria-label={`Pregledaj fotografiju ${f.naziv ?? ''}`}
+                  className="block w-full cursor-zoom-in"
+                >
                   <img src={f.url} alt={f.naziv ?? 'Fotografija'} className="h-28 w-full object-cover" />
-                </a>
+                </button>
                 <button
                   onClick={() => removeFoto(f)}
                   className="absolute right-1 top-1 hidden rounded bg-white/90 p-1 text-red-600 group-hover:block"
@@ -871,8 +969,64 @@ export function NalogIzvrsenje({
           </div>
         )}
       </div>
+      </div>
+      {selectedFoto && createPortal(
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/95 p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Pregled fotografije radnog naloga"
+          onClick={() => setSelectedFotoId(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setSelectedFotoId(null)}
+            aria-label="Zatvori pregled fotografije"
+            className="absolute right-3 top-3 rounded-full bg-white/10 p-2 text-white hover:bg-white/20 sm:right-5 sm:top-5"
+          >
+            <X className="h-6 w-6" />
+          </button>
+          {foto.length > 1 && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                navigateFoto(-1);
+              }}
+              aria-label="Prethodna fotografija"
+              className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-white/15 p-2 text-white hover:bg-white/30 sm:left-5 sm:p-3"
+            >
+              <ChevronLeft className="h-7 w-7" />
+            </button>
+          )}
+          <div className="flex max-h-full max-w-full flex-col items-center gap-3" onClick={(event) => event.stopPropagation()}>
+            <img
+              src={selectedFoto.url}
+              alt={selectedFoto.naziv ?? 'Fotografija radnog naloga'}
+              className="max-h-[82dvh] max-w-[85vw] object-contain"
+            />
+            <p className="text-sm text-white/80">
+              {selectedFoto.naziv ?? 'Fotografija'} · {selectedFotoIndex + 1} / {foto.length}
+            </p>
+          </div>
+          {foto.length > 1 && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                navigateFoto(1);
+              }}
+              aria-label="Sljedeća fotografija"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-white/15 p-2 text-white hover:bg-white/30 sm:right-5 sm:p-3"
+            >
+              <ChevronRight className="h-7 w-7" />
+            </button>
+          )}
+        </div>,
+        document.body,
+      )}
       <div className="xl:col-span-2">
-        <details className="group rounded-lg border border-slate-200 bg-slate-50">
+        <details className={`group rounded-xl border border-slate-200 ${visualSections ? 'bg-white shadow-sm' : 'bg-slate-50'}`}>
           <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 [&::-webkit-details-marker]:hidden">
             <History className="h-4 w-4 flex-shrink-0 text-slate-400" />
             <span className="font-medium text-slate-700">Povijest aktivnosti</span>

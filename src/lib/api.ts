@@ -1,8 +1,10 @@
 import { supabase } from './supabase';
 import { nocniInterval } from './postavke';
 import { minuteSmjene, nocniIzNapomene, type ObracunPrava } from './obracunSati';
+import { calculateDailyVehicleKmCosts } from './vehicleKmCosts';
 import { requireCompany } from './company';
 import { fetchAllRows } from './pagination';
+import { todayISO } from './rokovi';
 import type {
   VoziloDokument,
   OdsustvoVrsta,
@@ -19,7 +21,11 @@ import type {
   Gradiliste,
   Investitor,
   InvestitorInput,
+  InvestitorKontakt,
   Kooperant,
+  KooperantAngazman,
+  KooperantDokument,
+  KooperantDokumentVrsta,
   KooperantInput,
   Objekt,
   ObjektInput,
@@ -42,6 +48,21 @@ import type {
   OpremaDokument,
   OpremaKategorija,
 } from '@/types';
+
+function apiErrorMessage(reason: unknown): string {
+  if (reason instanceof Error) return reason.message;
+  if (typeof reason === 'object' && reason !== null) {
+    const error = reason as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    const parts = [
+      typeof error.message === 'string' ? error.message : null,
+      typeof error.details === 'string' ? `Detalji: ${error.details}` : null,
+      typeof error.hint === 'string' ? `Savjet: ${error.hint}` : null,
+      typeof error.code === 'string' ? `Kod: ${error.code}` : null,
+    ].filter(Boolean);
+    if (parts.length > 0) return parts.join(' ');
+  }
+  return String(reason);
+}
 
 export async function getPrivateFileUrl(path: string, expiresIn = 3600): Promise<string> {
   const { data, error } = await supabase.storage.from('nalozi-foto').createSignedUrl(path, expiresIn);
@@ -110,6 +131,35 @@ export async function deleteInvestitor(id: string) {
 
   const { error } = await supabase.from('investitori').delete().eq('id', id);
   if (error) throwActionableDbError(error, 'investitori');
+}
+
+export async function fetchInvestitorKontakti(investitorId: string): Promise<InvestitorKontakt[]> {
+  const { data, error } = await supabase
+    .from('investitor_kontakti')
+    .select('*')
+    .eq('investitor_id', investitorId)
+    .order('uloga')
+    .order('ime');
+  if (error) throw error;
+  return (data ?? []) as InvestitorKontakt[];
+}
+
+export async function saveInvestitorKontakt(
+  investitorId: string,
+  kontakt: Pick<InvestitorKontakt, 'uloga' | 'ime' | 'telefon' | 'email' | 'napomena'>,
+  kontaktId?: string,
+): Promise<InvestitorKontakt> {
+  const query = kontaktId
+    ? supabase.from('investitor_kontakti').update(kontakt).eq('id', kontaktId)
+    : supabase.from('investitor_kontakti').insert({ ...kontakt, investitor_id: investitorId });
+  const { data, error } = await query.select().single();
+  if (error) throw error;
+  return data as InvestitorKontakt;
+}
+
+export async function deleteInvestitorKontakt(kontaktId: string): Promise<void> {
+  const { error } = await supabase.from('investitor_kontakti').delete().eq('id', kontaktId);
+  if (error) throw error;
 }
 
 export async function fetchObjekti(investitorId: string): Promise<Objekt[]> {
@@ -322,12 +372,129 @@ export async function deleteRadnikDokument(d: RadnikDokument) {
 }
 
 export async function fetchVoziloDokumenti(voziloId: string): Promise<VoziloDokument[]> {
-  const { data, error } = await supabase.from('vozila_dokumenti').select('*').eq('vozilo_id', voziloId).order('datum_do', { ascending: false, nullsFirst: false });
+  const { data, error } = await supabase.from('vozila_dokumenti').select('*').eq('vozilo_id', voziloId).order('datum_od', { ascending: false, nullsFirst: false });
   if (error) throw error;
   return Promise.all((data ?? []).map(async (d: any) => ({
     ...d,
     url: d.putanja ? await getPrivateFileUrl(d.putanja) : null,
   })));
+}
+
+export interface VoziloKoristenje {
+  id: string;
+  datum: string;
+  gradiliste: string | null;
+  brojNaloga: string | null;
+  naslovNaloga: string | null;
+}
+
+export interface VoziloMjesecniObracun {
+  kilometri: number;
+  trosak: number;
+}
+
+export async function fetchVoziloMjesecniObracun(
+  vozilo: Pick<Vozilo, 'id' | 'marka' | 'model' | 'cijena_km'>,
+): Promise<VoziloMjesecniObracun> {
+  const today = todayISO();
+  const from = `${today.slice(0, 7)}-01`;
+  const { data: rasporedi, error: rasporedError } = await supabase
+    .from('dnevni_raspored_gradilista')
+    .select('datum, nalog_id, gradiliste_id')
+    .eq('vozilo_id', vozilo.id)
+    .gte('datum', from)
+    .lte('datum', today)
+    .not('nalog_id', 'is', null);
+  if (rasporedError) throw rasporedError;
+
+  const ids = [...new Set((rasporedi ?? []).map((row) => row.nalog_id).filter((id): id is string => Boolean(id)))];
+  if (!ids.length) return { kilometri: 0, trosak: 0 };
+
+  const { data: nalozi, error: naloziError } = await supabase
+    .from('radni_nalozi')
+    .select('id, broj, gradiliste_id, km_pocetak, km_kraj, bez_troska, bez_izvrsenja')
+    .in('id', ids)
+    .eq('status', 'zavrsen')
+    .not('km_pocetak', 'is', null)
+    .not('km_kraj', 'is', null);
+  if (naloziError) throw naloziError;
+
+  const completedOrders = (nalozi ?? []).filter((order) => !order.bez_izvrsenja);
+  const ordersById = new Map(completedOrders.map((order) => [order.id, {
+    id: order.id,
+    broj: order.broj,
+    gradiliste_id: order.gradiliste_id,
+    km_pocetak: Number(order.km_pocetak),
+    km_kraj: Number(order.km_kraj),
+    bez_troska: order.bez_troska,
+  }]));
+  const byDay = new Map<string, typeof rasporedi>();
+  for (const assignment of rasporedi ?? []) {
+    if (!assignment.nalog_id || !ordersById.has(assignment.nalog_id)) continue;
+    const assignments = byDay.get(assignment.datum) ?? [];
+    assignments.push(assignment);
+    byDay.set(assignment.datum, assignments);
+  }
+
+  return [...byDay.values()].reduce((total, assignments) => {
+    const dailyAssignments = assignments
+      .filter((assignment): assignment is typeof assignment & { nalog_id: string } => Boolean(assignment.nalog_id))
+      .map((assignment) => ({ ...assignment, vozilo_id: vozilo.id }));
+    const dailyOrders = [...new Set(assignments.map((assignment) => assignment.nalog_id).filter((id): id is string => Boolean(id)))]
+      .map((id) => ordersById.get(id))
+      .filter((order): order is NonNullable<typeof order> => Boolean(order));
+    const distance = calculateDailyVehicleKmCosts(
+      dailyAssignments,
+      dailyOrders,
+      [{ id: vozilo.id, marka: vozilo.marka, model: vozilo.model, cijena_km: 1 }],
+    );
+    const expense = calculateDailyVehicleKmCosts(
+      dailyAssignments,
+      dailyOrders.filter((order) => !order.bez_troska),
+      [{ id: vozilo.id, marka: vozilo.marka, model: vozilo.model, cijena_km: Number(vozilo.cijena_km ?? 0) }],
+    );
+    return {
+      kilometri: total.kilometri + distance.reduce((sum, item) => sum + item.km, 0),
+      trosak: total.trosak + expense.reduce((sum, item) => sum + item.iznos, 0),
+    };
+  }, { kilometri: 0, trosak: 0 });
+}
+
+export async function fetchVoziloKoristenje(voziloId: string): Promise<VoziloKoristenje[]> {
+  const { data: rasporedi, error } = await supabase
+    .from('dnevni_raspored_gradilista')
+    .select('id, datum, gradiliste_id, nalog_id')
+    .eq('vozilo_id', voziloId)
+    .order('datum', { ascending: false })
+    .limit(100);
+  if (error) throw error;
+
+  const rows = rasporedi ?? [];
+  const nalogIds = [...new Set(rows.map((row) => row.nalog_id).filter((id): id is string => Boolean(id)))];
+  const gradilisteIds = [...new Set(rows.map((row) => row.gradiliste_id).filter((id): id is string => Boolean(id)))];
+  const [nalogResult, gradilisteResult] = await Promise.all([
+    nalogIds.length
+      ? supabase.from('radni_nalozi').select('id, broj, naslov').in('id', nalogIds)
+      : Promise.resolve({ data: [], error: null }),
+    gradilisteIds.length
+      ? supabase.from('gradilista').select('id, naziv').in('id', gradilisteIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (nalogResult.error) throw nalogResult.error;
+  if (gradilisteResult.error) throw gradilisteResult.error;
+
+  const nalozi = new Map((nalogResult.data ?? []).map((nalog) => [nalog.id, nalog]));
+  const gradilista = new Map((gradilisteResult.data ?? []).map((gradiliste) => [gradiliste.id, gradiliste.naziv]));
+  return rows.map((row) => {
+    const nalog = row.nalog_id ? nalozi.get(row.nalog_id) : null;
+    return {
+      id: row.id,
+      datum: row.datum,
+      gradiliste: row.gradiliste_id ? gradilista.get(row.gradiliste_id) ?? null : null,
+      brojNaloga: nalog?.broj ?? null,
+      naslovNaloga: nalog?.naslov ?? null,
+    };
+  });
 }
 
 export async function fetchRadnikPovijest(radnikId: string): Promise<RadnikPovijest[]> {
@@ -384,7 +551,7 @@ export async function fetchSviServisi(): Promise<VoziloDokument[]> {
 
 export async function addVoziloDokument(
   voziloId: string,
-  input: { vrsta: VoziloDokumentVrsta; naziv: string; datum_od: string | null; datum_do: string | null; iznos: number | null; km: number | null; napomena: string | null },
+  input: { vrsta: VoziloDokumentVrsta; naziv: string; datum_od: string | null; datum_do: string | null; iznos: number | null; km: number | null; napomena: string | null; serviser?: string | null; dijelovi?: string | null },
   file: File | null,
 ) {
   let putanja: string | null = null;
@@ -398,6 +565,40 @@ export async function addVoziloDokument(
   if (error) {
     if (putanja) await supabase.storage.from('nalozi-foto').remove([putanja]);
     throw error;
+  }
+}
+
+export async function updateVoziloDokument(
+  dokument: VoziloDokument,
+  input: { vrsta: VoziloDokumentVrsta; naziv: string; datum_od: string | null; datum_do: string | null; iznos: number | null; km: number | null; napomena: string | null; serviser?: string | null; dijelovi?: string | null },
+  file: File | null,
+) {
+  let newPath: string | null = null;
+  if (file) {
+    const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
+    newPath = `vozila/${dokument.vozilo_id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
+    const { error: uploadError } = await supabase.storage
+      .from('nalozi-foto')
+      .upload(newPath, file, { contentType: file.type || undefined });
+    if (uploadError) throw uploadError;
+  }
+
+  const { error } = await supabase
+    .from('vozila_dokumenti')
+    .update({ ...input, ...(newPath ? { putanja: newPath } : {}) })
+    .eq('id', dokument.id)
+    .eq('vozilo_id', dokument.vozilo_id);
+  if (error) {
+    if (newPath) {
+      const { error: cleanupError } = await supabase.storage.from('nalozi-foto').remove([newPath]);
+      if (cleanupError) throw new Error(`Promjena nije spremljena, a nova datoteka nije uklonjena: ${cleanupError.message}`);
+    }
+    throw error;
+  }
+
+  if (newPath && dokument.putanja) {
+    const { error: removeError } = await supabase.storage.from('nalozi-foto').remove([dokument.putanja]);
+    if (removeError) throw new Error(`Zapis je ažuriran, ali stari prilog nije uklonjen: ${removeError.message}`);
   }
 }
 
@@ -430,7 +631,59 @@ export async function updateVozilo(id: string, v: Partial<Vozilo>) {
     .select()
     .single();
   if (error) throw error;
+
+  if ('cijena_km' in v) {
+    let summary: Awaited<ReturnType<typeof recalculateVehicleKmCosts>>;
+    try {
+      summary = await recalculateVehicleKmCosts(id);
+    } catch (recalculationError) {
+      throw new Error(`Vozilo je spremljeno, ali obračun troška po kilometru nije osvježen: ${apiErrorMessage(recalculationError)}`);
+    }
+    if (Number(data.cijena_km ?? 0) > 0 && summary.createdCosts === 0) {
+      const reason = summary.scheduledAssignments === 0
+        ? 'vozilo nije pronađeno u povijesnim rasporedima'
+        : summary.linkedOrders === 0
+          ? 'povijesni rasporedi vozila nemaju povezane radne naloge'
+        : summary.eligibleOrders === 0
+          ? 'nema završenog povezanog naloga s upisanim početnim i završnim kilometrima'
+          : 'kilometraža povezanih naloga ne daje kilometre za naplatu';
+      throw new Error(`Cijena vozila je spremljena, ali trošak nije dodan na gradilište: ${reason}. Provjerite povezani raspored i podatke radnog naloga.`);
+    }
+  }
   return data;
+}
+
+export async function recalculateVehicleKmCosts(voziloId: string): Promise<{
+  dates: number;
+  scheduledAssignments: number;
+  unlinkedAssignments: number;
+  linkedOrders: number;
+  eligibleOrders: number;
+  createdCosts: number;
+}> {
+  const { data: assignments, error } = await supabase
+    .from('dnevni_raspored_gradilista')
+    .select('datum, nalog_id')
+    .eq('vozilo_id', voziloId)
+  if (error) throw error;
+
+  const dates = [...new Set((assignments ?? []).map((assignment: { datum: string }) => assignment.datum))];
+  const totals = {
+    dates: dates.length,
+    scheduledAssignments: assignments?.length ?? 0,
+    unlinkedAssignments: (assignments ?? []).filter((assignment: { nalog_id: string | null }) => !assignment.nalog_id).length,
+    linkedOrders: 0,
+    eligibleOrders: 0,
+    createdCosts: 0,
+  };
+  for (const datum of dates) {
+    const summary = await syncKmGrupe(datum);
+    const vehicleSummary = summary.get(voziloId);
+    totals.linkedOrders += vehicleSummary?.linkedOrders ?? 0;
+    totals.eligibleOrders += vehicleSummary?.eligibleOrders ?? 0;
+    totals.createdCosts += vehicleSummary?.createdCosts ?? 0;
+  }
+  return totals;
 }
 
 export async function deleteVozilo(id: string) {
@@ -446,6 +699,122 @@ export async function fetchOprema(kategorija: OpremaKategorija): Promise<Oprema[
     .order('created_at', { ascending: false });
   if (error) throw error;
   return (data ?? []) as Oprema[];
+}
+
+export interface OpremaKoristenje {
+  id: string;
+  oprema_id: string;
+  datum: string;
+  radnici: Array<{ id: string; ime: string; prezime: string }>;
+  gradiliste: string | null;
+  brojNaloga: string | null;
+  nalog: string | null;
+  radniSati?: number | null;
+  cijenaSata?: number;
+  ukupanObracun?: number;
+  napomena?: string | null;
+}
+
+export interface StrojKoristenje extends OpremaKoristenje {
+  radniSati: number | null;
+  cijenaSata: number;
+  ukupanObracun: number;
+  napomena: string | null;
+}
+
+export async function fetchStrojKoristenjaZaResurse(opremaIds: string[]): Promise<Record<string, StrojKoristenje[]>> {
+  if (!opremaIds.length) return {};
+  const { data, error } = await supabase.rpc('get_stroj_koristenja', { p_oprema_ids: opremaIds });
+  if (error) throw error;
+  type UsageRow = {
+    oprema_id: string;
+    zapis_id: string;
+    datum: string;
+    radnik_id: string | null;
+    ime: string | null;
+    prezime: string | null;
+    gradiliste: string | null;
+    broj_naloga: string;
+    naslov_naloga: string;
+    radni_sati: number | null;
+    cijena_sata: number;
+    ukupan_obracun: number;
+    napomena: string | null;
+  };
+  const grouped: Record<string, StrojKoristenje[]> = {};
+  const entryMap = new Map<string, StrojKoristenje>();
+  for (const row of (data ?? []) as UsageRow[]) {
+    const key = `${row.oprema_id}:${row.zapis_id}`;
+    let usage = entryMap.get(key);
+    if (!usage) {
+      usage = {
+        id: row.zapis_id,
+        oprema_id: row.oprema_id,
+        datum: row.datum,
+        radnici: [],
+        gradiliste: row.gradiliste,
+        brojNaloga: row.broj_naloga,
+        nalog: row.naslov_naloga,
+        radniSati: row.radni_sati == null ? null : Number(row.radni_sati),
+        cijenaSata: Number(row.cijena_sata),
+        ukupanObracun: Number(row.ukupan_obracun),
+        napomena: row.napomena,
+      };
+      entryMap.set(key, usage);
+      grouped[row.oprema_id] ??= [];
+      grouped[row.oprema_id].push(usage);
+    }
+    if (row.radnik_id && row.ime && row.prezime) {
+      usage.radnici.push({ id: row.radnik_id, ime: row.ime, prezime: row.prezime });
+    }
+  }
+  return grouped;
+}
+
+export async function fetchOpremaKoristenja(opremaId: string): Promise<OpremaKoristenje[]> {
+  const grouped = await fetchOpremaKoristenjaZaResurse([opremaId]);
+  return grouped[opremaId] ?? [];
+}
+
+export async function fetchOpremaKoristenjaZaResurse(opremaIds: string[]): Promise<Record<string, OpremaKoristenje[]>> {
+  if (!opremaIds.length) return {};
+  const { data, error } = await supabase.rpc('get_oprema_koristenja', { p_oprema_ids: opremaIds });
+  if (error) throw error;
+  type UsageRow = {
+    oprema_id: string;
+    zapis_id: string;
+    datum: string;
+    radnik_id: string | null;
+    ime: string | null;
+    prezime: string | null;
+    gradiliste: string | null;
+    broj_naloga: string;
+    naslov_naloga: string;
+  };
+  const grouped: Record<string, OpremaKoristenje[]> = {};
+  const entryMap = new Map<string, OpremaKoristenje>();
+  for (const row of (data ?? []) as UsageRow[]) {
+    const key = `${row.oprema_id}:${row.zapis_id}`;
+    let usage = entryMap.get(key);
+    if (!usage) {
+      usage = {
+        id: row.zapis_id,
+        oprema_id: row.oprema_id,
+        datum: row.datum,
+        radnici: [],
+        gradiliste: row.gradiliste,
+        brojNaloga: row.broj_naloga,
+        nalog: row.naslov_naloga,
+      };
+      entryMap.set(key, usage);
+      grouped[row.oprema_id] ??= [];
+      grouped[row.oprema_id].push(usage);
+    }
+    if (row.radnik_id && row.ime && row.prezime) {
+      usage.radnici.push({ id: row.radnik_id, ime: row.ime, prezime: row.prezime });
+    }
+  }
+  return grouped;
 }
 
 export async function createOprema(item: Omit<Oprema, 'id' | 'created_at' | 'updated_at' | 'gradilista'>) {
@@ -889,6 +1258,95 @@ export async function fetchTroskovi(): Promise<Trosak[]> {
   return (data ?? []) as Trosak[];
 }
 
+export async function fetchKooperantAngazmani(kooperantId?: string): Promise<KooperantAngazman[]> {
+  let query = supabase
+    .from('kooperant_angazmani')
+    .select('*, gradilista:gradiliste_id ( id, naziv, status, datum_pocetka, datum_zavrsetka, ugovorena_vrijednost )')
+    .order('datum_pocetka', { ascending: false });
+  if (kooperantId) query = query.eq('kooperant_id', kooperantId);
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as KooperantAngazman[];
+}
+
+export async function saveKooperantAngazman(
+  angazman: Pick<KooperantAngazman, 'kooperant_id' | 'gradiliste_id' | 'dogovoreni_iznos' | 'status' | 'datum_pocetka' | 'datum_zavrsetka' | 'napomena'>,
+  id?: string,
+): Promise<KooperantAngazman> {
+  const values = { ...angazman, company_id: requireCompany().id, updated_at: new Date().toISOString() };
+  const query = id
+    ? supabase.from('kooperant_angazmani').update(values).eq('id', id)
+    : supabase.from('kooperant_angazmani').upsert(values, { onConflict: 'company_id,kooperant_id,gradiliste_id' });
+  const { data, error } = await query
+    .select('*, gradilista:gradiliste_id ( id, naziv, status, datum_pocetka, datum_zavrsetka, ugovorena_vrijednost )')
+    .single();
+  if (error) throw error;
+  return data as KooperantAngazman;
+}
+
+export async function fetchKooperantDokumenti(kooperantId: string): Promise<KooperantDokument[]> {
+  const { data, error } = await supabase
+    .from('kooperant_dokumenti')
+    .select('*')
+    .eq('kooperant_id', kooperantId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as KooperantDokument[];
+}
+
+export async function getKooperantDokumentUrl(path: string, expiresIn = 3600): Promise<string> {
+  const { data, error } = await supabase.storage.from('kooperant-dokumenti').createSignedUrl(path, expiresIn);
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+export async function uploadKooperantDokument(
+  kooperantId: string,
+  vrsta: KooperantDokumentVrsta,
+  file: File,
+): Promise<KooperantDokument> {
+  if (file.size > 20 * 1024 * 1024) throw new Error('Dokument ne smije biti veći od 20 MB.');
+  const companyId = requireCompany().id;
+  const safeName = file.name.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120) || 'dokument';
+  const path = `${companyId}/${kooperantId}/${crypto.randomUUID()}-${safeName}`;
+  const { error: uploadError } = await supabase.storage
+    .from('kooperant-dokumenti')
+    .upload(path, file, { contentType: file.type || undefined, upsert: false });
+  if (uploadError) throw uploadError;
+
+  const { data, error } = await supabase.from('kooperant_dokumenti').insert({
+    company_id: companyId,
+    kooperant_id: kooperantId,
+    vrsta,
+    naziv: file.name,
+    putanja: path,
+  }).select().single();
+  if (error) {
+    const { error: cleanupError } = await supabase.storage.from('kooperant-dokumenti').remove([path]);
+    if (cleanupError) throw new Error(`${error.message} Datoteka nije mogla biti očišćena: ${cleanupError.message}`);
+    throw error;
+  }
+  return data as KooperantDokument;
+}
+
+export async function updateKooperantDokumentGradiliste(documentId: string, gradilisteId: string | null): Promise<KooperantDokument> {
+  const { data, error } = await supabase
+    .from('kooperant_dokumenti')
+    .update({ gradiliste_id: gradilisteId })
+    .eq('id', documentId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as KooperantDokument;
+}
+
+export async function deleteKooperantDokument(document: KooperantDokument): Promise<void> {
+  const { error: removeError } = await supabase.storage.from('kooperant-dokumenti').remove([document.putanja]);
+  if (removeError) throw removeError;
+  const { error } = await supabase.from('kooperant_dokumenti').delete().eq('id', document.id);
+  if (error) throw error;
+}
+
 export async function createTrosak(t: {
   gradiliste_id: string | null;
   kategorija: TrosakKategorija;
@@ -896,13 +1354,86 @@ export async function createTrosak(t: {
   opis: string;
   iznos: number;
   datum: string;
+  placen?: boolean;
+  placeno_at?: string | null;
 }) {
   const { data, error } = await supabase.from('troskovi').insert(t).select().single();
   if (error) throw error;
   return data;
 }
 
+export async function createTroskovi(troskovi: {
+  gradiliste_id: string;
+  kategorija: TrosakKategorija;
+  kooperant_id: string;
+  kooperant_racun_id: string;
+  opis: string;
+  iznos: number;
+  datum: string;
+  placen: boolean;
+}[]): Promise<Trosak[]> {
+  if (troskovi.length === 0) return [];
+  const { data, error } = await supabase.from('troskovi').insert(troskovi).select();
+  if (error) throw error;
+  return (data ?? []) as Trosak[];
+}
+
+export async function updateKooperantRacunPaid(
+  kooperantId: string,
+  invoiceId: string,
+  placen: boolean,
+  placenoAt: string | null,
+): Promise<Trosak[]> {
+  const { data, error } = await supabase
+    .from('troskovi')
+    .update({ placen, placeno_at: placenoAt })
+    .eq('kooperant_id', kooperantId)
+    .eq('kooperant_racun_id', invoiceId)
+    .select();
+  if (error) throw error;
+  if (!data?.length) throw new Error('Stavke računa nisu pronađene za ažuriranje.');
+  return data as Trosak[];
+}
+
+export async function deleteKooperantRacun(kooperantId: string, invoiceId: string): Promise<void> {
+  const { error } = await supabase
+    .from('troskovi')
+    .delete()
+    .eq('kooperant_id', kooperantId)
+    .eq('kooperant_racun_id', invoiceId);
+  if (error) throw error;
+}
+
 export async function updateTrosak(id: string, t: Partial<Trosak>) {
+  if (t.placen !== undefined) {
+    const { data: current, error: lookupError } = await supabase
+      .from('troskovi')
+      .select('kooperant_id, kooperant_racun_id')
+      .eq('id', id)
+      .maybeSingle();
+    if (lookupError) throw lookupError;
+
+    if (current?.kooperant_id && current.kooperant_racun_id) {
+      const { placen, placeno_at, ...otherUpdates } = t;
+      if (Object.keys(otherUpdates).length > 0) {
+        const { error } = await supabase
+          .from('troskovi')
+          .update(otherUpdates)
+          .eq('id', id);
+        if (error) throw error;
+      }
+      const updatedInvoice = await updateKooperantRacunPaid(
+        current.kooperant_id,
+        current.kooperant_racun_id,
+        placen,
+        placeno_at ?? (placen ? new Date().toISOString().slice(0, 10) : null),
+      );
+      const updatedCost = updatedInvoice.find((cost) => cost.id === id);
+      if (!updatedCost) throw new Error('Ažurirana stavka nije vraćena nakon spremanja računa.');
+      return updatedCost;
+    }
+  }
+
   const { data, error } = await supabase.from('troskovi').update(t).eq('id', id).select().single();
   if (error) throw error;
   return data;
@@ -1164,19 +1695,32 @@ export async function updateRadniNalog(
     zakljucen?: boolean;
   },
 ) {
+  const { data: currentOrder, error: currentOrderError } = await supabase
+    .from('radni_nalozi')
+    .select('status, mobile_status, poslovodja_id')
+    .eq('id', id)
+    .single();
+  if (currentOrderError) throw currentOrderError;
+
+  const { data: existing, error: selError } = await supabase
+    .from('radni_nalozi_radnici')
+    .select('radnik_id')
+    .eq('nalog_id', id);
+  if (selError) throw selError;
+  const existingIds = (existing ?? []).map((r: { radnik_id: string }) => r.radnik_id);
+  const workersChanged = existingIds.length !== input.radnik_ids.length
+    || existingIds.some((radnikId) => !input.radnik_ids.includes(radnikId));
+  if (currentOrder.status === 'zavrsen' && workersChanged) {
+    throw new Error('Djelatnike nije moguće mijenjati jer je ured već završno zaključio radni nalog.');
+  }
+
   if (input.zakljucen === true) {
     if (input.radnik_ids.length === 0) throw new Error('Dodijeli barem jednog djelatnika prije zaključivanja naloga.');
-    const { data: leader, error: leaderError } = await supabase
-      .from('radni_nalozi')
-      .select('poslovodja_id,mobile_status')
-      .eq('id', id)
-      .single();
-    if (leaderError) throw leaderError;
     const autoLeader = input.radnik_ids.length === 1;
-    if (!autoLeader && (!leader.poslovodja_id || !input.radnik_ids.includes(leader.poslovodja_id))) {
+    if (!autoLeader && (!currentOrder.poslovodja_id || !input.radnik_ids.includes(currentOrder.poslovodja_id))) {
       throw new Error('Prije zaključivanja odaberi dodijeljenog poslovođu u detaljima naloga.');
     }
-    if (leader.mobile_status === 'u_tijeku' || leader.mobile_status === 'predan' || leader.mobile_status === 'odobren') {
+    if (currentOrder.mobile_status === 'u_tijeku' || currentOrder.mobile_status === 'predan' || currentOrder.mobile_status === 'odobren') {
       throw new Error('Nalog je već započet ili predan djelatnicima i ne može se ponovno zaključivati.');
     }
   }
@@ -1199,6 +1743,7 @@ export async function updateRadniNalog(
         zakljucen_at: input.zakljucen ? new Date().toISOString() : null,
         mobile_status: input.zakljucen ? 'dodijeljen' : 'nije_poslan',
       }),
+      ...(input.status !== 'zavrsen' ? { bez_izvrsenja: false } : {}),
       gradiliste_id: input.gradiliste_id,
       naslov: input.naslov,
       opis: input.opis,
@@ -1208,10 +1753,6 @@ export async function updateRadniNalog(
     })
     .eq('id', id);
   if (error) throw error;
-
-  const { data: existing, error: selError } = await supabase.from('radni_nalozi_radnici').select('radnik_id').eq('nalog_id', id);
-  if (selError) throw selError;
-  const existingIds = (existing ?? []).map((r: { radnik_id: string }) => r.radnik_id);
 
   const toRemove = existingIds.filter((rid) => !input.radnik_ids.includes(rid));
   for (const rid of toRemove) {
@@ -1273,25 +1814,29 @@ export async function syncNalogTroskovi(nalogId: string) {
     .single();
   if (error) throw error;
 
-  const { data: dan } = await supabase
+  const { data: dan, error: rasporedError } = await supabase
     .from('dnevni_raspored_gradilista')
-    .select('datum, vozilo_id')
+    .select('datum')
     .eq('nalog_id', nalogId)
-    .limit(1);
-  const datum = (dan?.[0]?.datum ?? nalog.rok ?? String(nalog.datum_kreiranja).slice(0, 10)) as string;
+    .order('datum', { ascending: true });
+  if (rasporedError) throw rasporedError;
+  const datum = dan?.[0]?.datum ?? nalog.rok ?? String(nalog.datum_kreiranja).slice(0, 10);
 
   const clean = async () => {
-    await supabase.from('radno_vrijeme').delete().eq('nalog_id', nalogId);
-    await supabase.from('troskovi').delete().eq('nalog_id', nalogId);
+    const { error: vrijemeError } = await supabase.from('radno_vrijeme').delete().eq('nalog_id', nalogId);
+    if (vrijemeError) throw vrijemeError;
+    const { error: troskoviError } = await supabase.from('troskovi').delete().eq('nalog_id', nalogId);
+    if (troskoviError) throw troskoviError;
   };
 
   // Nalozi s popisa "Ostalo" bilježe samo sate radnika, bez gradilišta i bez ikakvog troška.
   const bezTroska = Boolean(nalog.bez_troska);
+  const bezIzvrsenja = Boolean(nalog.bez_izvrsenja);
   const gradilisteId: string | null = bezTroska ? null : nalog.gradiliste_id;
 
   if (nalog.status !== 'zavrsen') {
-    await clean().catch(() => undefined);
-    await syncKmGrupa(datum, dan?.[0]?.vozilo_id as string | undefined, nalogId).catch(() => undefined);
+    await clean();
+    await syncKmGrupe(datum);
     return;
   }
 
@@ -1316,6 +1861,10 @@ export async function syncNalogTroskovi(nalogId: string) {
   if (taskTransferError) throw taskTransferError;
 
   await clean();
+  if (bezIzvrsenja) {
+    await syncKmGrupe(datum);
+    return;
+  }
 
   const radniciSelect = (prava: boolean) =>
     supabase
@@ -1398,7 +1947,7 @@ export async function syncNalogTroskovi(nalogId: string) {
     if (e) throw e;
   }
   if (bezTroska) {
-    await syncKmGrupa(datum, dan?.[0]?.vozilo_id as string | undefined, nalogId);
+    await syncKmGrupe(datum);
     return;
   }
   const { data: strojevi, error: machineError } = await supabase
@@ -1425,62 +1974,91 @@ export async function syncNalogTroskovi(nalogId: string) {
     if (e) throw e;
   }
 
-  await syncKmGrupa(datum, dan?.[0]?.vozilo_id as string | undefined, nalogId);
+  await syncKmGrupe(datum);
 }
 
-// Kilometri jednog auta u danu: ostala gradilišta obračunavaju se za sebe (kraj − početak svog naloga),
-// a cijela preostala razlika (ukupno prijeđeno − km ostalih) pripada prvom nalogu, tj. gradilištu 1.
-async function syncKmGrupa(datum: string, voziloId: string | undefined, nalogId: string) {
-  if (!voziloId) return;
-  const { data: veze } = await supabase
+// Ponovno obračunava sve završene naloge i sva vozila raspoređena na taj dan.
+async function syncKmGrupe(datum: string) {
+  const summary = new Map<string, { linkedOrders: number; eligibleOrders: number; createdCosts: number }>();
+  const { data: raspored, error: rasporedError } = await supabase
     .from('dnevni_raspored_gradilista')
-    .select('nalog_id')
+    .select('nalog_id, vozilo_id, gradiliste_id')
     .eq('datum', datum)
-    .eq('vozilo_id', voziloId)
     .not('nalog_id', 'is', null);
-  const ids = [...new Set([nalogId, ...(veze ?? []).map((v: { nalog_id: string }) => v.nalog_id)])];
-  if (ids.length === 0) return;
+  if (rasporedError) throw rasporedError;
+  const vezaPoVozilu = new Map<string, Map<string, string | null>>();
+  for (const veza of raspored ?? []) {
+    if (!veza.nalog_id || !veza.vozilo_id) continue;
+    const orders = vezaPoVozilu.get(veza.vozilo_id) ?? new Map<string, string | null>();
+    orders.set(veza.nalog_id, veza.gradiliste_id);
+    vezaPoVozilu.set(veza.vozilo_id, orders);
+  }
+  const nalogIds = [...new Set([...vezaPoVozilu.values()].flatMap((orders) => [...orders.keys()]))];
+  for (const [voziloId, orders] of vezaPoVozilu) {
+    summary.set(voziloId, { linkedOrders: orders.size, eligibleOrders: 0, createdCosts: 0 });
+  }
+  if (nalogIds.length === 0) return summary;
 
-  await supabase.from('troskovi').delete().in('nalog_id', ids).eq('kategorija', 'put');
-
-  const { data: nalozi } = await supabase
+  const { data: nalozi, error: naloziError } = await supabase
     .from('radni_nalozi')
-    .select('*')
-    .in('id', ids)
+    .select('id, broj, gradiliste_id, km_pocetak, km_kraj, bez_troska, bez_izvrsenja')
+    .in('id', nalogIds)
     .eq('status', 'zavrsen')
     .not('km_pocetak', 'is', null)
-    .not('km_kraj', 'is', null)
-    .order('broj');
-  type N = { id: string; broj: string; gradiliste_id: string | null; km_pocetak: number; km_kraj: number; bez_troska?: boolean };
-  const lista = ((nalozi ?? []) as N[]).filter((n) => !n.bez_troska);
-  if (lista.length === 0) return;
+    .not('km_kraj', 'is', null);
+  if (naloziError) throw naloziError;
 
-  const { data: v } = await supabase.from('vozila').select('marka, model, cijena_km').eq('id', voziloId).single();
-  const cijena = Number(v?.cijena_km ?? 0);
-  if (cijena <= 0) return;
+  const { error: deleteError } = await supabase
+    .from('troskovi')
+    .delete()
+    .in('nalog_id', nalogIds)
+    .eq('datum', datum)
+    .eq('kategorija', 'put')
+    .like('opis', 'Kilometri:%');
+  if (deleteError) throw deleteError;
 
-  const ukupno = Math.max(...lista.map((n) => n.km_kraj)) - Math.min(...lista.map((n) => n.km_pocetak));
-  const [glavni, ...ostali] = lista;
-  const kmOstali = ostali.map((n) => Math.max(0, n.km_kraj - n.km_pocetak));
-  const kmGlavni = Math.max(0, ukupno - kmOstali.reduce((s, k) => s + k, 0));
+  const lista = (nalozi ?? []).filter((nalog) => !nalog.bez_troska && !nalog.bez_izvrsenja);
+  if (lista.length === 0) return summary;
 
-  const rows = [
-    { n: glavni, km: kmGlavni },
-    ...ostali.map((n, i) => ({ n, km: kmOstali[i] })),
-  ]
-    .filter((r) => r.km > 0)
-    .map((r) => ({
-      gradiliste_id: r.n.gradiliste_id,
-      kategorija: 'put' as const,
-      opis: `Kilometri: ${[v?.marka, v?.model].filter(Boolean).join(' ')} ${r.km} km × ${cijena} €/km`,
-      iznos: Math.round(r.km * cijena * 100) / 100,
-      datum,
-      nalog_id: r.n.id,
-    }));
+  const voziloIds = [...vezaPoVozilu.keys()];
+  const { data: vozila, error: vozilaError } = await supabase
+    .from('vozila')
+    .select('id, marka, model, cijena_km')
+    .in('id', voziloIds);
+  if (vozilaError) throw vozilaError;
+  const nalogPoId = new Map(lista.map((nalog) => [nalog.id, nalog]));
+  for (const [voziloId, ids] of vezaPoVozilu) {
+    const vehicleSummary = summary.get(voziloId);
+    if (vehicleSummary) vehicleSummary.eligibleOrders = [...ids.keys()].filter((id) => nalogPoId.has(id)).length;
+  }
+  const rows = calculateDailyVehicleKmCosts(
+    (raspored ?? []).filter((veza): veza is typeof veza & { nalog_id: string; vozilo_id: string } =>
+      Boolean(veza.nalog_id && veza.vozilo_id)),
+    lista.map((nalog) => ({
+      id: nalog.id,
+      broj: nalog.broj,
+      gradiliste_id: nalog.gradiliste_id,
+      km_pocetak: Number(nalog.km_pocetak),
+      km_kraj: Number(nalog.km_kraj),
+    })),
+    vozila ?? [],
+  ).map((row) => ({
+    nalog_id: row.nalog_id,
+    gradiliste_id: row.gradiliste_id,
+    kategorija: row.kategorija,
+    opis: row.opis,
+    iznos: row.iznos,
+    datum,
+  }));
+  for (const [voziloId, ids] of vezaPoVozilu) {
+    const vehicleSummary = summary.get(voziloId);
+    if (vehicleSummary) vehicleSummary.createdCosts = rows.filter((row) => ids.has(row.nalog_id)).length;
+  }
   if (rows.length > 0) {
     const { error } = await supabase.from('troskovi').insert(rows);
     if (error) throw error;
   }
+  return summary;
 }
 
 // Neriješen materijal i alat s ranijih naloga (otvorenih ili završenih) istog gradilišta prenosi se na novi nalog.
@@ -1531,11 +2109,20 @@ async function vratiPrenesenoStavke(nalogId: string) {
 export async function fetchNalogIzvrsenje(nalogId: string) {
   const { data, error } = await supabase
     .from('radni_nalozi')
-    .select('km_pocetak, km_kraj, napomena, status, teren, poslovodja_id, vozac_id')
+    .select('km_pocetak, km_kraj, napomena, status, teren, bez_izvrsenja, poslovodja_id, vozac_id')
     .eq('id', nalogId)
     .single();
   if (error) throw error;
-  return data as { km_pocetak: number | null; km_kraj: number | null; napomena: string | null; status: NalogStatus; teren: boolean | null; poslovodja_id: string | null; vozac_id: string | null };
+  return data as {
+    km_pocetak: number | null;
+    km_kraj: number | null;
+    napomena: string | null;
+    status: NalogStatus;
+    teren: boolean | null;
+    bez_izvrsenja: boolean;
+    poslovodja_id: string | null;
+    vozac_id: string | null;
+  };
 }
 
 export async function setNalogPoslovodja(nalogId: string, radnikId: string | null) {
@@ -1604,13 +2191,26 @@ async function syncZadnjuKilometrazuVozila(voziloId: string) {
   if (updateError) throw updateError;
 }
 
-export async function setNalogZavrsen(nalogId: string, zavrsen: boolean, bezPotvrdeDjelatnika = false) {
+export async function setNalogZavrsen(
+  nalogId: string,
+  zavrsen: boolean,
+  bezPotvrdeDjelatnika = false,
+  bezIzvrsenja = false,
+) {
   const { data: nalog, error: fetchError } = await supabase
     .from('radni_nalozi')
-    .select('mobile_status, km_kraj')
+    .select('status, mobile_status, km_kraj')
     .eq('id', nalogId)
     .single();
   if (fetchError) throw fetchError;
+  if (bezIzvrsenja && (
+    !zavrsen
+    || (nalog.mobile_status
+      ? nalog.mobile_status !== 'dodijeljen' || nalog.status === 'zavrsen' || nalog.status === 'otkazan'
+      : nalog.status !== 'otvoren')
+  )) {
+    throw new Error('Bez izvršenja može se završiti samo otvoren nalog ili poslan nalog na kojem djelatnik još nije započeo rad.');
+  }
   if (zavrsen && !bezPotvrdeDjelatnika && (nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku')) {
     throw new Error('Djelatnici još rade na nalogu. Zaključivanje je moguće tek nakon što poslovođa preda završni izvještaj.');
   }
@@ -1623,10 +2223,15 @@ export async function setNalogZavrsen(nalogId: string, zavrsen: boolean, bezPotv
         : nalog.mobile_status;
   const { error } = await supabase
     .from('radni_nalozi')
-    .update({ status: zavrsen ? 'zavrsen' : 'u_tijeku', mobile_status: mobileStatus })
+    .update({
+      status: zavrsen ? 'zavrsen' : 'u_tijeku',
+      mobile_status: zavrsen && bezIzvrsenja ? 'nije_poslan' : mobileStatus,
+      ...(zavrsen && bezIzvrsenja ? { zakljucen_at: null } : {}),
+      bez_izvrsenja: zavrsen && bezIzvrsenja,
+    })
     .eq('id', nalogId);
   if (error) throw error;
-  if (zavrsen && nalog.km_kraj !== null) {
+  if (zavrsen && !bezIzvrsenja && nalog.km_kraj !== null) {
     const { data: assignments, error: assignmentsError } = await supabase
       .from('dnevni_raspored_gradilista')
       .select('vozilo_id')
@@ -1644,6 +2249,7 @@ export interface MobileRadniNalog {
   id: string;
   broj: string;
   gradiliste_naziv: string | null;
+  gradiliste_adresa: string | null;
   naslov: string;
   opis: string | null;
   status: NalogStatus;
@@ -1853,10 +2459,9 @@ export async function saveMobileNalogIzvjestaj(input: {
   }
 }
 
-export async function submitMobileNalog(nalogId: string, leaderConfirmed: boolean) {
+export async function submitMobileNalog(nalogId: string) {
   const { error } = await supabase.rpc('mobile_submit_nalog', {
     p_nalog_id: nalogId,
-    p_leader_confirmed: leaderConfirmed,
   });
   if (error) throw error;
 }
@@ -2164,7 +2769,7 @@ export async function setNalogStavke(nalogId: string, gradilisteId: string | nul
   if (currentError) throw currentError;
 
   const siteRows = gradilisteId ? await fetchGradilisteStavke(gradilisteId) : [];
-  const availableRows = siteRows.filter((item) => !item.gotovo);
+  const availableRows = siteRows.filter((item) => !item.gotovo && !item.uzeto);
   const availableById = new Map(availableRows.map((item) => [item.id, item]));
   const selectedIds = new Set(stavkaIds.filter((id) => availableById.has(id)));
 
@@ -2462,8 +3067,10 @@ export async function deleteRok(id: string) {
 
 // ===== FAKTURE =====
 
-export function iznosFakture(faktura: Pick<Faktura, 'iznos' | 'rabat'>) {
-  return faktura.iznos + (faktura.rabat ?? 0);
+export function iznosFakture(faktura: Pick<Faktura, 'iznos' | 'rabat' | 'rabat_smjer'>) {
+  return faktura.rabat_smjer === 'oduzmi'
+    ? faktura.iznos - (faktura.rabat ?? 0)
+    : faktura.iznos + (faktura.rabat ?? 0);
 }
 
 export async function fetchFakture(gradilisteId?: string): Promise<Faktura[]> {
@@ -2486,10 +3093,15 @@ export async function createFaktura(f: {
   rabat: number;
   datum_izdavanja: string;
   datum_dospjecja: string | null;
+  datum_naplate?: string | null;
   status: FakturaStatus;
   opis: string | null;
 }) {
-  const { data, error } = await supabase.from('fakture').insert(f).select().single();
+  const company = requireCompany();
+  const { data, error } = await supabase.from('fakture').insert({
+    ...f,
+    rabat_smjer: company.postavke.invoice_rebate_mode,
+  }).select().single();
   if (error) throw error;
   return data;
 }

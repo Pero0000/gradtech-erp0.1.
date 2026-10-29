@@ -12,3 +12,202 @@
     overflow-wrap: anywhere;
   }
 }
+
+.daily-schedule-view,
+.gradilista-view-container {
+  container-type: inline-size;
+}
+
+.daily-schedule-view {
+  container-name: daily-schedule;
+}
+
+.gradilista-view-container {
+  container-name: gradilista-view;
+}
+
+@container daily-schedule (min-width: 1601px) {
+  .daily-schedule-view .schedule-main-grid {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.75fr) minmax(250px, 0.75fr);
+    gap: 1rem;
+  }
+
+  .daily-schedule-view .schedule-sites-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .daily-schedule-view .schedule-vehicle-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .daily-schedule-view .schedule-support-grid {
+    display: block;
+    grid-column: auto;
+  }
+
+  .daily-schedule-view .schedule-support-grid > * + * {
+    margin-top: 0.75rem;
+  }
+}
+
+@container daily-schedule (max-width: 1600px) {
+  .daily-schedule-view .schedule-page-header {
+    margin-bottom: 0.75rem;
+    gap: 0.5rem;
+  }
+
+  .daily-schedule-view .schedule-page-header h1 {
+    font-size: 1.35rem;
+  }
+
+  .daily-schedule-view .schedule-page-header p {
+    font-size: 0.75rem;
+    line-height: 1.1rem;
+  }
+
+  .daily-schedule-view .schedule-main-grid {
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.55fr);
+    gap: 0.625rem;
+  }
+
+  .daily-schedule-view .schedule-support-grid {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    align-items: start;
+  }
+
+  .daily-schedule-view .schedule-sites-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.375rem;
+  }
+
+  .daily-schedule-view .schedule-vehicle-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.375rem;
+  }
+
+  .daily-schedule-view .schedule-site-card,
+  .daily-schedule-view .schedule-vehicle-card {
+    padding: 0.375rem;
+  }
+
+  .daily-schedule-view .schedule-vehicle-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+    align-items: start;
+    column-gap: 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  .daily-schedule-view .schedule-vehicle-header,
+  .daily-schedule-view .schedule-vehicle-capacity {
+    grid-column: 1 / -1;
+  }
+
+  .daily-schedule-view .schedule-vehicle-sites,
+  .daily-schedule-view .schedule-vehicle-crew {
+    display: block;
+    min-width: 0;
+  }
+
+  .daily-schedule-view .schedule-vehicle-row-label {
+    display: inline-flex;
+    width: auto;
+    margin-bottom: 0.2rem;
+  }
+}
+
+@container daily-schedule (max-width: 1050px) {
+  .daily-schedule-view .schedule-main-grid {
+    gap: 0.5rem;
+  }
+
+  .daily-schedule-view .schedule-support-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .daily-schedule-view .schedule-site-card {
+    padding: 0.3rem;
+  }
+}
+
+@container daily-schedule (max-width: 760px) {
+  .daily-schedule-view .schedule-main-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .daily-schedule-view .schedule-support-grid {
+    grid-column: 1;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .daily-schedule-view .schedule-vehicle-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .daily-schedule-view .schedule-vehicle-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .daily-schedule-view .schedule-vehicle-header,
+  .daily-schedule-view .schedule-vehicle-capacity {
+    grid-column: 1;
+  }
+
+  .daily-schedule-view .schedule-vehicle-sites,
+  .daily-schedule-view .schedule-vehicle-crew {
+    display: flex;
+  }
+
+  .daily-schedule-view .schedule-vehicle-row-label {
+    width: 3rem;
+    margin-bottom: 0;
+  }
+
+  .daily-schedule-view .schedule-sites-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.gradilista-view-container .gradilista-board-columns {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@container gradilista-view (max-width: 1600px) {
+  .gradilista-view-container .gradilista-page-header {
+    margin-bottom: 0.75rem;
+    gap: 0.5rem;
+  }
+
+  .gradilista-view-container .gradilista-page-header h1 {
+    font-size: 1.35rem;
+  }
+
+  .gradilista-view-container .gradilista-page-header p {
+    font-size: 0.8125rem;
+  }
+
+  .gradilista-view-container .gradilista-main-layout {
+    grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+    gap: 0.75rem;
+  }
+
+  .gradilista-view-container .gradilista-board-columns {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .gradilista-view-container .gradiliste-board-card {
+    padding: 0.5rem;
+  }
+}
+
+@container gradilista-view (max-width: 800px) {
+  .gradilista-view-container .gradilista-main-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+}

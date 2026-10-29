@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, Building2, Pencil, Plus, RotateCcw, Search, Trash2, Users } from 'lucide-react';
-import type { Faktura, Gradiliste, Investitor, Objekt, RadnoVrijeme, Trosak } from '@/types';
+import type { Faktura, Gradiliste, Investitor, InvestitorKontakt, Objekt, RadniNalog, RadnoVrijeme, Trosak } from '@/types';
 import {
   createInvestitor,
   deleteInvestitor,
@@ -9,6 +9,10 @@ import {
   fetchFakture,
   fetchGradilista,
   fetchInvestitori,
+  fetchInvestitorKontakti,
+  saveInvestitorKontakt,
+  deleteInvestitorKontakt,
+  fetchRadniNalozi,
   fetchRadnoVrijeme,
   fetchTroskovi,
   saveObjekt,
@@ -85,6 +89,10 @@ function formatCurrency(value: number) {
   return value.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' });
 }
 
+function formatDate(value: string | null | undefined) {
+  return value ? new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString('hr-HR') : '—';
+}
+
 function errorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
   if (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string') {
@@ -99,6 +107,7 @@ export function InvestitoriView() {
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [troskovi, setTroskovi] = useState<Trosak[]>([]);
   const [radnoVrijeme, setRadnoVrijeme] = useState<RadnoVrijeme[]>([]);
+  const [nalozi, setNalozi] = useState<RadniNalog[]>([]);
   const [fakture, setFakture] = useState<Faktura[]>([]);
   const [query, setQuery] = useState('');
   const [year, setYear] = useState('');
@@ -114,6 +123,12 @@ export function InvestitoriView() {
   const [form, setForm] = useState(emptyInvestitorForm);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Investitor | null>(null);
+  const [selectedInvestor, setSelectedInvestor] = useState<Investitor | null>(null);
+  const [investorContacts, setInvestorContacts] = useState<InvestitorKontakt[]>([]);
+  const [contactEditing, setContactEditing] = useState<InvestitorKontakt | null>(null);
+  const [contactForm, setContactForm] = useState({ uloga: '', ime: '', telefon: '', email: '', napomena: '' });
+  const [contactError, setContactError] = useState<string | null>(null);
+  const [contactSaving, setContactSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -124,14 +139,16 @@ export function InvestitoriView() {
       fetchTroskovi(),
       fetchRadnoVrijeme(),
       fetchFakture(),
+      fetchRadniNalozi(),
     ])
-      .then(([nextInvestitori, nextObjekti, nextGradilista, nextTroskovi, nextRadnoVrijeme, nextFakture]) => {
+      .then(([nextInvestitori, nextObjekti, nextGradilista, nextTroskovi, nextRadnoVrijeme, nextFakture, nextNalozi]) => {
         if (cancelled) return;
         setInvestitori(nextInvestitori);
         setObjekti(nextObjekti);
         setGradilista(nextGradilista);
         setTroskovi(nextTroskovi);
         setRadnoVrijeme(nextRadnoVrijeme);
+        setNalozi(nextNalozi);
         setFakture(nextFakture);
       })
       .catch((e: unknown) => {
@@ -182,12 +199,35 @@ export function InvestitoriView() {
     const laborCosts = radnoVrijeme
       .filter((entry) => entry.gradiliste_id && siteIds.has(entry.gradiliste_id))
       .reduce((sum, entry) => sum + entry.sati * (entry.radnici?.cijena_sata ?? 0), 0);
-    const invoices = fakture.filter((faktura) => faktura.gradiliste_id && siteIds.has(faktura.gradiliste_id));
+    const investorSites = gradilista.filter((gradiliste) => siteIds.has(gradiliste.id));
+    const invoices = fakture.filter((faktura) =>
+      (faktura.gradiliste_id !== null && siteIds.has(faktura.gradiliste_id))
+      || (faktura.investitor_id === investitor.id && !faktura.gradiliste_id));
     const invoiced = invoices.reduce((sum, faktura) => sum + iznosFakture(faktura), 0);
     const paid = invoices
       .filter((faktura) => faktura.status === 'placena')
       .reduce((sum, faktura) => sum + iznosFakture(faktura), 0);
     const totalCosts = directCosts + laborCosts;
+    const investorObjects = objekti.filter((objekt) => objekt.investitor_id === investitor.id);
+    const relevantSites = investorSites;
+    const startedDates = relevantSites.map((site) => site.datum_pocetka).filter((date): date is string => Boolean(date)).sort();
+    const latestSite = [...relevantSites].filter((site) => site.status === 'zavrseno' || site.status === 'neplaceno').sort((a, b) =>
+      (b.datum_zavrsetka ?? b.datum_pocetka ?? '').localeCompare(a.datum_zavrsetka ?? a.datum_pocetka ?? ''),
+    )[0] ?? null;
+    const latestInvoice = [...invoices].sort((a, b) => b.datum_izdavanja.localeCompare(a.datum_izdavanja))[0] ?? null;
+    const latestPaidInvoice = [...invoices]
+      .filter((invoice) => invoice.status === 'placena' && invoice.datum_naplate)
+      .sort((a, b) => (b.datum_naplate ?? '').localeCompare(a.datum_naplate ?? ''))[0] ?? null;
+    const latestOrder = nalozi
+      .filter((nalog) => nalog.gradiliste_id && siteIds.has(nalog.gradiliste_id))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
+    const activityDates = [
+      ...relevantSites.flatMap((site) => [site.datum_zavrsetka, site.datum_pocetka]),
+      ...invoices.map((invoice) => invoice.datum_izdavanja),
+      ...troskovi.filter((expense) => expense.gradiliste_id && siteIds.has(expense.gradiliste_id)).map((expense) => expense.datum),
+      latestOrder?.created_at,
+    ].filter((date): date is string => Boolean(date)).sort();
+    const lastActivity = activityDates.length ? activityDates[activityDates.length - 1] : null;
 
     return [investitor.id, {
       directCosts,
@@ -197,6 +237,19 @@ export function InvestitoriView() {
       paid,
       unpaid: invoiced - paid,
       difference: invoiced - totalCosts,
+      objectCount: investorObjects.length,
+      siteCount: relevantSites.length,
+      activeSites: relevantSites.filter((site) => site.status === 'aktivno').length,
+      completedSites: relevantSites.filter((site) => site.status === 'zavrseno' || site.status === 'neplaceno').length,
+      margin: invoiced > 0 ? ((invoiced - totalCosts) / invoiced) * 100 : null,
+      collaborationStart: startedDates[0] ?? null,
+      latestSite,
+      latestInvoice,
+      latestPaidInvoice,
+      latestOrder,
+      lastActivity,
+      objectIds,
+      siteIds,
     }] as const;
   }));
   const sortedInvestitori = [...filtered].sort((first, second) => {
@@ -308,6 +361,85 @@ export function InvestitoriView() {
     }
   };
 
+  const openInvestorOverview = async (investitor: Investitor) => {
+    setSelectedInvestor(investitor);
+    setContactError(null);
+    setContactEditing(null);
+    setContactForm({ uloga: '', ime: '', telefon: '', email: '', napomena: '' });
+    try {
+      setInvestorContacts(await fetchInvestitorKontakti(investitor.id));
+    } catch (e) {
+      setContactError(errorMessage(e));
+      setInvestorContacts([]);
+    }
+  };
+
+  const submitContact = async () => {
+    if (!selectedInvestor || !contactForm.uloga.trim() || !contactForm.ime.trim()) return;
+    setContactSaving(true);
+    setContactError(null);
+    try {
+      const saved = await saveInvestitorKontakt(selectedInvestor.id, {
+        uloga: contactForm.uloga.trim(),
+        ime: contactForm.ime.trim(),
+        telefon: contactForm.telefon.trim() || null,
+        email: contactForm.email.trim() || null,
+        napomena: contactForm.napomena.trim() || null,
+      }, contactEditing?.id);
+      setInvestorContacts((current) => [...current.filter((item) => item.id !== saved.id), saved]
+        .sort((a, b) => a.uloga.localeCompare(b.uloga, 'hr') || a.ime.localeCompare(b.ime, 'hr')));
+      setContactEditing(null);
+      setContactForm({ uloga: '', ime: '', telefon: '', email: '', napomena: '' });
+    } catch (e) {
+      setContactError(errorMessage(e));
+    } finally {
+      setContactSaving(false);
+    }
+  };
+
+  const removeContact = async (kontakt: InvestitorKontakt) => {
+    setContactError(null);
+    try {
+      await deleteInvestitorKontakt(kontakt.id);
+      setInvestorContacts((current) => current.filter((item) => item.id !== kontakt.id));
+      if (contactEditing?.id === kontakt.id) {
+        setContactEditing(null);
+        setContactForm({ uloga: '', ime: '', telefon: '', email: '', napomena: '' });
+      }
+    } catch (e) {
+      setContactError(errorMessage(e));
+    }
+  };
+
+  const selectedInvestorFinances = selectedInvestor ? financesByInvestor.get(selectedInvestor.id) : undefined;
+  const selectedInvestorObjects = selectedInvestor
+    ? objekti.filter((objekt) => objekt.investitor_id === selectedInvestor.id).map((objekt) => {
+      const objectSites = gradilista.filter((site) => site.objekt_id === objekt.id);
+      const objectSiteIds = new Set(objectSites.map((site) => site.id));
+      const invoices = fakture.filter((invoice) => invoice.gradiliste_id && objectSiteIds.has(invoice.gradiliste_id));
+      const objectLastActivity = [
+        ...objectSites.flatMap((site) => [site.datum_pocetka, site.datum_zavrsetka]),
+        ...invoices.map((invoice) => invoice.datum_izdavanja),
+        ...troskovi.filter((expense) => expense.gradiliste_id && objectSiteIds.has(expense.gradiliste_id)).map((expense) => expense.datum),
+        ...nalozi.filter((order) => order.gradiliste_id && objectSiteIds.has(order.gradiliste_id)).map((order) => order.created_at),
+      ].filter((date): date is string => Boolean(date)).sort().pop() ?? null;
+      return {
+        objekt,
+        sites: objectSites,
+        activeCount: objectSites.filter((site) => site.status === 'aktivno').length,
+        invoiced: invoices.reduce((sum, invoice) => sum + iznosFakture(invoice), 0),
+        lastActivity: objectLastActivity,
+      };
+    }).sort((a, b) => a.objekt.naziv.localeCompare(b.objekt.naziv, 'hr', { sensitivity: 'base' }))
+    : [];
+  const selectedInvestorSiteIds = new Set(
+    selectedInvestor ? gradilista.filter((site) => site.objekt_id && objekti.some((object) => object.id === site.objekt_id && object.investitor_id === selectedInvestor.id)).map((site) => site.id) : [],
+  );
+  const selectedInvestorLastWorkOrder = selectedInvestor
+    ? nalozi.filter((order) => order.gradiliste_id && selectedInvestorSiteIds.has(order.gradiliste_id))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null
+    : null;
+
   if (loading) {
     return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
   }
@@ -317,7 +449,7 @@ export function InvestitoriView() {
       <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-4 xl:flex-row xl:flex-wrap xl:items-end">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Investitori</h1>
-          <p className="mt-1 text-sm text-slate-500">Financije po investitoru: fakture, troškovi i rad; filtriranje po datumu dodavanja</p>
+          <p className="mt-1 text-sm text-slate-500">Sažetak poslovnog odnosa, naplate i objekata po investitoru</p>
         </div>
         <div className="flex min-w-0 w-full flex-col gap-3 xl:w-auto xl:flex-row xl:flex-wrap xl:items-end xl:justify-end">
           <div className="relative min-w-0 w-full xl:w-72">
@@ -455,7 +587,13 @@ export function InvestitoriView() {
                 return (
                   <tr key={investitor.id} className="hover:bg-slate-50">
                     <td className="px-5 py-3.5 text-sm text-slate-700">
-                      <div className="font-medium text-slate-900">{investitor.naziv}</div>
+                      <button
+                        type="button"
+                        onClick={() => void openInvestorOverview(investitor)}
+                        className="text-left font-semibold text-sky-700 hover:text-sky-900 hover:underline"
+                      >
+                        {investitor.naziv}
+                      </button>
                       {investitor.oib && <div className="mt-1 text-xs text-slate-500">OIB: {investitor.oib}</div>}
                       {(investitor.adresa || investitor.mjesto || investitor.postanski_broj) && (
                         <div className="mt-1 text-xs text-slate-500">
@@ -518,6 +656,159 @@ export function InvestitoriView() {
           </table>
         </div>
       )}
+
+      <Modal
+        open={selectedInvestor !== null}
+        onClose={() => setSelectedInvestor(null)}
+        title={selectedInvestor?.naziv ?? 'Investitor'}
+        wide
+      >
+        {selectedInvestor && selectedInvestorFinances && (
+          <div className="space-y-5">
+            <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {[
+                ['Objekata', selectedInvestorFinances.objectCount],
+                ['Gradilišta', selectedInvestorFinances.siteCount],
+                ['Aktivna gradilišta', selectedInvestorFinances.activeSites],
+                ['Završena gradilišta', selectedInvestorFinances.completedSites],
+                ['Fakturirano', formatCurrency(selectedInvestorFinances.invoiced)],
+                ['Naplaćeno', formatCurrency(selectedInvestorFinances.paid)],
+                ['Otvoreno za naplatu', formatCurrency(selectedInvestorFinances.unpaid)],
+                ['Prosječna marža', selectedInvestorFinances.margin === null ? '—' : `${selectedInvestorFinances.margin.toFixed(1)} %`],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs text-slate-500">{label}</p>
+                  <p className="mt-1 text-sm font-bold text-slate-900">{value}</p>
+                </div>
+              ))}
+            </section>
+
+            <section className="grid gap-4 xl:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 p-4">
+                <h3 className="text-sm font-semibold text-slate-900">Odnos s investitorom</h3>
+                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                  <dt className="text-slate-500">Prvi posao</dt>
+                  <dd className="text-right font-medium">{formatDate(selectedInvestorFinances.collaborationStart)}</dd>
+                  <dt className="text-slate-500">Posljednji posao</dt>
+                  <dd className="text-right font-medium">{formatDate(selectedInvestorFinances.latestSite?.datum_zavrsetka ?? selectedInvestorFinances.latestSite?.datum_pocetka)}</dd>
+                  <dt className="text-slate-500">Trajanje suradnje</dt>
+                  <dd className="text-right font-medium">
+                    {selectedInvestorFinances.collaborationStart
+                      ? `${Math.floor((Date.now() - new Date(`${selectedInvestorFinances.collaborationStart}T00:00:00`).getTime()) / (365.25 * 24 * 60 * 60 * 1000))} god.`
+                      : '—'}
+                  </dd>
+                  <dt className="text-slate-500">Postotak naplaćenosti</dt>
+                  <dd className="text-right font-medium">{selectedInvestorFinances.invoiced > 0 ? `${(selectedInvestorFinances.paid / selectedInvestorFinances.invoiced * 100).toFixed(1)} %` : '—'}</dd>
+                </dl>
+                <div className="mt-4 border-t border-slate-100 pt-3">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Posljednja aktivnost</h4>
+                  <p className="mt-2 text-sm text-slate-700">
+                    Zadnji radni nalog: <strong>{selectedInvestorLastWorkOrder?.broj ?? '—'}</strong>
+                    {selectedInvestorLastWorkOrder && <span className="text-slate-500"> · {formatDate(selectedInvestorLastWorkOrder.created_at)}</span>}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-700">Zadnja faktura: <strong>{formatDate(selectedInvestorFinances.latestInvoice?.datum_izdavanja)}</strong></p>
+                  <p className="mt-1 text-sm text-slate-700">
+                    Zadnja naplata: <strong>{selectedInvestorFinances.latestPaidInvoice?.datum_naplate ? formatDate(selectedInvestorFinances.latestPaidInvoice.datum_naplate) : 'Nije evidentiran datum naplate'}</strong>
+                  </p>
+                  <p className="mt-1 text-sm text-slate-700">
+                    Zadnje završeno gradilište: <strong>{selectedInvestorFinances.latestSite?.naziv ?? '—'}</strong>
+                  </p>
+                  <p className="mt-1 text-sm text-slate-700">Posljednja aktivnost: <strong>{formatDate(selectedInvestorFinances.lastActivity)}</strong></p>
+                </div>
+              </div>
+              <div className="rounded-xl border border-slate-200 p-4">
+                <h3 className="text-sm font-semibold text-slate-900">Financijski pregled</h3>
+                <p className="mt-1 text-xs text-slate-500">Naplaćeno se računa prema statusu fakture; djelomične uplate nisu zasebno evidentirane.</p>
+                <dl className="mt-3 space-y-2 text-sm">
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500">Ukupno fakturirano</dt><dd className="font-semibold">{formatCurrency(selectedInvestorFinances.invoiced)}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500">Ukupno naplaćeno</dt><dd className="font-semibold">{formatCurrency(selectedInvestorFinances.paid)}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500">Otvoreno</dt><dd className="font-semibold text-red-700">{formatCurrency(selectedInvestorFinances.unpaid)}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500">Prosječna marža (ponderirana)</dt><dd className="font-semibold">{selectedInvestorFinances.margin === null ? '—' : `${selectedInvestorFinances.margin.toFixed(1)} %`}</dd></div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-slate-500">Najveće aktivno gradilište</dt>
+                    <dd className="text-right font-semibold">
+                      {[...gradilista].filter((site) => selectedInvestorFinances.siteIds.has(site.id) && site.status === 'aktivno')
+                        .sort((a, b) => (b.ugovorena_vrijednost ?? 0) - (a.ugovorena_vrijednost ?? 0))[0]?.naziv ?? '—'}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-slate-500">Najveći otvoreni dug</dt>
+                    <dd className="font-semibold">{formatCurrency(Math.max(0, ...fakture
+                      .filter((invoice) => invoice.investitor_id === selectedInvestor.id || (invoice.gradiliste_id && selectedInvestorFinances.siteIds.has(invoice.gradiliste_id)))
+                      .filter((invoice) => invoice.status !== 'placena')
+                      .map(iznosFakture)))}</dd>
+                  </div>
+                </dl>
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-slate-200 p-4">
+              <h3 className="text-sm font-semibold text-slate-900">Objekti investitora</h3>
+              {selectedInvestorObjects.length ? (
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  {selectedInvestorObjects.map(({ objekt, sites, activeCount, invoiced, lastActivity }) => (
+                    <div key={objekt.id} className="rounded-lg bg-slate-50 p-3">
+                      <p className="font-semibold text-slate-900">{objekt.naziv}</p>
+                      <p className="mt-1 text-xs text-slate-500">{[objekt.adresa, objekt.mjesto].filter(Boolean).join(', ') || 'Adresa nije unesena'}</p>
+                      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
+                        <span>Aktivna gradilišta: {activeCount}</span>
+                        <span>Ukupno: {sites.length}</span>
+                        <span>Fakturirano: {formatCurrency(invoiced)}</span>
+                        <span>Aktivnost: {formatDate(lastActivity)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="mt-2 text-sm text-slate-500">Investitor još nema povezanih objekata.</p>}
+            </section>
+
+            <section className="rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-slate-900">Kontakti investitora</h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setContactEditing(null);
+                    setContactForm({ uloga: '', ime: '', telefon: '', email: '', napomena: '' });
+                  }}
+                  className="text-xs font-semibold text-sky-700 hover:text-sky-900"
+                >
+                  Novi kontakt
+                </button>
+              </div>
+              {contactError && <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{contactError}</p>}
+              <div className="mt-3 space-y-2">
+                {investorContacts.map((kontakt) => (
+                  <div key={kontakt.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 p-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-900">{kontakt.ime} <span className="font-normal text-slate-500">· {kontakt.uloga}</span></p>
+                      <p className="text-xs text-slate-600">{[kontakt.telefon, kontakt.email, kontakt.napomena].filter(Boolean).join(' · ')}</p>
+                    </div>
+                    <div className="flex gap-1">
+                      <button type="button" onClick={() => {
+                        setContactEditing(kontakt);
+                        setContactForm({ uloga: kontakt.uloga, ime: kontakt.ime, telefon: kontakt.telefon ?? '', email: kontakt.email ?? '', napomena: kontakt.napomena ?? '' });
+                      }} className="rounded p-1.5 text-slate-500 hover:bg-white hover:text-sky-700" aria-label={`Uredi kontakt ${kontakt.ime}`}><Pencil className="h-4 w-4" /></button>
+                      <button type="button" onClick={() => void removeContact(kontakt)} className="rounded p-1.5 text-slate-500 hover:bg-white hover:text-red-700" aria-label={`Izbriši kontakt ${kontakt.ime}`}><Trash2 className="h-4 w-4" /></button>
+                    </div>
+                  </div>
+                ))}
+                {investorContacts.length === 0 && <p className="text-sm text-slate-500">Nema dodatnih kontakata.</p>}
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <TextInput value={contactForm.uloga} onChange={(event) => setContactForm({ ...contactForm, uloga: event.target.value })} placeholder="Uloga (npr. Nabava)" aria-label="Uloga kontakta" />
+                <TextInput value={contactForm.ime} onChange={(event) => setContactForm({ ...contactForm, ime: event.target.value })} placeholder="Ime i prezime" aria-label="Ime kontakta" />
+                <TextInput type="tel" value={contactForm.telefon} onChange={(event) => setContactForm({ ...contactForm, telefon: event.target.value })} placeholder="Telefon" aria-label="Telefon kontakta" />
+                <TextInput type="email" value={contactForm.email} onChange={(event) => setContactForm({ ...contactForm, email: event.target.value })} placeholder="Email" aria-label="Email kontakta" />
+                <TextInput value={contactForm.napomena} onChange={(event) => setContactForm({ ...contactForm, napomena: event.target.value })} placeholder="Napomena" aria-label="Napomena kontakta" />
+                <button type="button" disabled={contactSaving || !contactForm.uloga.trim() || !contactForm.ime.trim()} onClick={() => void submitContact()} className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50">
+                  {contactSaving ? 'Spremanje…' : contactEditing ? 'Spremi kontakt' : 'Dodaj kontakt'}
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={modalOpen}
@@ -599,10 +890,13 @@ export function InvestitoriView() {
   );
 }
 
-export function ObjektiView() {
+export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: string) => void } = {}) {
   const [objekti, setObjekti] = useState<Objekt[]>([]);
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [fakture, setFakture] = useState<Faktura[]>([]);
+  const [troskovi, setTroskovi] = useState<Trosak[]>([]);
+  const [radnoVrijeme, setRadnoVrijeme] = useState<RadnoVrijeme[]>([]);
+  const [nalozi, setNalozi] = useState<RadniNalog[]>([]);
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<ObjektSortKey>('naziv');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
@@ -614,16 +908,20 @@ export function ObjektiView() {
   const [form, setForm] = useState(emptyObjektForm);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Objekt | null>(null);
+  const [selectedObjekt, setSelectedObjekt] = useState<Objekt | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchAllObjekti(), fetchGradilista(), fetchFakture(), fetchInvestitori()])
-      .then(([nextObjekti, nextGradilista, nextFakture, nextInvestitori]) => {
+    Promise.all([fetchAllObjekti(), fetchGradilista(), fetchFakture(), fetchInvestitori(), fetchTroskovi(), fetchRadnoVrijeme(), fetchRadniNalozi()])
+      .then(([nextObjekti, nextGradilista, nextFakture, nextInvestitori, nextTroskovi, nextRadnoVrijeme, nextNalozi]) => {
         if (cancelled) return;
         setObjekti(nextObjekti);
         setGradilista(nextGradilista);
         setFakture(nextFakture);
         setInvestitori(nextInvestitori);
+        setTroskovi(nextTroskovi);
+        setRadnoVrijeme(nextRadnoVrijeme);
+        setNalozi(nextNalozi);
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(errorMessage(e));
@@ -646,7 +944,7 @@ export function ObjektiView() {
   }
 
   const naplacenoPoGradilistu = fakture.reduce<Record<string, number>>((totals, faktura) => {
-    if (faktura.status === 'placena' && faktura.gradiliste_id) {
+    if (faktura.gradiliste_id) {
       totals[faktura.gradiliste_id] = (totals[faktura.gradiliste_id] ?? 0) + iznosFakture(faktura);
     }
     return totals;
@@ -827,7 +1125,9 @@ export function ObjektiView() {
 
   const objektDetails = (objekt: Objekt) => (
     <>
-      <div>{objekt.naziv}</div>
+      <button type="button" onClick={() => setSelectedObjekt(objekt)} className="text-left font-semibold text-sky-700 hover:text-sky-900 hover:underline">
+        {objekt.naziv}
+      </button>
       {(objekt.adresa || objekt.mjesto || objekt.postanski_broj) && (
         <div className="mt-1 text-xs font-normal text-slate-500">
           {[objekt.adresa, objekt.postanski_broj, objekt.mjesto].filter(Boolean).join(', ')}
@@ -840,6 +1140,30 @@ export function ObjektiView() {
       )}
     </>
   );
+
+  const selectedObjektHistory = selectedObjekt
+    ? (gradilistaPoObjektu.get(selectedObjekt.id) ?? [])
+      .map((site) => {
+        const revenue = fakture.filter((invoice) => invoice.gradiliste_id === site.id)
+          .reduce((sum, invoice) => sum + iznosFakture(invoice), 0);
+        const expenseCost = troskovi.filter((expense) => expense.gradiliste_id === site.id)
+          .reduce((sum, expense) => sum + expense.iznos, 0);
+        const laborCost = radnoVrijeme.filter((entry) => entry.gradiliste_id === site.id)
+          .reduce((sum, entry) => sum + entry.sati * (entry.radnici?.cijena_sata ?? 0), 0);
+        const cost = expenseCost + laborCost;
+        const margin = revenue > 0 ? ((revenue - cost) / revenue) * 100 : null;
+        return { site, revenue, cost, margin };
+      })
+      .sort((a, b) => (a.site.datum_pocetka ?? '').localeCompare(b.site.datum_pocetka ?? ''))
+    : [];
+  const selectedObjektActivity = selectedObjektHistory
+    .flatMap(({ site }) => [site.datum_pocetka, site.datum_zavrsetka])
+    .concat(fakture.filter((invoice) => selectedObjektHistory.some(({ site }) => site.id === invoice.gradiliste_id)).map((invoice) => invoice.datum_izdavanja))
+    .concat(troskovi.filter((expense) => selectedObjektHistory.some(({ site }) => site.id === expense.gradiliste_id)).map((expense) => expense.datum))
+    .concat(nalozi.filter((order) => selectedObjektHistory.some(({ site }) => site.id === order.gradiliste_id)).map((order) => order.created_at))
+    .filter((date): date is string => Boolean(date))
+    .sort()
+    .pop() ?? null;
 
   if (loading) {
     return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
@@ -923,16 +1247,16 @@ export function ObjektiView() {
                   {sortHeader('investitor', 'Investitor')}
                 </th>
                 <th aria-sort={sortKey === 'gradiliste' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="px-5 py-3 text-left text-xs">
-                  {sortHeader('gradiliste', 'Gradilište')}
+                  {sortHeader('gradiliste', 'Gradilišta')}
                 </th>
                 <th aria-sort={sortKey === 'datum_pocetka' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="px-5 py-3 text-right text-xs">
-                  {sortHeader('datum_pocetka', 'Početak')}
+                  {sortHeader('datum_pocetka', 'Prvi posao')}
                 </th>
                 <th aria-sort={sortKey === 'datum_zavrsetka' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="px-5 py-3 text-right text-xs">
-                  {sortHeader('datum_zavrsetka', 'Završetak')}
+                  {sortHeader('datum_zavrsetka', 'Posljednja aktivnost')}
                 </th>
                 <th aria-sort={sortKey === 'naplaceno' ? sortDirection === 'asc' ? 'ascending' : 'descending' : 'none'} className="px-5 py-3 text-right text-xs">
-                  {sortHeader('naplaceno', 'Naplaćeno')}
+                  {sortHeader('naplaceno', 'Fakturirano')}
                 </th>
                 <th className="px-5 py-3 text-right text-xs font-semibold uppercase text-slate-500">Akcije</th>
               </tr>
@@ -940,51 +1264,82 @@ export function ObjektiView() {
             <tbody className="divide-y divide-slate-100">
               {sortedObjekti.map((objekt) => {
                 const relatedGradilista = redoviPoObjektu.get(objekt.id) ?? [];
-                if (relatedGradilista.length === 0) {
-                  return (
-                    <tr key={objekt.id} className="hover:bg-slate-50">
-                      <td className="px-5 py-3.5 text-sm font-medium text-slate-900">{objektDetails(objekt)}</td>
-                      <td className="px-5 py-3.5 text-sm text-slate-600">{objekt.investitori?.naziv ?? 'Bez investitora'}</td>
-                      <td colSpan={4} className="px-5 py-3.5 text-sm text-slate-400">Nema povezanih gradilišta</td>
-                      <td className="px-5 py-3.5">{actionButtons(objekt)}</td>
-                    </tr>
-                  );
-                }
-
-                return relatedGradilista.map(({ gradiliste, naplaceno }, index) => (
-                  <tr key={`${objekt.id}-${gradiliste.id}`} className="hover:bg-slate-50">
-                    {index === 0 && (
-                      <>
-                        <td rowSpan={relatedGradilista.length} className="border-r border-slate-100 px-5 py-3.5 align-top text-sm font-medium text-slate-900">
-                          {objektDetails(objekt)}
-                        </td>
-                        <td rowSpan={relatedGradilista.length} className="border-r border-slate-100 px-5 py-3.5 align-top text-sm text-slate-600">
-                          {objekt.investitori?.naziv ?? 'Bez investitora'}
-                        </td>
-                      </>
-                    )}
-                    <td className="px-5 py-3.5 text-sm font-medium text-slate-900">{gradiliste.naziv}</td>
-                    <td className="px-5 py-3.5 text-right text-sm text-slate-600">
-                      {gradiliste.datum_pocetka ? new Date(gradiliste.datum_pocetka).toLocaleDateString('hr-HR') : '—'}
+                const siteRows = relatedGradilista.map((row) => row.gradiliste);
+                const firstDate = siteRows.map((site) => site.datum_pocetka).filter((date): date is string => Boolean(date)).sort()[0] ?? null;
+                const activityDates = [
+                  ...siteRows.flatMap((site) => [site.datum_zavrsetka, site.datum_pocetka]),
+                  ...fakture.filter((invoice) => invoice.gradiliste_id && siteRows.some((site) => site.id === invoice.gradiliste_id)).map((invoice) => invoice.datum_izdavanja),
+                  ...troskovi.filter((expense) => expense.gradiliste_id && siteRows.some((site) => site.id === expense.gradiliste_id)).map((expense) => expense.datum),
+                  ...nalozi.filter((order) => order.gradiliste_id && siteRows.some((site) => site.id === order.gradiliste_id)).map((order) => order.created_at),
+                ].filter((date): date is string => Boolean(date)).sort();
+                const lastDate = activityDates.length ? activityDates[activityDates.length - 1] : null;
+                const invoiced = relatedGradilista.reduce((sum, row) => sum + row.naplaceno, 0);
+                return (
+                  <tr key={objekt.id} className="hover:bg-slate-50">
+                    <td className="px-5 py-3.5 text-sm font-medium text-slate-900">{objektDetails(objekt)}</td>
+                    <td className="px-5 py-3.5 text-sm text-slate-600">{objekt.investitori?.naziv ?? 'Bez investitora'}</td>
+                    <td className="px-5 py-3.5 text-sm text-slate-600">
+                      {siteRows.filter((site) => site.status === 'aktivno').length} aktivnih / {siteRows.length} ukupno
                     </td>
-                    <td className="px-5 py-3.5 text-right text-sm text-slate-600">
-                      {gradiliste.datum_zavrsetka ? new Date(gradiliste.datum_zavrsetka).toLocaleDateString('hr-HR') : '—'}
-                    </td>
-                    <td className="px-5 py-3.5 text-right text-sm font-medium text-slate-900">
-                      {formatCurrency(naplaceno)}
-                    </td>
-                    {index === 0 && (
-                      <td rowSpan={relatedGradilista.length} className="border-l border-slate-100 px-5 py-3.5 align-top">
-                        {actionButtons(objekt)}
-                      </td>
-                    )}
+                    <td className="px-5 py-3.5 text-right text-sm text-slate-600">{formatDate(firstDate)}</td>
+                    <td className="px-5 py-3.5 text-right text-sm text-slate-600">{formatDate(lastDate)}</td>
+                    <td className="px-5 py-3.5 text-right text-sm font-medium text-slate-900">{formatCurrency(invoiced)}</td>
+                    <td className="px-5 py-3.5">{actionButtons(objekt)}</td>
                   </tr>
-                ));
+                );
               })}
             </tbody>
           </table>
         </div>
       )}
+
+      <Modal
+        open={selectedObjekt !== null}
+        onClose={() => setSelectedObjekt(null)}
+        title={selectedObjekt?.naziv ?? 'Objekt'}
+        wide
+      >
+        {selectedObjekt && (
+          <div className="space-y-5">
+            <section className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div><p className="text-xs text-slate-500">Adresa</p><p className="mt-1 text-sm font-medium">{[selectedObjekt.adresa, selectedObjekt.postanski_broj, selectedObjekt.mjesto].filter(Boolean).join(', ') || 'Nije unesena'}</p></div>
+              <div><p className="text-xs text-slate-500">Investitor</p><p className="mt-1 text-sm font-medium">{selectedObjekt.investitori?.naziv ?? investitori.find((item) => item.id === selectedObjekt.investitor_id)?.naziv ?? '—'}</p></div>
+              <div><p className="text-xs text-slate-500">Gradilišta</p><p className="mt-1 text-sm font-medium">{selectedObjektHistory.length} ukupno · {selectedObjektHistory.filter(({ site }) => site.status === 'aktivno').length} aktivnih</p></div>
+              <div><p className="text-xs text-slate-500">Posljednja aktivnost</p><p className="mt-1 text-sm font-medium">{formatDate(selectedObjektActivity)}</p></div>
+            </section>
+            <section>
+              <h3 className="mb-3 text-sm font-semibold text-slate-900">Povijest gradilišta na lokaciji</h3>
+              {selectedObjektHistory.length ? (
+                <div className="space-y-2">
+                  {selectedObjektHistory.map(({ site, revenue, cost, margin }) => (
+                    <div key={site.id} className="grid gap-2 rounded-lg border border-slate-200 p-3 lg:grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,0.7fr))_auto] lg:items-center">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-900">{site.naziv}</p>
+                        <p className="mt-1 text-xs text-slate-500">{formatDate(site.datum_pocetka)} – {formatDate(site.datum_zavrsetka)}</p>
+                      </div>
+                      <div><p className="text-xs text-slate-500">Status</p><p className="text-sm font-medium">{site.status === 'neplaceno' ? 'Završeno · neplaćeno' : site.status === 'zavrseno' ? 'Završeno' : site.status === 'aktivno' ? 'Aktivno' : site.status === 'pauzirano' ? 'Pauzirano' : site.status === 'planirano' ? 'Planirano' : 'Ponuda'}</p></div>
+                      <div><p className="text-xs text-slate-500">Vrijednost</p><p className="text-sm font-medium">{formatCurrency(site.ugovorena_vrijednost ?? 0)}</p></div>
+                      <div><p className="text-xs text-slate-500">Fakturirano</p><p className="text-sm font-medium">{formatCurrency(revenue)}</p></div>
+                      <div><p className="text-xs text-slate-500">Trošak / marža</p><p className="text-sm font-medium">{formatCurrency(cost)} · {margin === null ? '—' : `${margin.toFixed(1)} %`}</p></div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedObjekt(null);
+                          onOpenGradiliste?.(site.id);
+                        }}
+                        disabled={!onOpenGradiliste}
+                        className="rounded-lg border border-sky-200 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+                      >
+                        Otvori gradilište
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">Za ovaj objekt još nema evidentiranih gradilišta.</p>}
+            </section>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={modalOpen}

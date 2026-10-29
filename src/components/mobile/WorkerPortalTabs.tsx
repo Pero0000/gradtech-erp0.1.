@@ -14,7 +14,7 @@ import {
   type RasporedObjavaVozilo,
 } from '@/lib/api';
 import { OBRACUN_KATEGORIJE, computeObracun } from '@/lib/obracunSati';
-import { dokumentVrste } from '@/components/views/RadnikDokumenti';
+import { dokumentVrste } from '@/lib/radnikDokumenti';
 import type { RadnikDokument } from '@/types';
 
 export type WorkerPortalTab = 'nalozi' | 'raspored' | 'vrijeme' | 'dokumenti';

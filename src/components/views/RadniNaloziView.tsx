@@ -48,7 +48,7 @@ const emptyForm = {
   radnik_ids: [] as string[],
 };
 
-type Period = 'svi' | 'danas' | 'sutra' | 'tjedan' | 'prosli' | 'kasni' | 'datum' | 'bez';
+type Period = 'svi' | 'danas' | 'sutra' | 'tjedan' | 'prosli' | 'kasni' | 'datum' | 'bez' | 'u_tijeku' | 'otvoren';
 
 const periodOptions: { key: Period; label: string }[] = [
   { key: 'danas', label: 'Danas' },
@@ -58,6 +58,8 @@ const periodOptions: { key: Period; label: string }[] = [
   { key: 'kasni', label: 'Kasni' },
   { key: 'datum', label: 'Odaberi datum' },
   { key: 'bez', label: 'Bez roka' },
+  { key: 'u_tijeku', label: 'U tijeku' },
+  { key: 'otvoren', label: 'Otvoren' },
   { key: 'svi', label: 'Svi' },
 ];
 
@@ -252,6 +254,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
     const q = search.trim().toLowerCase();
     if (q && !`${n.broj} ${n.naslov} ${n.gradilista?.naziv ?? ''}`.toLowerCase().includes(q)) return false;
     if (period === 'svi') return true;
+    if (period === 'u_tijeku' || period === 'otvoren') return n.status === period;
     if (period === 'bez') return !n.rok;
     if (!n.rok) return false;
     const today = new Date();
@@ -558,7 +561,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                   </div>
                 </div>
 
-                <NalogIzvrsenje key={n.id} nalog={n} slotId={`rn-detail-slot-${n.id}`} onChange={() => void load()} />
+                <NalogIzvrsenje key={n.id} nalog={n} slotId={`rn-detail-slot-${n.id}`} visualSections onChange={() => void load()} />
               </div>
             );
           })()}
@@ -661,6 +664,11 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
 
           <div>
             <p className="mb-2 text-sm font-medium text-slate-700">Dodijeljeni radnici</p>
+            {editing?.status === 'zavrsen' ? (
+              <p className="mb-2 text-xs text-slate-500">Ured je završno zaključio nalog; djelatnike više nije moguće mijenjati.</p>
+            ) : (
+              <p className="mb-2 text-xs text-slate-500">Djelatnike možeš mijenjati dok ured ne zaključi nalog.</p>
+            )}
             <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
               {radnikOptions.length === 0 ? (
                 <div className="flex items-center gap-2 px-3 py-2 text-sm text-slate-400">
@@ -677,6 +685,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                       type="checkbox"
                       checked={form.radnik_ids.includes(r.id)}
                       onChange={() => toggleRadnik(r.id)}
+                      disabled={editing?.status === 'zavrsen'}
                       className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                     />
                     <span className="text-sm text-slate-700">

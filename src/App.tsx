@@ -44,6 +44,7 @@ function App() {
   const [hasHoverPointer, setHasHoverPointer] = useState(false);
   const sidebarCloseTimer = useRef<number | null>(null);
   const [focusNalogId, setFocusNalogId] = useState<string | null>(null);
+  const [focusGradilisteId, setFocusGradilisteId] = useState<string | null>(null);
   const [counts, setCounts] = useState({
     gradilista: 0,
     radnici: 0,
@@ -137,6 +138,7 @@ function App() {
       return module !== null && canAccess(module);
     })()) {
       setFocusNalogId(null);
+      setFocusGradilisteId(null);
       setView(nextView);
       setMobileNavOpen(false);
     }
@@ -146,12 +148,12 @@ function App() {
   const viewAuthorized = view === 'tvrtke' ? isPlatformOwner : view === 'korisnici' ? isAdmin : module !== null && canAccess(module);
   const autoHideSidebar = view === 'raspored' || view === 'gradilista';
 
-  if (!isAdmin && !isPlatformOwner && !MODULES.some((module) => canAccess(module.id))) {
+  if (!isPlatformOwner && !MODULES.some((module) => canAccess(module.id))) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
         <div className="max-w-lg rounded-xl border border-amber-200 bg-white p-6 shadow-sm">
-          <h1 className="text-lg font-semibold text-slate-900">Nema dodijeljenih prava</h1>
-          <p className="mt-2 text-sm text-slate-600">Vaš račun je odobren, ali još nema prava za prikaz modula. Obratite se administratoru.</p>
+          <h1 className="text-lg font-semibold text-slate-900">Nema dostupnih modula</h1>
+          <p className="mt-2 text-sm text-slate-600">Nijedan modul nije uključen za vašu tvrtku ili vam administrator još nije dodijelio prava za prikaz.</p>
           <button onClick={() => void signOut().catch(() => undefined)} className="mt-4 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700">Odjavi se</button>
         </div>
       </div>
@@ -181,7 +183,7 @@ function App() {
           className="fixed inset-y-0 left-0 z-[60] w-3 cursor-pointer"
         />
       )}
-      <main className="min-h-0 min-w-0 max-w-full flex-1 overflow-y-auto">
+      <main className={`min-h-0 min-w-0 max-w-full flex-1 ${view === 'dashboard' ? 'overflow-y-auto xl:overflow-hidden' : 'overflow-y-auto'}`}>
         <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4 xl:hidden">
           <div className="min-w-0 break-words">
             <p className="text-sm font-bold text-slate-900">GradTech · {company?.naziv}</p>
@@ -191,7 +193,7 @@ function App() {
             {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
         </header>
-        <div className="mx-auto min-w-0 w-full max-w-[2560px] px-3 py-4 sm:px-4 sm:py-6 xl:px-8 2xl:px-12 xl:py-8">
+        <div className={`mx-auto min-w-0 w-full max-w-[2560px] px-3 py-4 sm:px-4 sm:py-6 xl:px-8 2xl:px-12 xl:py-8 ${view === 'dashboard' ? 'xl:h-full xl:min-h-0' : ''}`}>
           {!viewAuthorized && <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">Provjera prava pristupa…</p>}
           {viewAuthorized && module && !canAccess(module, 'edit') && (
             <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -200,9 +202,12 @@ function App() {
           )}
           {viewAuthorized && view === 'dashboard' && <Dashboard onNavigate={navigate} />}
           {viewAuthorized && view === 'tvrtke' && <TvrtkeView />}
-          {viewAuthorized && view === 'gradilista' && <GradilistaView onOpenNalog={(id) => { setFocusNalogId(id); setView('radni_nalozi'); }} />}
+          {viewAuthorized && view === 'gradilista' && <GradilistaView focusGradilisteId={focusGradilisteId} onOpenNalog={(id) => { setFocusNalogId(id); setView('radni_nalozi'); }} />}
           {viewAuthorized && view === 'investitori' && <InvestitoriView />}
-          {viewAuthorized && view === 'objekti' && <ObjektiView />}
+          {viewAuthorized && view === 'objekti' && <ObjektiView onOpenGradiliste={canAccess('gradilista') ? (id) => {
+            setFocusGradilisteId(id);
+            setView('gradilista');
+          } : undefined} />}
           {viewAuthorized && view === 'kooperanti' && <KooperantiView />}
           {viewAuthorized && view === 'stavke' && <StavkeView />}
           {viewAuthorized && view === 'ponude' && <PonudeView />}

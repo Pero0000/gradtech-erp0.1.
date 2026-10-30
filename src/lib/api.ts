@@ -1371,6 +1371,11 @@ export async function createTroskovi(troskovi: {
   iznos: number;
   datum: string;
   placen: boolean;
+  placeno_at?: string | null;
+  broj_racuna?: string | null;
+  kolicina?: number | null;
+  jedinica?: string | null;
+  jedinicna_cijena?: number | null;
 }[]): Promise<Trosak[]> {
   if (troskovi.length === 0) return [];
   const { data, error } = await supabase.from('troskovi').insert(troskovi).select();

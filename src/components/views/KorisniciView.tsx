@@ -121,16 +121,18 @@ export function KorisniciView() {
         .eq('id', user.id);
       if (approvalError) throw approvalError;
 
-      const rows = MODULES.map(({ id }) => ({
-        user_id: user.id,
-        module: id,
-        can_view: user.permissions[id].can_view,
-        can_edit: user.permissions[id].can_edit,
-      }));
-      const { error: savePermissionsError } = await supabase
-        .from('app_user_permissions')
-        .upsert(rows, { onConflict: 'user_id,module' });
-      if (savePermissionsError) throw savePermissionsError;
+      if (!user.is_admin) {
+        const rows = MODULES.map(({ id }) => ({
+          user_id: user.id,
+          module: id,
+          can_view: user.permissions[id].can_view,
+          can_edit: user.permissions[id].can_edit,
+        }));
+        const { error: savePermissionsError } = await supabase
+          .from('app_user_permissions')
+          .upsert(rows, { onConflict: 'user_id,module' });
+        if (savePermissionsError) throw savePermissionsError;
+      }
 
       setNotice(`Prava za ${user.email} su spremljena.`);
     } catch (reason) {
@@ -166,8 +168,39 @@ export function KorisniciView() {
                 <div className="flex min-w-0 flex-col items-stretch justify-between gap-3 border-b border-slate-200 p-4 xl:flex-row xl:flex-wrap xl:items-center">
                   <div>
                     <h2 className="font-semibold text-slate-900">{user.email}</h2>
-                    <p className="mt-1 text-xs text-slate-500">{user.is_admin ? 'Administrator' : !user.approved ? 'Čeka odobrenje' : user.is_voditelj || user.is_platform_owner ? user.radnik_id ? 'ERP moduli · Portal djelatnika' : 'Voditelj · ERP moduli' : 'Radnik · Portal djelatnika'}{isCurrentUser ? ' · Vaš račun' : ''}</p>
+                    <p className="mt-1 text-xs text-slate-500">{user.is_admin ? user.radnik_id ? 'Administrator · Portal djelatnika' : 'Administrator' : !user.approved ? 'Čeka odobrenje' : user.is_voditelj || user.is_platform_owner ? user.radnik_id ? 'ERP moduli · Portal djelatnika' : 'Voditelj · ERP moduli' : 'Radnik · Portal djelatnika'}{isCurrentUser ? ' · Vaš račun' : ''}</p>
                   </div>
+                  {user.is_admin && (
+                    <div className="space-y-3 px-4 py-3">
+                      <label className="block max-w-xl text-sm font-medium text-slate-700">
+                        Djelatnik za Portal djelatnika
+                        <select
+                          value={user.radnik_id ?? ''}
+                          onChange={(event) => updateWorker(user.id, event.target.value)}
+                          className="mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                        >
+                          <option value="">Nije povezan s djelatnikom</option>
+                          {workers.map((worker) => (
+                            <option
+                              key={worker.id}
+                              value={worker.id}
+                              disabled={users.some((other) => other.id !== user.id && other.radnik_id === worker.id)}
+                            >
+                              {worker.ime} {worker.prezime} — {worker.uloga}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <p className="text-xs text-slate-500">Poveži administratora s djelatnikom da se u ERP-u pojavi Portal djelatnika s njegovim dodijeljenim nalozima.</p>
+                      <div className="flex justify-end">
+                        <button type="button" disabled={savingId === user.id} onClick={() => void saveUser(user)} className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-wait disabled:opacity-60">
+                          {savingId === user.id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : notice?.includes(user.email) ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+                          Spremi povezivanje
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {!user.is_admin && (
                     <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                       <input type="checkbox" checked={user.approved} onChange={(event) => updateApproval(user.id, event.target.checked)} className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500" />

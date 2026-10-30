@@ -4,7 +4,6 @@ import { Modal } from '@/components/ui/Modal';
 import { Select, TextInput } from '@/components/ui/Field';
 import { parseTroskovnik, MAX_FILE_MB, type TroskovnikRedak } from '@/lib/aiTroskovnik';
 import { createPonuda, replacePonudaStavke, updatePonuda, type Ponuda, type PonudaStavka } from '@/lib/ponude';
-import { getAiKey } from '@/lib/ai';
 
 const eur = (v: number) => v.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' });
 const errText = (e: unknown) => (e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : 'Greška');
@@ -135,7 +134,6 @@ export function TroskovnikAiImport({ open, onClose, gradilisteId, naziv, ponude,
     >
       <div className="space-y-4">
         {error && <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-        {!getAiKey() && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Gemini API ključ nije postavljen. Upiši ga u Postavke.</p>}
 
         {!rows ? (
           <>

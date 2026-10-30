@@ -19,7 +19,6 @@ import {
   Wrench,
   Cog,
   UserCog,
-  ClipboardCheck,
 } from 'lucide-react';
 import { useAuth } from '@/auth/useAuth';
 import { moduleForView } from '@/auth/permissions';
@@ -57,7 +56,6 @@ interface SidebarProps {
   onDesktopEnter?: () => void;
   onDesktopLeave?: () => void;
   onMobileClose: () => void;
-  onOpenPortal: () => void;
   counts: {
     gradilista: number;
     radnici: number;
@@ -81,7 +79,7 @@ const navSections: {
     title: 'Resursi',
     items: [
       { view: 'gradilista', label: 'Gradilišta', icon: Building2 },
-      { view: 'radnici', label: 'Radnici', icon: Users },
+      { view: 'radnici', label: 'Djelatnici', icon: Users },
       { view: 'vozila', label: 'Vozila', icon: Truck },
       { view: 'alat', label: 'Alat', icon: Wrench },
       { view: 'strojevi', label: 'Strojevi', icon: Cog },
@@ -133,8 +131,8 @@ const countMap: Partial<Record<View, keyof SidebarProps['counts']>> = {
   obavijesti: 'obavijesti',
 };
 
-export function Sidebar({ current, onNavigate, mobileOpen, desktopHidden = false, desktopOverlay = false, onDesktopEnter, onDesktopLeave, onMobileClose, onOpenPortal, counts }: SidebarProps) {
-  const { canAccess, isAdmin, isPlatformOwner, hasWorkerPortal, company, profile, signOut } = useAuth();
+export function Sidebar({ current, onNavigate, mobileOpen, desktopHidden = false, desktopOverlay = false, onDesktopEnter, onDesktopLeave, onMobileClose, counts }: SidebarProps) {
+  const { canAccess, isAdmin, isPlatformOwner, company, profile, signOut } = useAuth();
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const sidebarClassName = mobileOpen
     ? 'fixed inset-y-0 left-0 z-50 flex w-72 max-w-[calc(100vw-2rem)] shadow-xl'
@@ -162,19 +160,6 @@ export function Sidebar({ current, onNavigate, mobileOpen, desktopHidden = false
           <p className="text-xs text-slate-500">{company?.naziv}</p>
         </div>
       </div>
-
-      {hasWorkerPortal && (
-        <div className="border-b border-slate-100 px-3 py-3">
-          <button
-            type="button"
-            onClick={onOpenPortal}
-            className="flex w-full items-center gap-3 rounded-lg bg-sky-50 px-3 py-2.5 text-sm font-semibold text-sky-800 hover:bg-sky-100"
-          >
-            <ClipboardCheck className="h-[18px] w-[18px]" />
-            Portal djelatnika
-          </button>
-        </div>
-      )}
 
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         {navSections.map((section) => {

@@ -51,6 +51,7 @@ let currentCompany: Tvrtka | null = null;
 
 export function setCurrentCompany(company: Tvrtka | null) {
   currentCompany = company;
+  if (company) localStorage.removeItem(`gradtech:${company.id}:tm_gemini_key`);
   if (company?.oib === '29191529726' && localStorage.getItem(`gradtech:${company.id}:legacy-migrated`) !== '1') {
     for (const key of ['tm_ponude_postavke', 'tm_postavke', 'tm_univerzalna_satnica', 'tm_netto_po_radnicima', 'tm_prikaz_teren', 'tm_prikaz_nocna']) {
       const scopedKey = `gradtech:${company.id}:${key}`;

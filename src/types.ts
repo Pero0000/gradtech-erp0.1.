@@ -336,6 +336,10 @@ export interface DnevniRasporedRadnik {
                                                                                                                                     placen?: boolean;
                                                                                                                                     placeno_at?: string | null;
                                                                                                                                     kooperant_racun_id?: string | null;
+                                                                                                                                      broj_racuna?: string | null;
+                                                                                                                                      kolicina?: number | null;
+                                                                                                                                      jedinica?: string | null;
+                                                                                                                                      jedinicna_cijena?: number | null;
                                                                                                                                       created_at: string;
                                                                                                                                         gradilista?: Pick<Gradiliste, 'id' | 'naziv'> | null;
                                                                                                                                         }

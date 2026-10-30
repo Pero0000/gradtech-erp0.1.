@@ -296,6 +296,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
       if (editing) {
         await updateOprema(editing.id, payload);
         setModalOpen(false);
+        setExpandedId(null);
       } else {
         const created = await createOprema(payload);
         setModalOpen(false);
@@ -585,7 +586,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
               <th className="px-4 py-3 text-right">Akcije</th>
             </tr></thead>
             <tbody className="divide-y divide-slate-100">
-              {visibleItems.map((item) => {
+              {visibleItems.map((item, index) => {
                 const itemDocuments = documents[item.id] ?? [];
                 const itemUsage = usageHistory[item.id] ?? [];
                 const readiness = readinessState(item, itemDocuments);
@@ -602,7 +603,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
                 return (
                 <tr key={item.id} className="group hover:bg-slate-50">
                   <td className="px-4 py-3">
-                    <button type="button" onClick={() => void toggleDetails(item)} className="text-left font-medium text-slate-900 hover:text-sky-700">{item.naziv}</button>
+                    <button type="button" onClick={() => void toggleDetails(item)} className="text-left font-medium text-slate-900 hover:text-sky-700"><span className="mr-2 text-slate-400">{index + 1}.</span>{item.naziv}</button>
                     <p className="text-xs text-slate-500">{item.podkategorija || [item.marka, item.model].filter(Boolean).join(' ') || '—'}</p>
                   </td>
                   <td className="px-4 py-3 text-slate-600">{item.inventarski_broj || '—'}</td>
@@ -625,7 +626,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
         </div>
       ) : (
         <div className="grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-2 2xl:grid-cols-3">
-          {visibleItems.map((item) => {
+          {visibleItems.map((item, index) => {
             const itemDocuments = documents[item.id] ?? [];
             const itemUsage = usageHistory[item.id] ?? [];
             const alert = itemServiceAlert(item, itemDocuments);
@@ -645,7 +646,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
                 <div className="flex items-start justify-between gap-2">
                   <button type="button" onClick={() => void toggleDetails(item)} className="flex min-w-0 items-center gap-3 text-left">
                     <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-700"><Icon className="h-5 w-5" /></span>
-                    <span className="min-w-0"><span className="block truncate font-semibold text-slate-900">{item.naziv}</span><span className="block truncate text-xs text-slate-500">{[item.podkategorija, [item.marka, item.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ') || 'Bez kategorije i marke/modela'}</span></span>
+                    <span className="min-w-0"><span className="block truncate font-semibold text-slate-900"><span className="mr-2 text-slate-400">{index + 1}.</span>{item.naziv}</span><span className="block truncate text-xs text-slate-500">{[item.podkategorija, [item.marka, item.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ') || 'Bez kategorije i marke/modela'}</span></span>
                   </button>
                   <div className="flex gap-1">
                     <button type="button" onClick={() => openEdit(item)} className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-700" aria-label={`Uredi ${item.naziv}`}><Pencil className="h-4 w-4" /></button>

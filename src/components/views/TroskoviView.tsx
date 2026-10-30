@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Receipt, Plus, Pencil, Trash2, Euro, Search, ArrowUp, ArrowDown, ArrowUpDown, X } from 'lucide-react';
+import { Receipt, Plus, Pencil, Trash2, Euro, Search, ArrowUp, ArrowDown, ArrowUpDown, X, Building2, Trophy } from 'lucide-react';
 import type { Trosak, TrosakKategorija, Gradiliste, Kooperant, RadnoVrijeme } from '@/types';
 import {
   fetchTroskovi,
@@ -59,7 +59,7 @@ const emptyForm = {
   placen: false,
 };
 
-export function TroskoviView() {
+export function TroskoviView({ onOpenGradiliste }: { onOpenGradiliste?: (id: string) => void } = {}) {
   const [items, setItems] = useState<Trosak[]>([]);
   const [radnoVrijeme, setRadnoVrijeme] = useState<RadnoVrijeme[]>([]);
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
@@ -81,6 +81,14 @@ export function TroskoviView() {
   const [sortKey, setSortKey] = useState<SortKey>('datum');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
+  const [topSitesLimit, setTopSitesLimit] = useState<5 | 10>(() =>
+    companyStorage.getItem('tm_troskovi_top_gradilista') === '10' ? 10 : 5,
+  );
+
+  const selectTopSitesLimit = (limit: 5 | 10) => {
+    setTopSitesLimit(limit);
+    companyStorage.setItem('tm_troskovi_top_gradilista', String(limit));
+  };
 
   const load = async () => {
     setLoading(true);
@@ -213,6 +221,28 @@ export function TroskoviView() {
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [filtered]);
 
+  const topGradilista = useMemo(() => {
+    const names = new Map(gradilista.map((gradiliste) => [gradiliste.id, gradiliste.naziv]));
+    const totals = new Map<string, { id: string; naziv: string; iznos: number; brojTroskova: number }>();
+    for (const item of filtered) {
+      if (!item.gradiliste_id) continue;
+      const current = totals.get(item.gradiliste_id) ?? {
+        id: item.gradiliste_id,
+        naziv: item.gradilista?.naziv ?? names.get(item.gradiliste_id) ?? 'Nepoznato gradilište',
+        iznos: 0,
+        brojTroskova: 0,
+      };
+      current.iznos += Number(item.iznos) || 0;
+      current.brojTroskova += 1;
+      totals.set(item.gradiliste_id, current);
+    }
+    return [...totals.values()]
+      .sort((a, b) => b.iznos - a.iznos || a.naziv.localeCompare(b.naziv, 'hr'))
+      .slice(0, topSitesLimit);
+  }, [filtered, gradilista, topSitesLimit]);
+
+  const topGradilisteMax = topGradilista[0]?.iznos ?? 0;
+
   const rows = useMemo<Row[]>(() => {
     if (groupBy === 'none') return filtered.map((t) => ({ type: 'item', t }));
     const m = new Map<string, { label: string; list: Trosak[] }>();
@@ -329,6 +359,67 @@ export function TroskoviView() {
           )}
         </div>
       </div>
+
+      <section aria-labelledby="top-gradilista-title" className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 id="top-gradilista-title" className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+              <Trophy className="h-4 w-4 text-amber-500" />
+              Najskuplja gradilišta{hasFilters ? ' · filtrirano' : ''}
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500">Zbroj evidentiranih troškova i obračuna plaća</p>
+          </div>
+          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5" aria-label="Broj prikazanih gradilišta">
+            {([5, 10] as const).map((limit) => (
+              <button
+                key={limit}
+                type="button"
+                onClick={() => selectTopSitesLimit(limit)}
+                aria-pressed={topSitesLimit === limit}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium ${topSitesLimit === limit ? 'bg-white text-sky-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+              >
+                {limit}
+              </button>
+            ))}
+          </div>
+        </div>
+        {topGradilista.length === 0 ? (
+          <p className="rounded-lg bg-slate-50 px-3 py-4 text-sm text-slate-500">Nema troškova povezanih s gradilištima za odabrane filtere.</p>
+        ) : (
+          <ol className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 md:grid-cols-2">
+            {topGradilista.map((site, index) => (
+              <li key={site.id} className="min-w-0">
+                <div className="mb-1 flex min-w-0 items-center justify-between gap-3">
+                  <span className="flex min-w-0 items-center gap-2 text-sm text-slate-700">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-50 text-xs font-semibold text-sky-700">{index + 1}</span>
+                    <Building2 className="h-4 w-4 shrink-0 text-slate-400" />
+                    {onOpenGradiliste ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenGradiliste(site.id)}
+                        className="truncate text-left font-medium text-sky-700 hover:text-sky-900 hover:underline"
+                        title={`Otvori gradilište: ${site.naziv}`}
+                      >
+                        {site.naziv}
+                      </button>
+                    ) : (
+                      <span className="truncate font-medium" title={site.naziv}>{site.naziv}</span>
+                    )}
+                  </span>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">{eur(site.iznos)}</span>
+                </div>
+                <div className="ml-8 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full bg-sky-500"
+                    style={{ width: `${topGradilisteMax > 0 ? (site.iznos / topGradilisteMax) * 100 : 0}%` }}
+                  />
+                </div>
+                <p className="ml-8 mt-1 text-[11px] text-slate-400">{site.brojTroskova} stavki</p>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
 
       {/* Filteri */}
       <div className="mb-4 flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">

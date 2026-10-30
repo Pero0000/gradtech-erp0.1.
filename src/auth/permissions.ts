@@ -3,7 +3,7 @@ import type { View } from '@/components/Sidebar';
 export const MODULES = [
   { id: 'dashboard', label: 'Nadzorna ploča' },
   { id: 'gradilista', label: 'Gradilišta' },
-  { id: 'radnici', label: 'Radnici' },
+  { id: 'radnici', label: 'Djelatnici' },
   { id: 'vozila', label: 'Vozila' },
   { id: 'alat', label: 'Alat' },
   { id: 'strojevi', label: 'Strojevi' },

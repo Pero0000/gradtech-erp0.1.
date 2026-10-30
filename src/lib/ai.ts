@@ -11,13 +11,51 @@ import {
 } from '@/lib/api';
 import { loadObavijesti } from '@/lib/obavijesti';
 import { loadPostavke } from '@/lib/postavke';
-import { companyStorage } from './company';
+import { FunctionsHttpError } from '@supabase/supabase-js';
+import { supabase } from './supabase';
 
-const KEY_STORAGE = 'tm_gemini_key';
 export const MODEL = 'gemini-3-flash-preview';
 
-export const getAiKey = () => companyStorage.getItem(KEY_STORAGE) ?? '';
-export const setAiKey = (key: string) => (key ? companyStorage.setItem(KEY_STORAGE, key) : companyStorage.removeItem(KEY_STORAGE));
+interface GeminiResponse {
+  candidates?: {
+    content?: { parts?: { text?: string }[] };
+    groundingMetadata?: { groundingChunks?: { web?: { title?: string; uri?: string } }[] };
+  }[];
+  error?: string | { message?: string };
+}
+
+export class GeminiRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'GeminiRequestError';
+  }
+}
+
+export type GeminiFeature = 'assistant' | 'kooperant-invoice' | 'troskovnik-import';
+
+export async function generateGeminiContent(feature: GeminiFeature, request: Record<string, unknown>): Promise<GeminiResponse> {
+  const { data, error } = await supabase.functions.invoke<GeminiResponse>('gemini-proxy', {
+    body: { feature, request },
+  });
+  if (error) {
+    if (error instanceof FunctionsHttpError) {
+      let message = error.message;
+      try {
+        const result = await error.context.json() as { error?: string | { message?: string } };
+        if (typeof result.error === 'string') message = result.error;
+        else if (result.error?.message) message = result.error.message;
+      } catch {
+        message = error.message;
+      }
+      throw new GeminiRequestError(message, error.context.status);
+    }
+    throw new Error(error.message);
+  }
+  if (!data) throw new Error('AI servis nije vratio odgovor.');
+  if (typeof data.error === 'string') throw new Error(data.error);
+  if (data.error?.message) throw new Error(data.error.message);
+  return data;
+}
 
 export interface ChatMessage {
   role: 'user' | 'model';
@@ -74,6 +112,20 @@ export async function buildSnapshot() {
       djelatnost: k.djelatnost,
       troskovi_ukupno: sum(troskovi.filter((t) => t.kooperant_id === k.id), (t) => t.iznos),
     })),
+    stavke_racuna_kooperanata: troskovi
+      .filter((cost) => cost.kooperant_racun_id)
+      .map((cost) => ({
+        kooperant: cost.kooperanti?.naziv ?? 'Nepoznat kooperant',
+        gradiliste: cost.gradilista?.naziv ?? 'Bez gradilišta',
+        datum: cost.datum,
+        broj_racuna: cost.broj_racuna ?? null,
+        opis: cost.opis,
+        kolicina: cost.kolicina ?? null,
+        jedinica: cost.jedinica ?? null,
+        jedinicna_cijena: cost.jedinicna_cijena ?? null,
+        iznos: cost.iznos,
+        placen: Boolean(cost.placen),
+      })),
     radnici: radnici.map((r) => ({ ime: `${r.ime} ${r.prezime}`, uloga: r.uloga, status: r.status })),
     vozila: vozila.map((v) => ({ model: [v.marka, v.model].filter(Boolean).join(' '), status: v.status, kilometraza: v.kilometraza })),
     otvorene_obavijesti: obavijesti.map((o) => ({ vrsta: o.tipLabel, stavka: o.title, detalj: o.detail, datum: o.datum, hitnost: o.level })),
@@ -81,13 +133,11 @@ export async function buildSnapshot() {
 }
 
 export async function askAi(history: ChatMessage[], snapshot: unknown, webSearch: boolean): Promise<ChatMessage> {
-  const key = getAiKey();
-  if (!key) throw new Error('Nedostaje Gemini API ključ. Upiši ga u Postavke.');
-
   const system = [
     'Ti si poslovni asistent građevinske tvrtke TM Color. Odgovaraj na hrvatskom, sažeto i s konkretnim brojkama u EUR.',
     'FORMAT ODGOVORA (markdown): počni jednom kratkom rečenicom zaključka, zatim koristi kratke naslove (###) s emojijem, popise s crticama, **podebljane** ključne brojke i iznose, a za usporedbe tablice. Za status koristi ikone: ✅ dobro, ⚠️ pozor, 🔴 problem, 💰 novac, 📅 rokovi, 🏗️ gradilišta, 🚚 vozila, 👷 radnici. Završi s 💡 kratkim prijedlogom što napraviti. Ne piši dugačke odlomke.',
     'Za pitanja o firmi koristi isključivo priloženi JSON s podacima iz programa; ako podatka nema, to reci.',
+    'Kod pitanja o cijenama kooperanata koristi stavke računa iz JSON-a. Navedi naziv kooperanta, gradilište, količinu/jedinicu, jediničnu cijenu i datum kad su dostupni. Nemoj zaključivati cijenu iz opisa ako strukturirana jedinična cijena nedostaje.',
     webSearch ? 'Za vanjske informacije (cijene materijala, propisi, tržište) koristi web pretragu i navedi da su to vanjski podaci.' : 'Web pretraga je isključena.',
     `PODACI IZ PROGRAMA:\n${JSON.stringify(snapshot)}`,
   ].join('\n\n');
@@ -98,16 +148,14 @@ export async function askAi(history: ChatMessage[], snapshot: unknown, webSearch
   };
   if (webSearch) body.tools = [{ google_search: {} }];
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-    body: JSON.stringify(body),
-  });
-  const json = await response.json();
-  if (!response.ok) {
-    const message = String(json?.error?.message ?? 'Greška AI servisa.');
-    if (response.status === 429) throw new Error('Dosegnut je besplatni limit zahtjeva. Pričekaj minutu pa pokušaj ponovno.');
-    throw new Error(message);
+  let json: GeminiResponse;
+  try {
+    json = await generateGeminiContent('assistant', body);
+  } catch (reason) {
+    if (reason instanceof GeminiRequestError && reason.status === 429) {
+      throw new Error('Dosegnut je besplatni limit zahtjeva. Pričekaj minutu pa pokušaj ponovno.');
+    }
+    throw reason;
   }
   const candidate = json.candidates?.[0];
   const text = (candidate?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('').trim();

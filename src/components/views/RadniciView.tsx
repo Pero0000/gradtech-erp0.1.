@@ -185,8 +185,8 @@ export function RadniciView() {
         bonusi: form.bonusi.map((b) => ({ naziv: b.naziv.trim(), iznos: b.iznos ? parseFloat(b.iznos) : 0, tip: b.tip })),
       };
       if (editing) {
-        const updated = await updateRadnik(editing.id, payload);
-        setSelectedRadnik(updated as Radnik);
+        await updateRadnik(editing.id, payload);
+        setSelectedRadnik(null);
         const before = editing as unknown as Record<string, number | null>;
         const after = payload as unknown as Record<string, number>;
         const rows = Object.keys(polja)
@@ -256,15 +256,15 @@ export function RadniciView() {
     <div className="min-w-0 max-w-full">
       <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Radnici</h1>
-          <p className="text-sm text-slate-500 mt-1">Upravljajte radnicima i njihovim ulogama</p>
+          <h1 className="text-2xl font-bold text-slate-900">Djelatnici</h1>
+          <p className="text-sm text-slate-500 mt-1">Upravljajte djelatnicima i njihovim ulogama</p>
         </div>
         <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
           <ExportMenu
             disabled={sorted.length === 0}
             build={() => ({
-              file: 'Radnici',
-              title: 'Radnici',
+              file: 'Djelatnici',
+              title: 'Djelatnici',
               rows: sorted,
               columns: [
                 { header: 'Prezime', get: (r: Radnik) => r.prezime },
@@ -331,7 +331,7 @@ export function RadniciView() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {sorted.map((r) => {
+              {sorted.map((r, index) => {
                 const sb = statusBadge[r.status];
                 const docs = documentSummary(documents.filter((item) => item.radnik_id === r.id), todayISO());
                 return (
@@ -342,7 +342,7 @@ export function RadniciView() {
                           <HardHat className="h-4.5 w-4.5" />
                         </div>
                         <button type="button" onClick={() => setSelectedRadnik(r)} className="text-left font-medium text-slate-900 hover:text-sky-700 hover:underline">
-                          {r.ime} {r.prezime}
+                          <span className="mr-2 text-slate-400">{index + 1}.</span>{r.ime} {r.prezime}
                         </button>
                       </div>
                     </td>

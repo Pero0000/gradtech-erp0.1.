@@ -1,4 +1,4 @@
-import { getAiKey, MODEL } from './ai';
+import { generateGeminiContent, GeminiRequestError } from './ai';
 
 export interface KooperantRacunStavka {
   opis: string;
@@ -71,8 +71,6 @@ function mimeType(file: File) {
 
 export async function parseKooperantRacun(file: File): Promise<KooperantRacun> {
   validateInvoiceFile(file);
-  const key = getAiKey();
-  if (!key) throw new Error('Nedostaje Gemini API ključ. Upiši ga u Postavke.');
 
   const base64 = await toBase64(file);
   const prompt = [
@@ -95,17 +93,23 @@ export async function parseKooperantRacun(file: File): Promise<KooperantRacun> {
   };
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify(body),
-    });
-    const json = await response.json();
-    if (response.status === 429 || response.status === 503) {
-      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 3000 * (attempt + 1)));
-      continue;
+    let json: Awaited<ReturnType<typeof generateGeminiContent>>;
+    try {
+      json = await generateGeminiContent('kooperant-invoice', body);
+    } catch (reason) {
+      if (reason instanceof GeminiRequestError && (reason.status === 429 || reason.status === 503) && attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 3000 * (attempt + 1)));
+        continue;
+      }
+      throw reason;
     }
-    if (!response.ok) throw new Error(String(json?.error?.message ?? 'Greška AI servisa pri čitanju računa.'));
+    if (!json.candidates?.length) {
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 3000 * (attempt + 1)));
+        continue;
+      }
+      break;
+    }
 
     const text = (json.candidates?.[0]?.content?.parts ?? [])
       .map((part: { text?: string }) => part.text ?? '')

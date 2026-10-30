@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Bot, Globe, Loader2, Send, Sparkles, Trash2 } from 'lucide-react';
-import type { View } from '@/components/Sidebar';
-import { askAi, buildSnapshot, getAiKey, type ChatMessage } from '@/lib/ai';
+import { askAi, buildSnapshot, type ChatMessage } from '@/lib/ai';
 
 const suggestions = [
   'Koja gradilišta imaju najlošiju maržu i zašto?',
@@ -12,7 +11,7 @@ const suggestions = [
   'Koliko smo potrošili na kooperante po gradilištima?',
 ];
 
-export function AsistentView({ onNavigate }: { onNavigate: (view: View) => void }) {
+export function AsistentView() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [web, setWeb] = useState(false);
@@ -20,8 +19,6 @@ export function AsistentView({ onNavigate }: { onNavigate: (view: View) => void 
   const [error, setError] = useState<string | null>(null);
   const snapshotRef = useRef<unknown>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const hasKey = !!getAiKey();
-
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busy]);
@@ -58,12 +55,6 @@ export function AsistentView({ onNavigate }: { onNavigate: (view: View) => void 
           </button>
         )}
       </div>
-
-      {!hasKey && (
-        <div className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-          Nedostaje besplatni Gemini API ključ. <button type="button" className="font-semibold underline" onClick={() => onNavigate('postavke')}>Otvori Postavke</button> i slijedi upute.
-        </div>
-      )}
 
       <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 xl:p-4">
         {messages.length === 0 && (
@@ -115,7 +106,7 @@ export function AsistentView({ onNavigate }: { onNavigate: (view: View) => void 
           <Globe className="h-4 w-4" /> Web
         </button>
         <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Upiši pitanje…" className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm xl:flex-1" />
-        <button type="submit" disabled={busy || !input.trim() || !hasKey} className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">
+        <button type="submit" disabled={busy || !input.trim()} className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">
           <Send className="h-4 w-4" /> Pošalji
         </button>
       </form>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ClipboardList, Plus, Pencil, Trash2, Users, Calendar, AlertCircle, Printer, Bell } from 'lucide-react';
+import { ClipboardList, Plus, Pencil, Trash2, Users, Calendar, AlertCircle, Printer, Bell, History } from 'lucide-react';
 import type { RadniNalog, Gradiliste, Radnik, NalogStatus, NalogPrioritet, Rok } from '@/types';
 import {
   fetchRokoviNaloga,
@@ -86,6 +86,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [period, setPeriod] = useState<Period>(focusNalogId ? 'svi' : 'danas');
+  const [showHistory, setShowHistory] = useState(false);
   const [customDate, setCustomDate] = useState('');
   const [statusFilter, setStatusFilter] = useState<NalogStatus | 'svi'>('svi');
   const [search, setSearch] = useState('');
@@ -250,9 +251,11 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
   };
 
   const filteredItems = items.filter((n) => {
+    if (showHistory && n.status !== 'zavrsen' && n.status !== 'otkazan') return false;
     if (statusFilter !== 'svi' && n.status !== statusFilter) return false;
     const q = search.trim().toLowerCase();
     if (q && !`${n.broj} ${n.naslov} ${n.gradilista?.naziv ?? ''}`.toLowerCase().includes(q)) return false;
+    if (showHistory) return true;
     if (period === 'svi') return true;
     if (period === 'u_tijeku' || period === 'otvoren') return n.status === period;
     if (period === 'bez') return !n.rok;
@@ -286,6 +289,9 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
   }
 
   const selected = filteredItems.find((n) => n.id === selectedId) ?? filteredItems[0] ?? null;
+  const visibleStatuses: NalogStatus[] = showHistory
+    ? ['zavrsen', 'otkazan']
+    : Object.keys(statusInfo) as NalogStatus[];
 
   return (
     <div>
@@ -329,7 +335,21 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
       ) : (
         <div className="space-y-4">
           <div className="flex min-w-0 flex-col items-stretch gap-2 xl:flex-row xl:flex-wrap xl:items-center rounded-xl border border-slate-200 bg-white p-3">
-            {periodOptions.map((p) => (
+            <button
+              type="button"
+              onClick={() => {
+                setShowHistory((visible) => !visible);
+                setStatusFilter('svi');
+              }}
+              aria-pressed={showHistory}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                showHistory ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <History className="h-3.5 w-3.5" />
+              Povijest naloga
+            </button>
+            {!showHistory && periodOptions.map((p) => (
               <button
                 key={p.key}
                 onClick={() => setPeriod(p.key)}
@@ -340,7 +360,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                 {p.label}
               </button>
             ))}
-            {period === 'datum' && (
+            {!showHistory && period === 'datum' && (
               <input
                 type="date"
                 value={customDate}
@@ -353,8 +373,8 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
               onChange={(e) => setStatusFilter(e.target.value as NalogStatus | 'svi')}
               className="min-w-0 max-w-full rounded-lg border border-slate-300 px-2 py-1 text-xs xl:ml-auto"
             >
-              <option value="svi">Svi statusi</option>
-              {(Object.keys(statusInfo) as NalogStatus[]).map((s) => (
+              <option value="svi">{showHistory ? 'Svi završni statusi' : 'Svi statusi'}</option>
+              {visibleStatuses.map((s) => (
                 <option key={s} value={s}>{statusInfo[s].label}</option>
               ))}
             </select>

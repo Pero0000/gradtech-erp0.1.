@@ -1,4 +1,4 @@
-import { getAiKey, MODEL } from './ai';
+import { generateGeminiContent, GeminiRequestError } from './ai';
 
 export interface TroskovnikRedak {
   grupa: string;
@@ -45,9 +45,6 @@ const toBase64 = (file: File) =>
 const isText = (f: File) => /\.(csv|txt|tsv)$/i.test(f.name) || f.type.startsWith('text/');
 
 async function callBatch(file: File, content: { b64?: string; text?: string }, offset: number): Promise<{ stavke: TroskovnikRedak[]; imaJos: boolean }> {
-  const key = getAiKey();
-  if (!key) throw new Error('Nedostaje Gemini API ključ. Upiši ga u Postavke.');
-
   const prompt = [
     'Ovo je građevinski troškovnik. Izvuci stavke troškovnika redom kojim se pojavljuju u dokumentu.',
     `Preskoči prvih ${offset} stavki (već su učitane) i vrati sljedećih najviše ${BATCH} stavki. Ako nakon njih u dokumentu ima još stavki, postavi ima_jos na true, inače false.`,
@@ -65,17 +62,16 @@ async function callBatch(file: File, content: { b64?: string; text?: string }, o
   };
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify(body),
-    });
-    const json = await response.json();
-    if (response.status === 429 || response.status === 503) {
-      await new Promise((r) => setTimeout(r, 4000 * (attempt + 1)));
-      continue;
+    let json: Awaited<ReturnType<typeof generateGeminiContent>>;
+    try {
+      json = await generateGeminiContent('troskovnik-import', body);
+    } catch (reason) {
+      if (reason instanceof GeminiRequestError && (reason.status === 429 || reason.status === 503) && attempt < 2) {
+        await new Promise((r) => setTimeout(r, 4000 * (attempt + 1)));
+        continue;
+      }
+      throw reason;
     }
-    if (!response.ok) throw new Error(String(json?.error?.message ?? 'Greška AI servisa.'));
     const text = (json.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('');
     try {
       const parsed = JSON.parse(text) as { stavke?: Partial<TroskovnikRedak>[]; ima_jos?: boolean };

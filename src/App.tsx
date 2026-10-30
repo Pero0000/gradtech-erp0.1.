@@ -174,7 +174,6 @@ function App() {
         onDesktopEnter={openHoverSidebar}
         onDesktopLeave={closeHoverSidebarSoon}
         onMobileClose={() => setMobileNavOpen(false)}
-        onOpenPortal={() => { setPortalMode(true); setMobileNavOpen(false); }}
         counts={counts}
       />
       {autoHideSidebar && hasHoverPointer && (
@@ -188,14 +187,25 @@ function App() {
         />
       )}
       <main className={`min-h-0 min-w-0 max-w-full flex-1 ${view === 'dashboard' ? 'overflow-y-auto xl:overflow-hidden' : 'overflow-y-auto'}`}>
-        <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4 xl:hidden">
+        <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4">
           <div className="min-w-0 break-words">
             <p className="text-sm font-bold text-slate-900">GradTech · {company?.naziv}</p>
             <p className="text-xs text-slate-500">{MODULES.find((module) => module.id === view)?.label ?? 'Aplikacija'}</p>
           </div>
-          <button type="button" onClick={() => setMobileNavOpen((open) => !open)} aria-label={mobileNavOpen ? 'Zatvori navigaciju' : 'Otvori navigaciju'} aria-expanded={mobileNavOpen} className="shrink-0 rounded-lg p-2 text-slate-700 hover:bg-slate-100">
-            {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {hasWorkerPortal && (
+              <button
+                type="button"
+                onClick={() => { setPortalMode(true); setMobileNavOpen(false); }}
+                className="rounded-lg bg-sky-700 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-800"
+              >
+                Portal djelatnika
+              </button>
+            )}
+            <button type="button" onClick={() => setMobileNavOpen((open) => !open)} aria-label={mobileNavOpen ? 'Zatvori navigaciju' : 'Otvori navigaciju'} aria-expanded={mobileNavOpen} className="rounded-lg p-2 text-slate-700 hover:bg-slate-100 xl:hidden">
+              {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
+          </div>
         </header>
         <div className={`mx-auto min-w-0 w-full max-w-[2560px] px-3 py-4 sm:px-4 sm:py-6 xl:px-8 2xl:px-12 xl:py-8 ${view === 'dashboard' ? 'xl:h-full xl:min-h-0' : ''}`}>
           {!viewAuthorized && <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">Provjera prava pristupa…</p>}
@@ -222,14 +232,17 @@ function App() {
           {viewAuthorized && view === 'raspored' && (
             <RasporedView />
           )}
-          {viewAuthorized && view === 'troskovi' && <TroskoviView />}
+          {viewAuthorized && view === 'troskovi' && <TroskoviView onOpenGradiliste={canAccess('gradilista') ? (id) => {
+            setFocusGradilisteId(id);
+            setView('gradilista');
+          } : undefined} />}
           {viewAuthorized && view === 'fakture' && <FaktureView />}
           {viewAuthorized && view === 'radno_vrijeme' && <RadnoVrijemeView />}
           {viewAuthorized && view === 'radni_nalozi' && <RadniNaloziView key={focusNalogId ?? 'none'} focusNalogId={focusNalogId} />}
           {viewAuthorized && view === 'rekapitulacija' && <RekapitulacijaView />}
           {viewAuthorized && view === 'obavijesti' && <ObavijestiView onNavigate={navigate} />}
           {viewAuthorized && view === 'postavke' && <PostavkeView />}
-          {viewAuthorized && view === 'asistent' && <AsistentView onNavigate={navigate} />}
+          {viewAuthorized && view === 'asistent' && <AsistentView />}
           {viewAuthorized && view === 'korisnici' && <KorisniciView />}
         </div>
       </main>

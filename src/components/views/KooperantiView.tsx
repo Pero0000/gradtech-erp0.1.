@@ -6,6 +6,7 @@ import {
   ClipboardList,
   FileText,
   Handshake,
+  ChevronDown,
   Pencil,
   Plus,
   Search,
@@ -196,6 +197,8 @@ export function KooperantiView() {
   const [savingCost, setSavingCost] = useState(false);
   const [invoiceDraft, setInvoiceDraft] = useState<{ file: File; data: KooperantRacun } | null>(null);
   const [invoiceSiteId, setInvoiceSiteId] = useState('');
+  const [invoicePaid, setInvoicePaid] = useState(false);
+  const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
   const [analyzingInvoice, setAnalyzingInvoice] = useState(false);
   const [savingInvoice, setSavingInvoice] = useState(false);
   const [updatingOfferId, setUpdatingOfferId] = useState<string | null>(null);
@@ -409,6 +412,8 @@ export function KooperantiView() {
     setShowEngagementForm(false);
     setInvoiceDraft(null);
     setInvoiceSiteId('');
+    setInvoicePaid(false);
+    setExpandedInvoiceId(null);
     setProfileError(null);
     setDocuments([]);
     setDocumentUrls({});
@@ -575,6 +580,7 @@ export function KooperantiView() {
     setAnalyzingInvoice(true);
     setProfileError(null);
     setInvoiceDraft(null);
+    setInvoicePaid(false);
     try {
       const data = await parseKooperantRacun(file);
       setInvoiceDraft({ file, data });
@@ -637,7 +643,8 @@ export function KooperantiView() {
       return;
     }
     const datum = invoiceDraft.data.datum;
-    const invoiceNumber = invoiceDraft.data.broj_racuna ? ` · Račun ${invoiceDraft.data.broj_racuna}` : '';
+    const invoiceNumber = invoiceDraft.data.broj_racuna.trim() || null;
+    const placenoAt = invoicePaid ? new Date().toISOString().slice(0, 10) : null;
     setSavingInvoice(true);
     setProfileError(null);
     let uploadedDocument: KooperantDokument | null = null;
@@ -650,10 +657,15 @@ export function KooperantiView() {
           kategorija: 'kooperanti' as const,
           kooperant_id: selected.id,
           kooperant_racun_id: uploadedDocument!.id,
-          opis: `${item.opis.trim()}${item.kolicina > 0 ? ` · ${item.kolicina} ${item.jedinica} × ${eur(item.cijena)}` : ''}${invoiceNumber}`,
+          broj_racuna: invoiceNumber,
+          kolicina: item.kolicina || null,
+          jedinica: item.jedinica.trim() || null,
+          jedinicna_cijena: item.cijena,
+          opis: item.opis.trim(),
           iznos: Math.round(item.iznos * 100) / 100,
           datum,
-          placen: false,
+          placen: invoicePaid,
+          placeno_at: placenoAt,
         }));
         await createTroskovi(costs);
       } catch (reason) {
@@ -678,6 +690,7 @@ export function KooperantiView() {
       }
       setInvoiceDraft(null);
       setInvoiceSiteId('');
+      setInvoicePaid(false);
       await load(false);
       if (followupWarning) setProfileError(followupWarning);
     } catch (reason) {
@@ -993,32 +1006,67 @@ export function KooperantiView() {
                       const paid = group.costs.every((cost) => cost.placen);
                       const amount = group.costs.reduce((sum, cost) => sum + cost.iznos, 0);
                       return (
-                        <div key={group.key} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-                          <div className="min-w-0">
-                            <p className="truncate font-medium text-slate-800">
-                              {group.invoice ? 'Račun kooperanta' : representative.opis}
-                            </p>
-                            <p className="truncate text-xs text-slate-500">
-                              {group.invoice ? group.costs.map((cost) => cost.opis).join(' · ') : `${displayDate(representative.datum)} · ${representative.gradilista?.naziv ?? 'Bez gradilišta'}`}
-                            </p>
-                            {group.invoice && <p className="text-xs text-slate-500">{displayDate(representative.datum)} · {representative.gradilista?.naziv ?? 'Bez gradilišta'}</p>}
+                        <div key={group.key} className="py-2 text-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              {group.invoice && group.invoiceId ? (
+                                <button
+                                  type="button"
+                                  aria-expanded={expandedInvoiceId === group.invoiceId}
+                                  onClick={() => setExpandedInvoiceId((current) => current === group.invoiceId ? null : group.invoiceId)}
+                                  className="inline-flex max-w-full items-center gap-1 truncate text-left font-medium text-sky-700 hover:text-sky-900 hover:underline"
+                                >
+                                  <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${expandedInvoiceId === group.invoiceId ? 'rotate-180' : ''}`} />
+                                  Račun kooperanta{representative.broj_racuna ? ` · ${representative.broj_racuna}` : ''}
+                                </button>
+                              ) : (
+                                <p className="truncate font-medium text-slate-800">{representative.opis}</p>
+                              )}
+                              <p className="truncate text-xs text-slate-500">
+                                {displayDate(representative.datum)} · {representative.gradilista?.naziv ?? 'Bez gradilišta'}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold">{eur(amount)}</span>
+                              <Badge variant={paid ? 'green' : 'orange'}>{paid ? 'Plaćeno' : 'Otvoreno'}</Badge>
+                              {canEditCosts && <button type="button" onClick={() => void toggleCostPaid(representative)} className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50">{paid ? 'Označi otvoreno' : 'Označi plaćeno'}</button>}
+                              {canEditCosts && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPendingCostDelete(group)}
+                                  aria-label={group.invoice ? 'Izbriši cijeli račun kooperanta' : `Izbriši trošak ${representative.opis}`}
+                                  title={group.invoice ? 'Izbriši cijeli račun' : 'Izbriši trošak'}
+                                  className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-700"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold">{eur(amount)}</span>
-                            <Badge variant={paid ? 'green' : 'orange'}>{paid ? 'Plaćeno' : 'Otvoreno'}</Badge>
-                            {canEditCosts && <button type="button" onClick={() => void toggleCostPaid(representative)} className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50">{paid ? 'Označi otvoreno' : 'Označi plaćeno'}</button>}
-                            {canEditCosts && (
-                              <button
-                                type="button"
-                                onClick={() => setPendingCostDelete(group)}
-                                aria-label={group.invoice ? 'Izbriši cijeli račun kooperanta' : `Izbriši trošak ${representative.opis}`}
-                                title={group.invoice ? 'Izbriši cijeli račun' : 'Izbriši trošak'}
-                                className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-700"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            )}
-                          </div>
+                          {group.invoice && expandedInvoiceId === group.invoiceId && (
+                            <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Stavke računa ({group.costs.length})</p>
+                                {group.invoiceId && documentUrls[group.invoiceId] && (
+                                  <a href={documentUrls[group.invoiceId]} target="_blank" rel="noreferrer" className="text-xs font-medium text-sky-700 underline hover:text-sky-900">Otvori sken računa</a>
+                                )}
+                              </div>
+                              <div className="divide-y divide-slate-200">
+                                {group.costs.map((cost) => (
+                                  <div key={cost.id} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0">
+                                    <div className="min-w-0">
+                                      <p className="font-medium text-slate-800">{cost.opis}</p>
+                                      <p className="text-xs text-slate-500">
+                                        {cost.kolicina != null ? `${cost.kolicina.toLocaleString('hr-HR')} ${cost.jedinica ?? ''} · ` : ''}
+                                        {cost.jedinicna_cijena != null ? `${eur(cost.jedinicna_cijena)}${cost.jedinica ? ` / ${cost.jedinica}` : ' / jedinica'}` : 'Jedinična cijena nije spremljena'}
+                                      </p>
+                                    </div>
+                                    <span className="shrink-0 font-semibold tabular-nums text-slate-900">{eur(cost.iznos)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -1204,6 +1252,18 @@ export function KooperantiView() {
                             Zbroj stavki: <strong className="ml-1 text-slate-900">{eur(invoiceLinesTotal)}</strong>
                           </div>
                         </div>
+                        <label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={invoicePaid}
+                            onChange={(event) => setInvoicePaid(event.target.checked)}
+                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <span>
+                            Račun je već plaćen
+                            <span className="block text-xs text-slate-500">Sve stavke računa bit će spremljene kao plaćene.</span>
+                          </span>
+                        </label>
                         {invoiceDraft.data.valuta.toUpperCase() !== 'EUR' && (
                           <p className="rounded-md bg-amber-50 p-2 text-sm text-amber-800">Valuta računa je {invoiceDraft.data.valuta}. Troškovi se vode u EUR pa se ovaj račun ne može knjižiti ovim putem.</p>
                         )}
@@ -1238,7 +1298,7 @@ export function KooperantiView() {
                           </table>
                         </div>
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-xs text-slate-500">Svaka stavka sprema se kao zaseban neplaćeni trošak na odabranom gradilištu. Račun se sprema u dokumente kooperanta.</p>
+                          <p className="text-xs text-slate-500">Svaka stavka sprema se kao zaseban trošak na odabranom gradilištu. Račun se sprema u dokumente kooperanta.</p>
                           <button
                             type="button"
                             onClick={() => void saveInvoiceCosts()}
@@ -1267,21 +1327,59 @@ export function KooperantiView() {
                   <p className="text-xs text-slate-500">PDF, slike i drugi dokumenti do 20 MB po datoteci.</p>
                 </div>
                 <div className="grid gap-2 md:grid-cols-2">
-                  {selectedOtherDocuments.map((document) => (
-                    <div key={document.id} className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 p-3">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <FileText className="h-5 w-5 shrink-0 text-sky-600" />
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-slate-900">{document.naziv}</p>
-                          <p className="text-xs text-slate-500">{documentTypes.find((type) => type.value === document.vrsta)?.label} · {displayDate(document.created_at)}</p>
+                  {selectedOtherDocuments.map((document) => {
+                    const invoiceGroup = document.vrsta === 'racun'
+                      ? selectedCostGroups.find((group) => group.invoiceId === document.id)
+                      : undefined;
+                    const expanded = invoiceGroup && expandedInvoiceId === document.id;
+                    return (
+                      <div key={document.id} className="min-w-0 rounded-xl border border-slate-200 p-3">
+                        <div className="flex min-w-0 items-center justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <FileText className="h-5 w-5 shrink-0 text-sky-600" />
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-900">{document.naziv}</p>
+                              <p className="text-xs text-slate-500">{documentTypes.find((type) => type.value === document.vrsta)?.label} · {displayDate(document.created_at)}</p>
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 gap-1">
+                            {invoiceGroup && <button type="button" aria-expanded={Boolean(expanded)} onClick={() => setExpandedInvoiceId((current) => current === document.id ? null : document.id)} className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-50">{expanded ? 'Sakrij stavke' : `Stavke (${invoiceGroup.costs.length})`}</button>}
+                            {documentUrls[document.id] && <a href={documentUrls[document.id]} target="_blank" rel="noreferrer" className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-50">Otvori</a>}
+                            {canEditKooperanti && <button type="button" onClick={() => setPendingDocumentDelete(document)} aria-label={`Izbriši dokument ${document.naziv}`} className="rounded p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-700"><Trash2 className="h-4 w-4" /></button>}
+                          </div>
                         </div>
+                        {invoiceGroup && expanded && (
+                          <div className="mt-3 border-t border-slate-100 pt-3">
+                            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <Badge variant={invoiceGroup.costs.every((cost) => cost.placen) ? 'green' : 'orange'}>
+                                  {invoiceGroup.costs.every((cost) => cost.placen) ? 'Plaćeno' : 'Otvoreno'}
+                                </Badge>
+                                {canEditCosts && <button type="button" onClick={() => void toggleCostPaid(invoiceGroup.costs[0])} className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50">
+                                  {invoiceGroup.costs.every((cost) => cost.placen) ? 'Označi otvoreno' : 'Označi plaćeno'}
+                                </button>}
+                              </div>
+                              <span className="text-xs font-semibold text-slate-700">Ukupno: {eur(invoiceGroup.costs.reduce((sum, cost) => sum + cost.iznos, 0))}</span>
+                            </div>
+                            <div className="divide-y divide-slate-100">
+                              {invoiceGroup.costs.map((cost) => (
+                                <div key={cost.id} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0">
+                                  <div className="min-w-0">
+                                    <p className="font-medium text-slate-800">{cost.opis}</p>
+                                    <p className="text-xs text-slate-500">
+                                      {cost.kolicina != null ? `${cost.kolicina.toLocaleString('hr-HR')} ${cost.jedinica ?? ''} · ` : ''}
+                                      {cost.jedinicna_cijena != null ? `${eur(cost.jedinicna_cijena)}${cost.jedinica ? ` / ${cost.jedinica}` : ' / jedinica'}` : 'Jedinična cijena nije spremljena'}
+                                    </p>
+                                  </div>
+                                  <span className="shrink-0 font-semibold tabular-nums text-slate-900">{eur(cost.iznos)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div className="flex shrink-0 gap-1">
-                        {documentUrls[document.id] && <a href={documentUrls[document.id]} target="_blank" rel="noreferrer" className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-50">Otvori</a>}
-                        {canEditKooperanti && <button type="button" onClick={() => setPendingDocumentDelete(document)} aria-label={`Izbriši dokument ${document.naziv}`} className="rounded p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-700"><Trash2 className="h-4 w-4" /></button>}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 {selectedOtherDocuments.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">Dokumentacija kooperanta još nije učitana.</p>}
               </section>

@@ -161,6 +161,39 @@ function ResolvedStavkeHistory({ items, onToggle }: { items: NalogStavka[]; onTo
   );
 }
 
+function CompletedAdditionalWorkHistory({ items }: { items: GradilisteZadatak[] }) {
+  const [showHistory, setShowHistory] = useState(false);
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        aria-expanded={showHistory}
+        onClick={() => setShowHistory((open) => !open)}
+        className="mb-2 border-b-2 border-transparent px-2.5 py-2 text-xs font-semibold text-slate-600 hover:border-sky-600 hover:text-sky-800"
+      >
+        {showHistory ? 'Sakrij povijest' : `Povijest dodatnih radova (${items.length})`}
+      </button>
+      {showHistory && (
+        <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2">
+          {items.length === 0 && <p className="text-xs text-slate-400">Još nema završenih dodatnih radova.</p>}
+          {items.map((item) => {
+            const completedAt = item.gotovo_at ? new Date(item.gotovo_at) : null;
+            const completedAtLabel = completedAt && !Number.isNaN(completedAt.getTime())
+              ? completedAt.toLocaleString('hr-HR')
+              : null;
+            return (
+              <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
+                <span className="font-medium text-emerald-800">{item.naziv}</span>
+                <span className="text-xs text-emerald-700">{completedAtLabel ? `Završeno ${completedAtLabel}` : 'Završeno'}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function formatSize(bytes: number | null) {
   if (!bytes) return '';
   return bytes > 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -700,6 +733,9 @@ export function NalogIzvrsenje({
       </div>
       {([['zadatak', 'Radni zadaci', 'Nema zadataka na ovom nalogu.', 'Novi radni zadatak'], ['dodatni', 'Dodatni radovi', 'Nema dodatnih radova na ovom nalogu.', 'Novi dodatni rad']] as const).map(([vrsta, naslov, prazno, placeholder]) => {
         const lista = zadaci.filter((z) => !z.gotovo && zadatakVrsta(z) === vrsta);
+        const zavrseniDodatniRadovi = vrsta === 'dodatni'
+          ? zadaci.filter((z) => z.gotovo && zadatakVrsta(z) === 'dodatni')
+          : [];
         return (
       <div key={vrsta} className={`${hideZadaci ? 'hidden' : ''} ${modulePanelCls}`}>
         <SectionTitle icon={<ListChecks className="h-4 w-4" />}>
@@ -717,6 +753,7 @@ export function NalogIzvrsenje({
           ))}
           {lista.length === 0 && <p className="text-xs text-slate-400">{prazno}</p>}
         </div>
+        {vrsta === 'dodatni' && <CompletedAdditionalWorkHistory items={zavrseniDodatniRadovi} />}
         <div className="mt-2 flex gap-2">
           <input
             value={newZadatak[vrsta]}

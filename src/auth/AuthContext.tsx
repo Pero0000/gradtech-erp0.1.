@@ -167,7 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAdmin = profile?.approved === true && profile.is_admin;
   const isPlatformOwner = profile?.approved === true && profile.is_platform_owner;
   const isWorker = profile?.approved === true && !profile.is_admin && !profile.is_voditelj && !profile.is_platform_owner;
-  const hasWorkerPortal = profile?.approved === true && profile.radnik_id !== null && !profile.is_admin && !profile.is_platform_owner;
+  const hasWorkerPortal = profile?.approved === true && profile.radnik_id !== null;
   const canAccess = useCallback((module: AppModule, action: ModuleAction = 'view') => {
     if (company?.postavke.disabled_modules.includes(module)) return false;
     if (isAdmin) return true;

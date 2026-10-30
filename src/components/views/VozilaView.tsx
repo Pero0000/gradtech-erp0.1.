@@ -227,6 +227,7 @@ export function VozilaView() {
           : payload;
         await updateVozilo(editing.id, updatePayload);
         setModalOpen(false);
+        setSelectedVehicle(null);
       } else {
         // Nakon kreiranja ostaje otvoreno da se odmah mogu dodati dokumenti i servisi
         const created = await createVozilo(payload);
@@ -387,7 +388,7 @@ export function VozilaView() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {sortedItems.map((v) => {
+              {sortedItems.map((v, index) => {
                 const sb = statusBadge[displayStatus(v, todaysAssignments)];
                 const ns = nextServis(v, servisi);
                 const alert = servisAlert(v, servisi);
@@ -402,7 +403,7 @@ export function VozilaView() {
                 const alertCls = alert?.level === 'overdue' ? 'text-red-600 font-semibold' : alert?.level === 'soon' ? 'text-red-500 font-medium' : 'text-slate-700';
                 return (
                   <tr key={v.id} role="button" tabIndex={0} onClick={() => openDetails(v)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openDetails(v); } }} className="group cursor-pointer hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-900">{v.marka} {v.model} <span className="ml-1 text-xs text-slate-500">{v.registracija}</span></td>
+                    <td className="px-4 py-3 font-medium text-slate-900"><span className="mr-2 text-slate-400">{index + 1}.</span>{v.marka} {v.model} <span className="ml-1 text-xs text-slate-500">{v.registracija}</span></td>
                     <td className="px-4 py-3"><Badge variant="blue">{tipLabel[v.tip]}</Badge></td>
                     <td className="px-4 py-3"><Badge variant={sb.variant}>{sb.label}</Badge></td>
                     <td className="px-4 py-3"><Badge variant={warranty.tone}>{warranty.label}</Badge>{warranty.detail && <span className="mt-1 block text-xs text-slate-500">{warranty.detail}</span>}</td>
@@ -436,7 +437,7 @@ export function VozilaView() {
         </div>
       ) : (
         <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
-          {sortedItems.map((v) => {
+          {sortedItems.map((v, index) => {
             const sb = statusBadge[displayStatus(v, todaysAssignments)];
             const warranty = jamstvoInfo({
               aktivno: v.jamstvo_aktivno ?? false,
@@ -461,7 +462,7 @@ export function VozilaView() {
                       <Truck className="h-5 w-5" />
                     </div>
                     <div className="min-w-0">
-                      <h3 className="font-semibold text-slate-900 leading-tight">{v.marka} {v.model}</h3>
+                      <h3 className="font-semibold text-slate-900 leading-tight"><span className="mr-2 text-slate-400">{index + 1}.</span>{v.marka} {v.model}</h3>
                       <p className="mt-0.5 text-xs font-medium tracking-wide text-slate-500">{v.registracija}</p>
                     </div>
                   </div>

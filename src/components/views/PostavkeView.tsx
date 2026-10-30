@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Moon, Sun } from 'lucide-react';
-import { getAiKey, setAiKey } from '@/lib/ai';
 import { loadPostavke, obavijestTipovi, savePostavke, type ObavijestTip, type Postavke } from '@/lib/postavke';
 import { useAuth } from '@/auth/useAuth';
 import { DEFAULT_GRADILISTE_COLUMN_LABELS, manageCompany } from '@/lib/company';
@@ -24,7 +23,6 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (value: boolean) => v
 export function PostavkeView() {
   const { company, isAdmin, isPlatformOwner, refreshAccess } = useAuth();
   const [p, setP] = useState<Postavke>(loadPostavke);
-  const [aiKey, setAiKeyState] = useState(getAiKey);
   const [columnLabels, setColumnLabels] = useState<string[]>([...DEFAULT_GRADILISTE_COLUMN_LABELS]);
   const [savingLabels, setSavingLabels] = useState(false);
   const [labelsError, setLabelsError] = useState('');
@@ -159,15 +157,8 @@ export function PostavkeView() {
           <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="font-semibold text-slate-900">AI asistent</h2>
             <p className="mb-3 text-xs text-slate-500">
-              Besplatni Google Gemini ključ: otvori aistudio.google.com/apikey, prijavi se Google računom, klikni „Create API key” i zalijepi ga ovdje. Ključ se sprema samo u ovom pregledniku.
+              Gemini API ključ se centralno pohranjuje kao Supabase Edge Function tajna, pa AI radi na svim računalima bez spremanja ključa u preglednik. U Supabase Dashboardu otvori Project Settings → Edge Functions → Secrets i dodaj <code>GEMINI_API_KEY</code>. Ključ nemoj unositi u ovu stranicu ni slati u razgovor.
             </p>
-            <input
-              type="password"
-              value={aiKey}
-              onChange={(event) => { setAiKeyState(event.target.value); setAiKey(event.target.value.trim()); }}
-              placeholder="Gemini API ključ"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-            />
           </section>
         </div>
 

@@ -170,7 +170,7 @@ function Button({
   );
 }
 
-export function MobileWorkOrdersView() {
+export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) {
   const { profile, company, signOut } = useAuth();
   const pushError = usePushRegistration(profile?.id ?? '');
   const [workerName, setWorkerName] = useState<string | null>(null);
@@ -677,6 +677,11 @@ export function MobileWorkOrdersView() {
           <h1 className="text-lg font-bold text-slate-900">Portal djelatnika</h1>
         </div>
         <div className="flex shrink-0 gap-2">
+          {onOpenERP && (
+            <button type="button" onClick={onOpenERP} className="rounded-lg px-2 py-2 text-sm font-semibold text-sky-700 hover:bg-sky-50">
+              ERP
+            </button>
+          )}
           <button type="button" onClick={() => void refreshOrders().catch((reason: unknown) => setError(errorMessage(reason, 'Osvježavanje nije uspjelo.')))} className="rounded-lg p-2 text-slate-500" aria-label="Osvježi naloge">
             <RefreshCw className="h-5 w-5" />
           </button>

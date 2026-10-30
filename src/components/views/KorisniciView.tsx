@@ -166,7 +166,7 @@ export function KorisniciView() {
                 <div className="flex min-w-0 flex-col items-stretch justify-between gap-3 border-b border-slate-200 p-4 xl:flex-row xl:flex-wrap xl:items-center">
                   <div>
                     <h2 className="font-semibold text-slate-900">{user.email}</h2>
-                    <p className="mt-1 text-xs text-slate-500">{user.is_admin ? 'Administrator' : !user.approved ? 'Čeka odobrenje' : user.is_voditelj || user.is_platform_owner ? 'Voditelj · ERP moduli' : 'Radnik · Portal djelatnika'}{isCurrentUser ? ' · Vaš račun' : ''}</p>
+                    <p className="mt-1 text-xs text-slate-500">{user.is_admin ? 'Administrator' : !user.approved ? 'Čeka odobrenje' : user.is_voditelj || user.is_platform_owner ? user.radnik_id ? 'ERP moduli · Portal djelatnika' : 'Voditelj · ERP moduli' : 'Radnik · Portal djelatnika'}{isCurrentUser ? ' · Vaš račun' : ''}</p>
                   </div>
                   {!user.is_admin && (
                     <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
@@ -206,7 +206,7 @@ export function KorisniciView() {
                           Voditelj (pristup ERP modulima)
                           <span className="block text-xs font-normal text-slate-500">
                             {voditeljSupported
-                              ? 'Bez ove oznake korisnik vidi samo Portal djelatnika: svoje radne naloge, raspored, radno vrijeme i dokumente. Prava modula ispod vrijede samo za voditelje.'
+                              ? 'Oznaka omogućuje ERP pristup prema pravima modula. Ako je račun povezan s djelatnikom, korisnik zadržava i Portal djelatnika te može prebacivati između prikaza.'
                               : 'Pokreni migraciju 20261021110000_worker_portal.sql da bi oznaka bila dostupna.'}
                           </span>
                         </span>

@@ -79,6 +79,11 @@ export interface Oprema {
   radni_sati: number;
   servisni_interval_sati: number | null;
   servis_upozorenje_sati: number;
+  jamstvo_aktivno?: boolean;
+  jamstvo_od?: string | null;
+  jamstvo_mjeseci?: number | null;
+  jamstvo_do_radnih_sati?: number | null;
+  jamstvo_uvjeti?: string | null;
   napomena: string | null;
   created_at: string;
   updated_at: string;
@@ -239,6 +244,11 @@ export interface DnevniRasporedRadnik {
                                                                                         servis_upozorenje_km?: number;
                                                                                         servis_upozorenje_dana?: number;
                                                                                         sljedeci_servis_napomena?: string | null;
+                                                                                        jamstvo_aktivno?: boolean;
+                                                                                        jamstvo_od?: string | null;
+                                                                                        jamstvo_mjeseci?: number | null;
+                                                                                        jamstvo_do_km?: number | null;
+                                                                                        jamstvo_uvjeti?: string | null;
                                                                                           napomena: string | null;
                                                                                             created_at: string;
                                                                                               updated_at: string;

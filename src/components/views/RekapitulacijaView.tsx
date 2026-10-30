@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { companyStorage } from '@/lib/company';
+import { companyStorage, getUniversalHourlyRate } from '@/lib/company';
 import {
   FileBarChart,
   Building2,
@@ -60,10 +60,7 @@ function daysUntil(d: string): number {
 
 export function RekapitulacijaView() {
   const [tab, setTab] = useState<'pregled' | 'financije'>('pregled');
-  const [satnica, setSatnica] = useState(() => {
-    const saved = Number(companyStorage.getItem('tm_univerzalna_satnica'));
-    return saved > 0 ? saved : 18;
-  });
+  const [satnica, setSatnica] = useState(getUniversalHourlyRate);
   const [nettoPoRadnicima, setNettoPoRadnicima] = useState(() => companyStorage.getItem('tm_netto_po_radnicima') === '1');
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [selectedId, setSelectedId] = useState('');

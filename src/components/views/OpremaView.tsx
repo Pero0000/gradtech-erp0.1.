@@ -22,6 +22,7 @@ import { ExportMenu } from '@/components/ui/ExportMenu';
 import { Field, Select, TextInput, Textarea } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
 import { todayISO } from '@/lib/rokovi';
+import { jamstvoInfo } from '@/lib/jamstvo';
 
 const statusLabels: Record<OpremaStatus, string> = {
   slobodno: 'Slobodno',
@@ -68,6 +69,11 @@ const emptyForm = {
   radni_sati: '',
   servisni_interval_sati: '',
   servis_upozorenje_sati: '20',
+  jamstvo_aktivno: false,
+  jamstvo_od: '',
+  jamstvo_mjeseci: '',
+  jamstvo_do_radnih_sati: '',
+  jamstvo_uvjeti: '',
   napomena: '',
 };
 
@@ -237,6 +243,11 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
       radni_sati: String(item.radni_sati ?? ''),
       servisni_interval_sati: String(item.servisni_interval_sati ?? ''),
       servis_upozorenje_sati: String(item.servis_upozorenje_sati ?? 20),
+      jamstvo_aktivno: item.jamstvo_aktivno ?? false,
+      jamstvo_od: item.jamstvo_od ?? '',
+      jamstvo_mjeseci: item.jamstvo_mjeseci?.toString() ?? '',
+      jamstvo_do_radnih_sati: item.jamstvo_do_radnih_sati?.toString() ?? '',
+      jamstvo_uvjeti: item.jamstvo_uvjeti ?? '',
       napomena: item.napomena ?? '',
     });
     setError(null);
@@ -245,6 +256,14 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
 
   const save = async () => {
     if (!form.naziv.trim()) return;
+    if (form.jamstvo_mjeseci && (!Number.isInteger(Number(form.jamstvo_mjeseci)) || Number(form.jamstvo_mjeseci) < 1)) {
+      setError('Trajanje jamstva mora biti pozitivan cijeli broj mjeseci.');
+      return;
+    }
+    if (form.jamstvo_do_radnih_sati && (!Number.isFinite(Number(form.jamstvo_do_radnih_sati)) || Number(form.jamstvo_do_radnih_sati) < 0)) {
+      setError('Ograničenje radnih sati jamstva mora biti 0 ili veći broj.');
+      return;
+    }
     setSaving(true);
     setError(null);
     const payload = {
@@ -266,6 +285,11 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
       radni_sati: Math.max(0, Number(form.radni_sati) || 0),
       servisni_interval_sati: form.servisni_interval_sati ? Math.max(0, Number(form.servisni_interval_sati)) : null,
       servis_upozorenje_sati: Math.max(0, Number(form.servis_upozorenje_sati) || 20),
+      jamstvo_aktivno: form.jamstvo_aktivno,
+      jamstvo_od: form.jamstvo_od || null,
+      jamstvo_mjeseci: form.jamstvo_mjeseci ? parseInt(form.jamstvo_mjeseci) : null,
+      jamstvo_do_radnih_sati: form.jamstvo_do_radnih_sati ? Number(form.jamstvo_do_radnih_sati) : null,
+      jamstvo_uvjeti: form.jamstvo_uvjeti.trim() || null,
       napomena: form.napomena.trim() || null,
     };
     try {
@@ -556,7 +580,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
         <div className="min-w-0 max-w-full overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
-              <th className="px-4 py-3">Naziv / kategorija</th><th className="px-4 py-3">Inventarski broj</th><th className="px-4 py-3">Status / spremnost</th><th className="px-4 py-3">Lokacija / zadnji korisnik</th><th className="px-4 py-3">Pregled</th><th className="px-4 py-3 text-right">Nabavna vrijednost</th>
+              <th className="px-4 py-3">Naziv / kategorija</th><th className="px-4 py-3">Inventarski broj</th><th className="px-4 py-3">Status / spremnost</th><th className="px-4 py-3">Jamstvo</th><th className="px-4 py-3">Lokacija / zadnji korisnik</th><th className="px-4 py-3">Pregled</th><th className="px-4 py-3 text-right">Nabavna vrijednost</th>
               {kategorija === 'stroj' && <th className="px-4 py-3 text-right">Radni sati</th>}
               <th className="px-4 py-3 text-right">Akcije</th>
             </tr></thead>
@@ -567,6 +591,14 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
                 const readiness = readinessState(item, itemDocuments);
                 const inspection = inspectionState(itemDocuments);
                 const lastUse = itemUsage[0];
+                const warranty = jamstvoInfo({
+                  aktivno: item.jamstvo_aktivno ?? false,
+                  od: item.jamstvo_od,
+                  mjeseci: item.jamstvo_mjeseci,
+                  doVrijednosti: item.jamstvo_do_radnih_sati,
+                  trenutnaVrijednost: item.radni_sati,
+                  jedinica: 'rad. h',
+                });
                 return (
                 <tr key={item.id} className="group hover:bg-slate-50">
                   <td className="px-4 py-3">
@@ -575,6 +607,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
                   </td>
                   <td className="px-4 py-3 text-slate-600">{item.inventarski_broj || '—'}</td>
                   <td className="px-4 py-3"><Badge variant={statusVariants[item.status]}>{statusLabels[item.status]}</Badge><p className="mt-1 text-xs text-slate-600">{readiness.label}</p><p className="text-xs text-slate-500">Stanje: {conditionLabels[item.stanje]}</p></td>
+                  <td className="px-4 py-3"><Badge variant={warranty.tone}>{warranty.label}</Badge>{warranty.detail && <p className="mt-1 text-xs text-slate-500">{warranty.detail}</p>}</td>
                   <td className="px-4 py-3 text-slate-600">{itemLocation(item, itemUsage)}<p className="mt-1 text-xs text-slate-500">{lastUse?.radnici.map((worker) => `${worker.ime} ${worker.prezime}`).join(', ') || 'Bez zadnjeg korisnika'}{lastUse ? ` · ${dateLabel(lastUse.datum)}` : ''}</p></td>
                   <td className="px-4 py-3 text-slate-600">{inspection.label}</td>
                   <td className="px-4 py-3 text-right text-slate-600">{currency(item.nabavna_vrijednost)}</td>
@@ -599,6 +632,14 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
             const readiness = readinessState(item, itemDocuments);
             const inspection = inspectionState(itemDocuments);
             const lastUse = itemUsage[0];
+            const warranty = jamstvoInfo({
+              aktivno: item.jamstvo_aktivno ?? false,
+              od: item.jamstvo_od,
+              mjeseci: item.jamstvo_mjeseci,
+              doVrijednosti: item.jamstvo_do_radnih_sati,
+              trenutnaVrijednost: item.radni_sati,
+              jedinica: 'rad. h',
+            });
             return (
               <article key={item.id} className={`min-w-0 rounded-2xl border bg-white p-4 shadow-sm transition-shadow hover:shadow-md ${expandedId === item.id ? 'border-sky-300 ring-1 ring-sky-100 xl:col-span-2 2xl:col-span-3' : 'border-slate-200'}`}>
                 <div className="flex items-start justify-between gap-2">
@@ -611,7 +652,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
                     <button type="button" onClick={() => setDeleteId(item.id)} className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Obriši ${item.naziv}`}><Trash2 className="h-4 w-4" /></button>
                   </div>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2"><Badge variant={statusVariants[item.status]}>{statusLabels[item.status]}</Badge><Badge variant={item.stanje === 'osteceno' ? 'red' : item.stanje === 'novo' ? 'blue' : 'gray'}>{conditionLabels[item.stanje]}</Badge><Badge variant={statusTone(readiness.tone)}>{readiness.label}</Badge></div>
+                <div className="mt-3 flex flex-wrap gap-2"><Badge variant={statusVariants[item.status]}>{statusLabels[item.status]}</Badge><Badge variant={item.stanje === 'osteceno' ? 'red' : item.stanje === 'novo' ? 'blue' : 'gray'}>{conditionLabels[item.stanje]}</Badge><Badge variant={statusTone(readiness.tone)}>{readiness.label}</Badge><Badge variant={warranty.tone}>{warranty.label}</Badge></div>
                 <div className="mt-3 grid min-w-0 grid-cols-1 gap-2 text-xs text-slate-500 xl:grid-cols-2">
                   <span>{item.inventarski_broj ? `Inv. ${item.inventarski_broj}` : item.serijski_broj ? `Ser. ${item.serijski_broj}` : 'Bez inventarskog broja'}</span>
                   <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{itemLocation(item, itemUsage)}</span>
@@ -623,6 +664,8 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
                   {kategorija === 'stroj' && <span>Cijena sata: {currency(item.cijena_sata ?? 0)}/h</span>}
                   {kategorija === 'stroj' && item.servisni_interval_sati && <span>Servis svakih {item.servisni_interval_sati.toLocaleString('hr-HR')} h</span>}
                 </div>
+                {warranty.detail && <p className="mt-2 text-xs text-slate-500">Jamstvo: {warranty.detail}</p>}
+                {item.jamstvo_aktivno && item.jamstvo_uvjeti && <p className="mt-1 line-clamp-2 text-xs text-slate-500">Uvjeti jamstva: {item.jamstvo_uvjeti}</p>}
                 {alert && <p className="mt-3 flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-800"><AlertTriangle className="h-3.5 w-3.5" />{alert}</p>}
                 {item.napomena && <p className="mt-3 line-clamp-2 text-xs text-slate-600">{item.napomena}</p>}
                 {renderDetails(item)}
@@ -667,6 +710,20 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
             <Field label="Količina"><TextInput type="number" min="0.01" step="0.01" value={form.kolicina} onChange={(event) => setForm((previous) => ({ ...previous, kolicina: event.target.value }))} /></Field>
             <Field label="Datum nabave"><TextInput type="date" value={form.datum_nabave} onChange={(event) => setForm((previous) => ({ ...previous, datum_nabave: event.target.value }))} /></Field>
             <Field label="Nabavna vrijednost (€)"><TextInput type="number" min="0" step="0.01" value={form.nabavna_vrijednost} onChange={(event) => setForm((previous) => ({ ...previous, nabavna_vrijednost: event.target.value }))} /></Field>
+            <section className="space-y-3 rounded-lg border border-slate-200 p-3 xl:col-span-2">
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                <input type="checkbox" checked={form.jamstvo_aktivno} onChange={(event) => setForm((previous) => ({ ...previous, jamstvo_aktivno: event.target.checked }))} className="h-4 w-4 rounded border-slate-300" />
+                {kategorija === 'alat' ? 'Alat ima jamstvo' : 'Stroj ima jamstvo'}
+              </label>
+              {form.jamstvo_aktivno && <>
+                <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
+                  <Field label="Početak jamstva"><TextInput type="date" value={form.jamstvo_od} onChange={(event) => setForm((previous) => ({ ...previous, jamstvo_od: event.target.value }))} /></Field>
+                  <Field label="Trajanje (mjeseci)"><TextInput type="number" min="1" step="1" value={form.jamstvo_mjeseci} onChange={(event) => setForm((previous) => ({ ...previous, jamstvo_mjeseci: event.target.value }))} placeholder="npr. 24" /></Field>
+                  <Field label="Jamstvo do (radnih sati)"><TextInput type="number" min="0" step="0.1" value={form.jamstvo_do_radnih_sati} onChange={(event) => setForm((previous) => ({ ...previous, jamstvo_do_radnih_sati: event.target.value }))} placeholder="npr. 2000" /></Field>
+                </div>
+                <Field label="Dodatni uvjeti jamstva"><Textarea rows={2} value={form.jamstvo_uvjeti} onChange={(event) => setForm((previous) => ({ ...previous, jamstvo_uvjeti: event.target.value }))} placeholder="Ograničenja, obvezni servisi, što jamstvo pokriva…" /></Field>
+              </>}
+            </section>
             {kategorija === 'stroj' && <>
               <Field label="Cijena radnog sata (€/h)"><TextInput type="number" min="0" step="0.01" value={form.cijena_sata} onChange={(event) => setForm((previous) => ({ ...previous, cijena_sata: event.target.value }))} placeholder="npr. 45" /></Field>
               <Field label="Trenutni radni sati"><TextInput type="number" min="0" step="0.1" value={form.radni_sati} onChange={(event) => setForm((previous) => ({ ...previous, radni_sati: event.target.value }))} /></Field>

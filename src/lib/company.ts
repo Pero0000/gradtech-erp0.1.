@@ -76,6 +76,11 @@ export const companyStorage = {
   removeItem: (key: string) => localStorage.removeItem(companyStorageKey(key)),
 };
 
+export function getUniversalHourlyRate(): number {
+  const saved = Number(companyStorage.getItem('tm_univerzalna_satnica'));
+  return Number.isFinite(saved) && saved > 0 ? saved : 18;
+}
+
 export async function fetchTvrtke(): Promise<Tvrtka[]> {
   const rows = await fetchAllRows<Omit<Tvrtka, 'postavke'> & { postavke: unknown }>((from, to) => supabase.from('tvrtke')
     .select('id,naziv,oib,adresa,aktivna,postavke').order('naziv').order('id').range(from, to));

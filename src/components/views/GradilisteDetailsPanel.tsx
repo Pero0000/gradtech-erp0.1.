@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/auth/useAuth';
-import { companyStorage } from '@/lib/company';
+import { companyStorage, getUniversalHourlyRate } from '@/lib/company';
 import { downloadFile } from '@/lib/downloadFile';
 import {
   Calendar,
@@ -171,10 +171,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const [deletingPhotos, setDeletingPhotos] = useState(false);
   const [vtrDocumentUrls, setVtrDocumentUrls] = useState<Record<string, string>>({});
   const [openCostGroups, setOpenCostGroups] = useState<Set<string>>(new Set());
-  const [satnica, setSatnicaState] = useState<number>(() => {
-    const saved = Number(companyStorage.getItem('tm_univerzalna_satnica'));
-    return saved > 0 ? saved : 18;
-  });
+  const [satnica, setSatnicaState] = useState<number>(getUniversalHourlyRate);
   const [showWorkers, setShowWorkersState] = useState(() => companyStorage.getItem('tm_netto_po_radnicima') === '1');
   const [showTeren, setShowTerenState] = useState(() => companyStorage.getItem('tm_prikaz_teren') !== '0');
   const [showNight, setShowNightState] = useState(() => companyStorage.getItem('tm_prikaz_nocna') !== '0');

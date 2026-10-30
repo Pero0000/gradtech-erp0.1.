@@ -16,7 +16,7 @@ import { Field, TextInput, Select } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ExportMenu } from '@/components/ui/ExportMenu';
-import { companyStorage } from '@/lib/company';
+import { companyStorage, getUniversalHourlyRate } from '@/lib/company';
 
 const kategorijaInfo: Record<TrosakKategorija, { variant: 'blue' | 'orange' | 'green' | 'gray' | 'red'; label: string }> = {
   materijal: { variant: 'blue', label: 'Materijal' },
@@ -64,10 +64,7 @@ export function TroskoviView() {
   const [radnoVrijeme, setRadnoVrijeme] = useState<RadnoVrijeme[]>([]);
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [kooperanti, setKooperanti] = useState<Kooperant[]>([]);
-  const [satnica] = useState(() => {
-    const saved = Number(companyStorage.getItem('tm_univerzalna_satnica'));
-    return saved > 0 ? saved : 18;
-  });
+  const [satnica] = useState(getUniversalHourlyRate);
   const [nettoPoRadnicima] = useState(() => companyStorage.getItem('tm_netto_po_radnicima') === '1');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

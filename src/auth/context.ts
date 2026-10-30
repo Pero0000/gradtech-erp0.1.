@@ -13,8 +13,9 @@ export interface AuthContextValue {
   recoveryMode: boolean;
   isAdmin: boolean;
   isPlatformOwner: boolean;
-  /** Radnik bez pristupa ERP modulima — vidi samo Portal djelatnika. */
+  /** Radnik bez ERP uloge — vidi samo Portal djelatnika. */
   isWorker: boolean;
+  hasWorkerPortal: boolean;
   company: Tvrtka | null;
   canAccess: (module: AppModule, action?: ModuleAction) => boolean;
   refreshAccess: () => Promise<void>;

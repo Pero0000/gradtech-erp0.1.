@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { Capacitor } from '@capacitor/core';
 import { Menu, X } from 'lucide-react';
 import { Sidebar, type View } from '@/components/Sidebar';
 import { Dashboard } from '@/components/views/Dashboard';
@@ -37,8 +36,9 @@ import { MODULES, moduleForView } from '@/auth/permissions';
 import { MobileWorkOrdersView } from '@/components/mobile/MobileWorkOrdersView';
 
 function App() {
-  const { canAccess, isAdmin, isPlatformOwner, isWorker, company, profile, signOut } = useAuth();
+  const { canAccess, isAdmin, isPlatformOwner, isWorker, hasWorkerPortal, company, profile, signOut } = useAuth();
   const [view, setView] = useState<View>('dashboard');
+  const [portalMode, setPortalMode] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [hoverSidebarVisible, setHoverSidebarVisible] = useState(false);
   const [hasHoverPointer, setHasHoverPointer] = useState(false);
@@ -62,6 +62,10 @@ function App() {
     hoverQuery.addEventListener('change', updateHoverPointer);
     return () => hoverQuery.removeEventListener('change', updateHoverPointer);
   }, []);
+
+  useEffect(() => {
+    setPortalMode(false);
+  }, [profile?.id]);
 
   useEffect(() => {
     if (!profile?.approved || !canAccess('obavijesti')) return;
@@ -127,9 +131,8 @@ function App() {
     }, 180);
   };
 
-  // Radnici (nisu admin/voditelj) uvijek dobivaju Portal djelatnika — i na webu i na mobitelu.
-  if (isWorker || (Capacitor.isNativePlatform() && profile?.radnik_id && !isAdmin)) {
-    return <MobileWorkOrdersView />;
+  if (isWorker || (hasWorkerPortal && portalMode)) {
+    return <MobileWorkOrdersView onOpenERP={isWorker ? undefined : () => setPortalMode(false)} />;
   }
 
   const navigate = (nextView: View) => {
@@ -171,6 +174,7 @@ function App() {
         onDesktopEnter={openHoverSidebar}
         onDesktopLeave={closeHoverSidebarSoon}
         onMobileClose={() => setMobileNavOpen(false)}
+        onOpenPortal={() => { setPortalMode(true); setMobileNavOpen(false); }}
         counts={counts}
       />
       {autoHideSidebar && hasHoverPointer && (

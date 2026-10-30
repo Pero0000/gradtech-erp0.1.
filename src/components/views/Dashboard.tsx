@@ -21,7 +21,7 @@ import {
 } from '@/lib/api';
 import { izracunajFinancijskeRedove, prazniFinancijskiFilteri } from '@/lib/financijskaRekapitulacija';
 import { loadObavijesti, relativeLabel, type Obavijest, type ObavijestLevel } from '@/lib/obavijesti';
-import { companyStorage } from '@/lib/company';
+import { companyStorage, getUniversalHourlyRate } from '@/lib/company';
 import { loadPostavke } from '@/lib/postavke';
 import { todayISO } from '@/lib/rokovi';
 import { Badge } from '@/components/ui/Badge';
@@ -151,8 +151,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
 
   const financijskiRedovi = useMemo(() => {
     if (!data) return [];
-    const savedRate = Number(companyStorage.getItem('tm_univerzalna_satnica'));
-    const satnica = Number.isFinite(savedRate) && savedRate > 0 ? savedRate : 0;
+    const satnica = getUniversalHourlyRate();
     const nettoPoRadnicima = companyStorage.getItem('tm_netto_po_radnicima') === '1';
     return izracunajFinancijskeRedove(data.gradilista, data.financije, prazniFinancijskiFilteri, satnica, nettoPoRadnicima);
   }, [data]);
@@ -171,8 +170,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   const naplacenoMjesec = faktureMjesec.filter((f) => f.status === 'placena').reduce((sum, f) => sum + iznosFakture(f), 0);
   const troskoviMjesec = troskovi.filter((t) => dateKey(t.datum).startsWith(mjesec)).reduce((sum, t) => sum + t.iznos, 0)
     + financije.radnoVrijeme.filter((rv) => dateKey(rv.datum).startsWith(mjesec)).reduce((sum, rv) => {
-      const savedRate = Number(companyStorage.getItem('tm_univerzalna_satnica'));
-      const satnica = Number.isFinite(savedRate) && savedRate > 0 ? savedRate : 0;
+      const satnica = getUniversalHourlyRate();
       const netto = companyStorage.getItem('tm_netto_po_radnicima') === '1';
       return sum + rv.sati * (netto ? rv.radnici?.cijena_sata ?? satnica : satnica);
     }, 0);

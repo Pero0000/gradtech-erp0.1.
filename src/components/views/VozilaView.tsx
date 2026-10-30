@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Truck, Plus, Pencil, Trash2, Gauge, Calendar, Users, Weight, LayoutGrid, Table2, ArrowDown, ArrowUp, ArrowUpDown, RefreshCw } from 'lucide-react';
 import type { DnevniRasporedGradiliste, Vozilo, VoziloStatus, VoziloTip, VoziloDokument } from '@/types';
 import { servisAlert, nextServis } from '@/lib/servis';
+import { jamstvoInfo } from '@/lib/jamstvo';
 import { AlertTriangle } from 'lucide-react';
 import { VoziloDokumenti } from '@/components/views/VoziloDokumenti';
 import { fetchVozila, createVozilo, updateVozilo, deleteVozilo, fetchSviServisi, fetchDnevniRaspored, recalculateVehicleKmCosts } from '@/lib/api';
@@ -63,6 +64,11 @@ const emptyForm = {
   servis_upozorenje_km: '1000',
   servis_upozorenje_dana: '30',
   sljedeci_servis_napomena: '',
+  jamstvo_aktivno: false,
+  jamstvo_od: '',
+  jamstvo_mjeseci: '',
+  jamstvo_do_km: '',
+  jamstvo_uvjeti: '',
   napomena: '',
 };
 
@@ -141,6 +147,11 @@ export function VozilaView() {
       servis_upozorenje_km: (v.servis_upozorenje_km ?? 1000).toString(),
       servis_upozorenje_dana: (v.servis_upozorenje_dana ?? 30).toString(),
       sljedeci_servis_napomena: v.sljedeci_servis_napomena ?? '',
+      jamstvo_aktivno: v.jamstvo_aktivno ?? false,
+      jamstvo_od: v.jamstvo_od ?? '',
+      jamstvo_mjeseci: v.jamstvo_mjeseci?.toString() ?? '',
+      jamstvo_do_km: v.jamstvo_do_km?.toString() ?? '',
+      jamstvo_uvjeti: v.jamstvo_uvjeti ?? '',
       napomena: v.napomena ?? '',
     });
     setModalOpen(true);
@@ -172,7 +183,16 @@ export function VozilaView() {
 
   const save = async () => {
     if (!form.registracija.trim() || !form.marka.trim()) return;
+    if (form.jamstvo_mjeseci && (!Number.isInteger(Number(form.jamstvo_mjeseci)) || Number(form.jamstvo_mjeseci) < 1)) {
+      setError('Trajanje jamstva mora biti pozitivan cijeli broj mjeseci.');
+      return;
+    }
+    if (form.jamstvo_do_km && (!Number.isInteger(Number(form.jamstvo_do_km)) || Number(form.jamstvo_do_km) < 0)) {
+      setError('Ograničenje kilometraže jamstva mora biti cijeli broj 0 ili veći.');
+      return;
+    }
     setSaving(true);
+    setError(null);
     try {
       const payload = {
         registracija: form.registracija.trim(),
@@ -193,10 +213,19 @@ export function VozilaView() {
         servis_upozorenje_km: form.servis_upozorenje_km ? parseInt(form.servis_upozorenje_km) : 1000,
         servis_upozorenje_dana: form.servis_upozorenje_dana ? parseInt(form.servis_upozorenje_dana) : 30,
         sljedeci_servis_napomena: form.sljedeci_servis_napomena.trim() || null,
+        jamstvo_aktivno: form.jamstvo_aktivno,
+        jamstvo_od: form.jamstvo_od || null,
+        jamstvo_mjeseci: form.jamstvo_mjeseci ? parseInt(form.jamstvo_mjeseci) : null,
+        jamstvo_do_km: form.jamstvo_do_km ? parseInt(form.jamstvo_do_km) : null,
+        jamstvo_uvjeti: form.jamstvo_uvjeti.trim() || null,
         napomena: form.napomena.trim() || null,
       };
       if (editing) {
-        await updateVozilo(editing.id, payload);
+        const { cijena_km, ...otherUpdates } = payload;
+        const updatePayload = Number(cijena_km) === Number(editing.cijena_km ?? 0)
+          ? otherUpdates
+          : payload;
+        await updateVozilo(editing.id, updatePayload);
         setModalOpen(false);
       } else {
         // Nakon kreiranja ostaje otvoreno da se odmah mogu dodati dokumenti i servisi
@@ -345,6 +374,7 @@ export function VozilaView() {
                 <SortTh k="vozilo" label="Vozilo" />
                 <SortTh k="tip" label="Tip" />
                 <SortTh k="status" label="Status" />
+                <th className="px-4 py-3 text-left">Jamstvo</th>
                 <SortTh k="kilometraza" label="Km" right />
                 <SortTh k="godina" label="Godina" right />
                 <SortTh k="mjesta" label="Mjesta" right />
@@ -361,12 +391,21 @@ export function VozilaView() {
                 const sb = statusBadge[displayStatus(v, todaysAssignments)];
                 const ns = nextServis(v, servisi);
                 const alert = servisAlert(v, servisi);
+                const warranty = jamstvoInfo({
+                  aktivno: v.jamstvo_aktivno ?? false,
+                  od: v.jamstvo_od,
+                  mjeseci: v.jamstvo_mjeseci,
+                  doVrijednosti: v.jamstvo_do_km,
+                  trenutnaVrijednost: v.kilometraza,
+                  jedinica: 'km',
+                });
                 const alertCls = alert?.level === 'overdue' ? 'text-red-600 font-semibold' : alert?.level === 'soon' ? 'text-red-500 font-medium' : 'text-slate-700';
                 return (
                   <tr key={v.id} role="button" tabIndex={0} onClick={() => openDetails(v)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openDetails(v); } }} className="group cursor-pointer hover:bg-slate-50">
                     <td className="px-4 py-3 font-medium text-slate-900">{v.marka} {v.model} <span className="ml-1 text-xs text-slate-500">{v.registracija}</span></td>
                     <td className="px-4 py-3"><Badge variant="blue">{tipLabel[v.tip]}</Badge></td>
                     <td className="px-4 py-3"><Badge variant={sb.variant}>{sb.label}</Badge></td>
+                    <td className="px-4 py-3"><Badge variant={warranty.tone}>{warranty.label}</Badge>{warranty.detail && <span className="mt-1 block text-xs text-slate-500">{warranty.detail}</span>}</td>
                     <td className="px-4 py-3 text-right text-slate-600">{v.kilometraza.toLocaleString('hr-HR')}</td>
                     <td className="px-4 py-3 text-right text-slate-600">{v.godina_proizvodnje ?? '—'}</td>
                     <td className="px-4 py-3 text-right text-slate-600">{v.broj_mjesta}</td>
@@ -399,6 +438,14 @@ export function VozilaView() {
         <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
           {sortedItems.map((v) => {
             const sb = statusBadge[displayStatus(v, todaysAssignments)];
+            const warranty = jamstvoInfo({
+              aktivno: v.jamstvo_aktivno ?? false,
+              od: v.jamstvo_od,
+              mjeseci: v.jamstvo_mjeseci,
+              doVrijednosti: v.jamstvo_do_km,
+              trenutnaVrijednost: v.kilometraza,
+              jedinica: 'km',
+            });
             return (
               <div
                 key={v.id}
@@ -439,6 +486,7 @@ export function VozilaView() {
                 <div className="flex items-center gap-2 mb-3">
                   <Badge variant="blue">{tipLabel[v.tip]}</Badge>
                   <Badge variant={sb.variant}>{sb.label}</Badge>
+                  <Badge variant={warranty.tone}>{warranty.label}</Badge>
                 </div>
 
                 <div className="flex flex-wrap gap-4 text-xs text-slate-500">
@@ -467,6 +515,8 @@ export function VozilaView() {
                     Masa: {v.masa_kg ? `${v.masa_kg.toLocaleString('hr-HR')} kg` : '—'}
                   </span>
                 </div>
+                {warranty.detail && <p className="mt-2 text-xs text-slate-500">Jamstvo: {warranty.detail}</p>}
+                {v.jamstvo_aktivno && v.jamstvo_uvjeti && <p className="mt-1 line-clamp-2 text-xs text-slate-500">Uvjeti jamstva: {v.jamstvo_uvjeti}</p>}
 
                 {(() => {
                   const alert = servisAlert(v, servisi);
@@ -671,6 +721,20 @@ export function VozilaView() {
             />
             <p className="mt-1 text-xs text-slate-500">Popis ostaje uz vozilo dok ga ne promijeniš ili obrišeš.</p>
           </Field>
+          <section className="space-y-3 rounded-lg border border-slate-200 p-3">
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input type="checkbox" checked={form.jamstvo_aktivno} onChange={(event) => setForm((previous) => ({ ...previous, jamstvo_aktivno: event.target.checked }))} className="h-4 w-4 rounded border-slate-300" />
+              Vozilo ima jamstvo
+            </label>
+            {form.jamstvo_aktivno && <>
+              <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
+                <Field label="Početak jamstva"><TextInput type="date" value={form.jamstvo_od} onChange={(event) => setForm((previous) => ({ ...previous, jamstvo_od: event.target.value }))} /></Field>
+                <Field label="Trajanje (mjeseci)"><TextInput type="number" min="1" step="1" value={form.jamstvo_mjeseci} onChange={(event) => setForm((previous) => ({ ...previous, jamstvo_mjeseci: event.target.value }))} placeholder="npr. 24" /></Field>
+                <Field label="Jamstvo do kilometraže (km)"><TextInput type="number" min="0" step="1" value={form.jamstvo_do_km} onChange={(event) => setForm((previous) => ({ ...previous, jamstvo_do_km: event.target.value }))} placeholder="npr. 100000" /></Field>
+              </div>
+              <Field label="Dodatni uvjeti jamstva"><Textarea rows={2} value={form.jamstvo_uvjeti} onChange={(event) => setForm((previous) => ({ ...previous, jamstvo_uvjeti: event.target.value }))} placeholder="Ograničenja, obvezni servisi, što jamstvo pokriva…" /></Field>
+            </>}
+          </section>
           </div>
           {editing ? (
             <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/50 p-4">

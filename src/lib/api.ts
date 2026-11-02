@@ -5,6 +5,7 @@ import { calculateDailyVehicleKmCosts } from './vehicleKmCosts';
 import { requireCompany } from './company';
 import { fetchAllRows } from './pagination';
 import { todayISO } from './rokovi';
+import { compressPhotoForUpload } from './imageCompression';
 import type {
   VoziloDokument,
   OdsustvoVrsta,
@@ -1244,6 +1245,22 @@ export async function updateKooperant(id: string, k: Partial<KooperantInput>) {
   return data as Kooperant;
 }
 
+export async function updateKooperantTimelineColor(id: string, color: string) {
+  const { data, error } = await supabase
+    .from('kooperanti')
+    .update({ timeline_color: color, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) {
+    if (error.code === '42703' || error.code === 'PGRST204') {
+      throw new Error('Pokreni migraciju 20261107190000_kooperant_timeline_color.sql u Supabase SQL editoru.');
+    }
+    throwActionableDbError(error, 'kooperanti');
+  }
+  return data as Kooperant;
+}
+
 export async function deleteKooperant(id: string) {
   const { error } = await supabase.from('kooperanti').delete().eq('id', id);
   if (error) throwActionableDbError(error, 'kooperanti');
@@ -1261,7 +1278,7 @@ export async function fetchTroskovi(): Promise<Trosak[]> {
 export async function fetchKooperantAngazmani(kooperantId?: string): Promise<KooperantAngazman[]> {
   let query = supabase
     .from('kooperant_angazmani')
-    .select('*, gradilista:gradiliste_id ( id, naziv, status, datum_pocetka, datum_zavrsetka, ugovorena_vrijednost )')
+    .select('*, gradilista:gradiliste_id ( id, naziv, status, datum_pocetka, datum_zavrsetka, ugovorena_vrijednost ), kooperanti:kooperant_id ( id, naziv )')
     .order('datum_pocetka', { ascending: false });
   if (kooperantId) query = query.eq('kooperant_id', kooperantId);
   const { data, error } = await query;
@@ -1278,7 +1295,7 @@ export async function saveKooperantAngazman(
     ? supabase.from('kooperant_angazmani').update(values).eq('id', id)
     : supabase.from('kooperant_angazmani').upsert(values, { onConflict: 'company_id,kooperant_id,gradiliste_id' });
   const { data, error } = await query
-    .select('*, gradilista:gradiliste_id ( id, naziv, status, datum_pocetka, datum_zavrsetka, ugovorena_vrijednost )')
+    .select('*, gradilista:gradiliste_id ( id, naziv, status, datum_pocetka, datum_zavrsetka, ugovorena_vrijednost ), kooperanti:kooperant_id ( id, naziv )')
     .single();
   if (error) throw error;
   return data as KooperantAngazman;
@@ -2210,13 +2227,12 @@ export async function setNalogZavrsen(
   if (fetchError) throw fetchError;
   if (bezIzvrsenja && (
     !zavrsen
-    || (nalog.mobile_status
-      ? nalog.mobile_status !== 'dodijeljen' || nalog.status === 'zavrsen' || nalog.status === 'otkazan'
-      : nalog.status !== 'otvoren')
+    || nalog.status === 'zavrsen'
+    || nalog.status === 'otkazan'
   )) {
-    throw new Error('Bez izvršenja može se završiti samo otvoren nalog ili poslan nalog na kojem djelatnik još nije započeo rad.');
+    throw new Error('Bez izvršenja može se završiti samo otvoren nalog koji još nije zaključen ili otkazan.');
   }
-  if (zavrsen && !bezPotvrdeDjelatnika && (nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku')) {
+  if (zavrsen && !bezPotvrdeDjelatnika && !bezIzvrsenja && (nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku')) {
     throw new Error('Djelatnici još rade na nalogu. Zaključivanje je moguće tek nakon što poslovođa preda završni izvještaj.');
   }
   const mobileStatus = nalog.mobile_status === 'predan' || nalog.mobile_status === 'odobren'
@@ -2553,17 +2569,22 @@ export interface NalogFoto {
   id: string;
   nalog_id: string;
   putanja: string;
+  thumbnail_path: string | null;
   naziv: string | null;
   url: string;
+  thumbnailUrl: string;
 }
 
 export async function fetchNalogFoto(nalogId: string): Promise<NalogFoto[]> {
   const { data, error } = await supabase.from('radni_nalozi_foto').select('*').eq('nalog_id', nalogId).order('created_at');
   if (error) throw error;
-  return Promise.all((data ?? []).map(async (f: any) => ({
-    ...f,
-    url: await getPrivateFileUrl(f.putanja),
-  })));
+  return Promise.all((data ?? []).map(async (foto: NalogFoto) => {
+    const [url, thumbnailUrl] = await Promise.all([
+      getPrivateFileUrl(foto.putanja),
+      getPrivateFileUrl(foto.thumbnail_path ?? foto.putanja),
+    ]);
+    return { ...foto, url, thumbnailUrl };
+  }));
 }
 
 export interface GradilisteRadniNalogFoto extends NalogFoto {
@@ -2583,7 +2604,7 @@ export async function fetchGradilisteRadniNalogFoto(gradilisteId: string): Promi
   const brojNaloga = new Map(nalozi.map((nalog) => [nalog.id, { broj: nalog.broj, naslov: nalog.naslov }]));
   const { data, error } = await supabase
     .from('radni_nalozi_foto')
-    .select('id, nalog_id, putanja, naziv, created_at')
+    .select('id, nalog_id, putanja, thumbnail_path, naziv, created_at')
     .in('nalog_id', nalozi.map((nalog) => nalog.id))
     .order('created_at', { ascending: false });
   if (error) throw error;
@@ -2593,45 +2614,105 @@ export async function fetchGradilisteRadniNalogFoto(gradilisteId: string): Promi
     nalog_broj: brojNaloga.get(foto.nalog_id)?.broj ?? '',
     nalog_naslov: brojNaloga.get(foto.nalog_id)?.naslov ?? null,
     url: await getPrivateFileUrl(foto.putanja),
+    thumbnailUrl: await getPrivateFileUrl(foto.thumbnail_path ?? foto.putanja),
   })));
 }
 
-async function spremiNaGradiliste(nalogId: string, putanja: string, naziv: string, velicina: number | null, vrsta: 'dokument' | 'slika') {
+async function spremiNaGradiliste(nalogId: string, putanja: string, naziv: string, velicina: number | null, vrsta: 'dokument' | 'slika', thumbnailPath: string | null = null): Promise<string | null> {
   try {
-    const { data } = await supabase.from('radni_nalozi').select('gradiliste_id').eq('id', nalogId).single();
-    if (!data?.gradiliste_id) return;
-    await supabase.from('gradiliste_dokumenti').insert({ gradiliste_id: data.gradiliste_id, vrsta, putanja, naziv, velicina });
-  } catch {
-    // kopiranje na gradilište ne smije srušiti upload na nalog
+    const { data, error: nalogError } = await supabase.from('radni_nalozi').select('gradiliste_id').eq('id', nalogId).single();
+    if (nalogError) throw nalogError;
+    if (!data?.gradiliste_id) return null;
+    const { error } = await supabase.from('gradiliste_dokumenti').insert({
+      gradiliste_id: data.gradiliste_id,
+      vrsta,
+      putanja,
+      thumbnail_path: thumbnailPath,
+      naziv,
+      velicina,
+    });
+    if (error) throw error;
+    return null;
+  } catch (reason) {
+    return `Datoteka je spremljena na radni nalog, ali nije povezana s gradilištem: ${apiErrorMessage(reason)}`;
   }
 }
 
 async function datotekaJosKoristena(putanja: string) {
   const [g, d, f] = await Promise.all([
-    supabase.from('gradiliste_dokumenti').select('id', { count: 'exact', head: true }).eq('putanja', putanja),
+    supabase.from('gradiliste_dokumenti').select('id', { count: 'exact', head: true }).or(`putanja.eq.${putanja},thumbnail_path.eq.${putanja}`),
     supabase.from('radni_nalozi_dokumenti').select('id', { count: 'exact', head: true }).eq('putanja', putanja),
-    supabase.from('radni_nalozi_foto').select('id', { count: 'exact', head: true }).eq('putanja', putanja),
+    supabase.from('radni_nalozi_foto').select('id', { count: 'exact', head: true }).or(`putanja.eq.${putanja},thumbnail_path.eq.${putanja}`),
   ]);
+  if (g.error) throw g.error;
+  if (d.error) throw d.error;
+  if (f.error) throw f.error;
   return (g.count ?? 0) + (d.count ?? 0) + (f.count ?? 0) > 0;
 }
 
-export async function uploadNalogFoto(nalogId: string, file: File, copyToGradiliste = true) {
-  const ext = file.name.includes('.') ? file.name.split('.').pop() : 'jpg';
-  const putanja = `${nalogId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const { error: upError } = await supabase.storage.from('nalozi-foto').upload(putanja, file, { contentType: file.type });
-  if (upError) throw upError;
-  const { error } = await supabase.from('radni_nalozi_foto').insert({ nalog_id: nalogId, putanja, naziv: file.name });
+async function removeUnusedPhotoFiles(paths: (string | null | undefined)[]) {
+  for (const path of new Set(paths.filter((item): item is string => Boolean(item)))) {
+    if (await datotekaJosKoristena(path)) continue;
+    const { error } = await supabase.storage.from('nalozi-foto').remove([path]);
+    if (error) throw error;
+  }
+}
+
+async function removeUploadedPhotoFiles(paths: (string | null | undefined)[]) {
+  const files = [...new Set(paths.filter((item): item is string => Boolean(item)))];
+  if (files.length === 0) return;
+  const { error } = await supabase.storage.from('nalozi-foto').remove(files);
+  if (error) throw error;
+}
+
+export async function uploadNalogFoto(nalogId: string, file: File, copyToGradiliste = true): Promise<string | null> {
+  const compressed = await compressPhotoForUpload(file);
+  const basePath = `${nalogId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const putanja = `${basePath}.webp`;
+  const thumbnailPath = `${basePath}-thumbnail.webp`;
+  const bucket = supabase.storage.from('nalozi-foto');
+  const { error: imageError } = await bucket.upload(putanja, compressed.image, { contentType: 'image/webp' });
+  if (imageError) throw imageError;
+  const { error: thumbnailError } = await bucket.upload(thumbnailPath, compressed.thumbnail, { contentType: 'image/webp' });
+  if (thumbnailError) {
+    try {
+      await removeUploadedPhotoFiles([putanja]);
+    } catch (cleanupReason) {
+      throw new Error(`${thumbnailError.message}; nije moguće očistiti učitanu fotografiju: ${apiErrorMessage(cleanupReason)}`);
+    }
+    throw thumbnailError;
+  }
+  const { error } = await supabase.from('radni_nalozi_foto').insert({
+    nalog_id: nalogId,
+    putanja,
+    thumbnail_path: thumbnailPath,
+    naziv: file.name,
+  });
   if (error) {
-    await supabase.storage.from('nalozi-foto').remove([putanja]);
+    try {
+      await removeUploadedPhotoFiles([putanja, thumbnailPath]);
+    } catch (cleanupReason) {
+      throw new Error(`${error.message}; nije moguće očistiti učitane fotografije: ${apiErrorMessage(cleanupReason)}`);
+    }
     throw error;
   }
-  if (copyToGradiliste) await spremiNaGradiliste(nalogId, putanja, file.name, file.size, 'slika');
+  if (copyToGradiliste) {
+    return spremiNaGradiliste(
+      nalogId,
+      putanja,
+      file.name,
+      compressed.image.size + compressed.thumbnail.size,
+      'slika',
+      thumbnailPath,
+    );
+  }
+  return null;
 }
 
 export async function deleteNalogFoto(foto: NalogFoto) {
   const { error } = await supabase.from('radni_nalozi_foto').delete().eq('id', foto.id);
   if (error) throw error;
-  if (!(await datotekaJosKoristena(foto.putanja))) await supabase.storage.from('nalozi-foto').remove([foto.putanja]);
+  await removeUnusedPhotoFiles([foto.putanja, foto.thumbnail_path]);
 }
 
 export type StavkaTip = 'materijal' | 'alat' | 'stroj';
@@ -2711,7 +2792,7 @@ export async function fetchNalogDokumenti(nalogId: string): Promise<NalogDokumen
   })));
 }
 
-export async function uploadNalogDokument(nalogId: string, file: File) {
+export async function uploadNalogDokument(nalogId: string, file: File): Promise<string | null> {
   const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
   const putanja = `${nalogId}/dokumenti/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
   const { error: upError } = await supabase.storage.from('nalozi-foto').upload(putanja, file, { contentType: file.type || undefined });
@@ -2721,7 +2802,7 @@ export async function uploadNalogDokument(nalogId: string, file: File) {
     await supabase.storage.from('nalozi-foto').remove([putanja]);
     throw error;
   }
-  await spremiNaGradiliste(nalogId, putanja, file.name, file.size, 'dokument');
+  return spremiNaGradiliste(nalogId, putanja, file.name, file.size, 'dokument');
 }
 
 export async function deleteNalogDokument(d: NalogDokument) {
@@ -2825,28 +2906,62 @@ export interface GradilisteDokument {
   gradiliste_id: string;
   vrsta: 'dokument' | 'slika';
   putanja: string;
+  thumbnail_path: string | null;
   naziv: string;
   velicina: number | null;
   url: string;
+  thumbnailUrl: string;
 }
 
 export async function fetchGradilisteDokumenti(gradilisteId: string): Promise<GradilisteDokument[]> {
   const { data, error } = await supabase.from('gradiliste_dokumenti').select('*').eq('gradiliste_id', gradilisteId).order('created_at');
   if (error) throw error;
-  return Promise.all((data ?? []).map(async (d: any) => ({
-    ...d,
-    url: await getPrivateFileUrl(d.putanja),
-  })));
+  return Promise.all((data ?? []).map(async (document: GradilisteDokument) => {
+    const [url, thumbnailUrl] = await Promise.all([
+      getPrivateFileUrl(document.putanja),
+      getPrivateFileUrl(document.thumbnail_path ?? document.putanja),
+    ]);
+    return { ...document, url, thumbnailUrl };
+  }));
 }
 
 export async function uploadGradilisteDokument(gradilisteId: string, file: File, vrsta: 'dokument' | 'slika') {
+  const optimized = vrsta === 'slika' ? await compressPhotoForUpload(file) : null;
   const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
-  const putanja = `gradiliste/${gradilisteId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
-  const { error: upError } = await supabase.storage.from('nalozi-foto').upload(putanja, file, { contentType: file.type || undefined });
+  const uniquePath = `gradiliste/${gradilisteId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const baseName = safeName.replace(/\.[^.]+$/, '');
+  const putanja = optimized ? `${uniquePath}-${baseName}.webp` : `${uniquePath}-${safeName}`;
+  const thumbnailPath = optimized ? `${uniquePath}-${baseName}-thumbnail.webp` : null;
+  const bucket = supabase.storage.from('nalozi-foto');
+  const { error: upError } = await bucket.upload(putanja, optimized?.image ?? file, {
+    contentType: optimized ? 'image/webp' : file.type || undefined,
+  });
   if (upError) throw upError;
-  const { error } = await supabase.from('gradiliste_dokumenti').insert({ gradiliste_id: gradilisteId, vrsta, putanja, naziv: file.name, velicina: file.size });
+  if (optimized && thumbnailPath) {
+    const { error: thumbnailError } = await bucket.upload(thumbnailPath, optimized.thumbnail, { contentType: 'image/webp' });
+    if (thumbnailError) {
+      try {
+        await removeUploadedPhotoFiles([putanja]);
+      } catch (cleanupReason) {
+        throw new Error(`${thumbnailError.message}; nije moguće očistiti učitanu fotografiju: ${apiErrorMessage(cleanupReason)}`);
+      }
+      throw thumbnailError;
+    }
+  }
+  const { error } = await supabase.from('gradiliste_dokumenti').insert({
+    gradiliste_id: gradilisteId,
+    vrsta,
+    putanja,
+    thumbnail_path: thumbnailPath,
+    naziv: file.name,
+    velicina: optimized ? optimized.image.size + optimized.thumbnail.size : file.size,
+  });
   if (error) {
-    await supabase.storage.from('nalozi-foto').remove([putanja]);
+    try {
+      await removeUploadedPhotoFiles([putanja, thumbnailPath]);
+    } catch (cleanupReason) {
+      throw new Error(`${error.message}; nije moguće očistiti učitane datoteke: ${apiErrorMessage(cleanupReason)}`);
+    }
     throw error;
   }
 }
@@ -2854,7 +2969,7 @@ export async function uploadGradilisteDokument(gradilisteId: string, file: File,
 export async function deleteGradilisteDokument(d: GradilisteDokument) {
   const { error } = await supabase.from('gradiliste_dokumenti').delete().eq('id', d.id);
   if (error) throw error;
-  if (!(await datotekaJosKoristena(d.putanja))) await supabase.storage.from('nalozi-foto').remove([d.putanja]);
+  await removeUnusedPhotoFiles([d.putanja, d.thumbnail_path]);
 }
 
 export async function fetchZakljuceniNalozi(ids: string[]): Promise<string[]> {
@@ -2945,10 +3060,31 @@ export async function fetchRekapitulacija(gradilisteId: string) {
 export async function fetchGradilisteZadaci(gradilisteId: string): Promise<GradilisteZadatak[]> {
   const { data, error } = await supabase
     .from('gradiliste_zadaci')
-    .select('*')
+    .select('*, kooperanti:kooperant_id ( id, naziv )')
     .eq('gradiliste_id', gradilisteId)
     .order('created_at', { ascending: true });
-  if (error) throw error;
+  if (error) {
+    if (error.code === '42703' || error.code === 'PGRST200') {
+      throw new Error('Pokreni migraciju 20261107170000_gradiliste_zadaci_kooperant.sql u Supabase SQL editoru.');
+    }
+    throw error;
+  }
+  return (data ?? []) as GradilisteZadatak[];
+}
+
+export async function fetchTerminskiPlanZadaci(): Promise<GradilisteZadatak[]> {
+  const { data, error } = await supabase
+    .from('gradiliste_zadaci')
+    .select('*, kooperanti:kooperant_id ( id, naziv )')
+    .not('gradiliste_id', 'is', null)
+    .not('rok', 'is', null)
+    .order('rok', { ascending: true });
+  if (error) {
+    if (error.code === '42703' || error.code === 'PGRST200') {
+      throw new Error('Pokreni migraciju 20261107170000_gradiliste_zadaci_kooperant.sql u Supabase SQL editoru.');
+    }
+    throw error;
+  }
   return (data ?? []) as GradilisteZadatak[];
 }
 
@@ -2987,7 +3123,14 @@ async function syncZadatakRok(z: GradilisteZadatak) {
     if (error) throw error;
     return;
   }
-  const payload = { naziv: z.naziv, datum: z.rok, status: z.gotovo ? 'zavrsen' : 'otvoren' };
+  const payload = {
+    naziv: z.naziv,
+    datum: z.rok,
+    datum_pocetka: z.rok,
+    datum_zavrsetka: z.rok,
+    kooperant_id: z.kooperant_id ?? null,
+    status: z.gotovo ? 'zavrsen' : 'otvoren',
+  };
   const { data, error } = await supabase.from('rokovi').update(payload).eq('zadatak_id', z.id).select('id');
   if (error) throw error;
   if ((data ?? []).length === 0) {
@@ -2998,10 +3141,16 @@ async function syncZadatakRok(z: GradilisteZadatak) {
   }
 }
 
-export async function createGradilisteZadatak(gradilisteId: string, naziv: string, rok?: string | null, vrsta: ZadatakVrsta = 'zadatak') {
+export async function createGradilisteZadatak(
+  gradilisteId: string,
+  naziv: string,
+  rok?: string | null,
+  vrsta: ZadatakVrsta = 'zadatak',
+  kooperantId?: string | null,
+) {
   const { data, error } = await supabase
     .from('gradiliste_zadaci')
-    .insert({ gradiliste_id: gradilisteId, naziv, rok: rok || null, ...vrstaPolje(vrsta) })
+    .insert({ gradiliste_id: gradilisteId, naziv, rok: rok || null, kooperant_id: kooperantId || null, ...vrstaPolje(vrsta) })
     .select()
     .single();
   if (error) throw dodatniMigracijaError(error);
@@ -3009,7 +3158,7 @@ export async function createGradilisteZadatak(gradilisteId: string, naziv: strin
   return data as GradilisteZadatak;
 }
 
-export async function updateGradilisteZadatak(id: string, u: { naziv?: string; gotovo?: boolean; rok?: string | null }) {
+export async function updateGradilisteZadatak(id: string, u: { naziv?: string; gotovo?: boolean; rok?: string | null; kooperant_id?: string | null }) {
   const payload = u.gotovo === undefined ? u : { ...u, gotovo_at: u.gotovo ? new Date().toISOString() : null };
   const { data, error } = await supabase.from('gradiliste_zadaci').update(payload).eq('id', id).select().single();
   if (error) throw error;
@@ -3024,7 +3173,7 @@ export async function deleteGradilisteZadatak(id: string) {
 // ===== ROKOVI =====
 
 export async function fetchRokovi(gradilisteId?: string): Promise<Rok[]> {
-  let q = supabase.from('rokovi').select('*').order('datum', { ascending: true });
+  let q = supabase.from('rokovi').select('*, kooperanti:kooperant_id ( id, naziv )').order('datum', { ascending: true });
   if (gradilisteId) q = q.eq('gradiliste_id', gradilisteId);
   const { data, error } = await q;
   if (error) throw error;
@@ -3034,7 +3183,7 @@ export async function fetchRokovi(gradilisteId?: string): Promise<Rok[]> {
 export async function fetchRokoviNaloga(): Promise<Rok[]> {
   const { data, error } = await supabase
     .from('rokovi')
-    .select('*')
+    .select('*, kooperanti:kooperant_id ( id, naziv )')
     .not('nalog_id', 'is', null)
     .order('datum', { ascending: true });
   if (error) {
@@ -3049,8 +3198,11 @@ export async function fetchRokoviNaloga(): Promise<Rok[]> {
 export async function createRok(r: {
   gradiliste_id: string | null;
   nalog_id?: string | null;
+  kooperant_id?: string | null;
   naziv: string;
   datum: string;
+  datum_pocetka: string;
+  datum_zavrsetka: string;
   status: RokStatus;
   opis: string | null;
 }) {
@@ -3230,7 +3382,7 @@ export async function fetchFullRekapitulacija(gradilisteId: string) {
       .order('datum_kreiranja', { ascending: false }),
     supabase
       .from('rokovi')
-      .select('*')
+      .select('*, kooperanti:kooperant_id ( id, naziv )')
       .eq('gradiliste_id', gradilisteId)
       .order('datum', { ascending: true }),
     supabase

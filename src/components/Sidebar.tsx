@@ -36,6 +36,7 @@ export type View =
   | 'alat'
   | 'strojevi'
   | 'raspored'
+  | 'terminski_plan'
   | 'troskovi'
   | 'radno_vrijeme'
   | 'fakture'
@@ -99,6 +100,7 @@ const navSections: {
     items: [
       { view: 'ponude', label: 'Ponude', icon: FileSignature },
       { view: 'raspored', label: 'Dnevni raspored', icon: CalendarDays },
+      { view: 'terminski_plan', label: 'Terminski plan', icon: CalendarDays },
       { view: 'radni_nalozi', label: 'Radni nalozi', icon: ClipboardList },
     ],
   },

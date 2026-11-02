@@ -278,6 +278,7 @@ export interface DnevniRasporedRadnik {
                                                                                                                         export interface Kooperant {
                                                                                                                           id: string;
                                                                                                                           naziv: string;
+                                                                                                                          timeline_color?: string | null;
                                                                                                                           djelatnost: string | null;
                                                                                                                           oib: string | null;
                                                                                                                           iban: string | null;
@@ -307,6 +308,7 @@ export interface DnevniRasporedRadnik {
                                                                                                                           created_at: string;
                                                                                                                           updated_at: string;
                                                                                                                           gradilista?: Pick<Gradiliste, 'id' | 'naziv' | 'status' | 'datum_pocetka' | 'datum_zavrsetka' | 'ugovorena_vrijednost'> | null;
+                                                                                                                          kooperanti?: Pick<Kooperant, 'id' | 'naziv'> | null;
                                                                                                                         }
 
                                                                                                                         export type KooperantDokumentVrsta = 'ugovor' | 'licenca' | 'atest' | 'osiguranje' | 'ponuda' | 'racun';
@@ -391,6 +393,10 @@ export interface DnevniRasporedRadnik {
                                                                                                                                                                                       gradiliste_id: string;
                                                                                                                                                                                         naziv: string;
                                                                                                                                                                                           datum: string;
+                                                                                                                                                                                            datum_pocetka?: string | null;
+                                                                                                                                                                                            datum_zavrsetka?: string | null;
+                                                                                                                                                                                            kooperant_id?: string | null;
+                                                                                                                                                                                            kooperanti?: Pick<Kooperant, 'id' | 'naziv'> | null;
                                                                                                                                                                                             status: RokStatus;
 nalog_id?: string | null;
 zadatak_id?: string | null;
@@ -405,6 +411,8 @@ zadatak_id?: string | null;
   gotovo: boolean;
   gotovo_at: string | null;
   rok?: string | null;
+  kooperant_id?: string | null;
+  kooperanti?: Pick<Kooperant, 'id' | 'naziv'> | null;
   nalog_id?: string | null;
   /** Prije migracije 20261021160000 stupac ne postoji pa se tretira kao 'zadatak'. */
   vrsta?: ZadatakVrsta;

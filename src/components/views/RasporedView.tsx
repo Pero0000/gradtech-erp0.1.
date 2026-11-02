@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useRef, useState } from 'react';
 import { CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, GripVertical, Hammer, Package, Plus, Send, Trash2, Truck, X } from 'lucide-react';
-import type { DnevniRasporedGradiliste, DnevniRasporedOstalo, DnevniRasporedRadnik, Gradiliste, GradilisteRegija, GradilisteStatus, GradilisteZadatak, Investitor, NalogPrioritet, NalogStatus, Radnik, RadnikOdsustvo, Rok, Vozilo, ZadatakVrsta } from '@/types';
+import type { DnevniRasporedGradiliste, DnevniRasporedOstalo, DnevniRasporedRadnik, Gradiliste, GradilisteRegija, GradilisteStatus, GradilisteZadatak, Investitor, NalogPrioritet, NalogStatus, Objekt, Radnik, RadnikOdsustvo, Rok, Vozilo, ZadatakVrsta } from '@/types';
 import { zadatakVrsta } from '@/types';
 import { nextDeadline } from '@/lib/rokovi';
 import { Modal } from '@/components/ui/Modal';
@@ -116,7 +116,9 @@ interface NewGradilisteForm {
   naziv: string;
   adresa: string;
   regija: GradilisteRegija | '';
+  investitorId: string;
   investitorNaziv: string;
+  objektId: string;
   objektNaziv: string;
   status: GradilisteStatus;
   datum_pocetka: string;
@@ -129,7 +131,9 @@ const emptyNewGradilisteForm: NewGradilisteForm = {
   naziv: '',
   adresa: '',
   regija: '',
+  investitorId: '',
   investitorNaziv: '',
+  objektId: '',
   objektNaziv: '',
   status: 'planirano',
   datum_pocetka: '',
@@ -246,6 +250,11 @@ export function RasporedView() {
   const [newSiteSaving, setNewSiteSaving] = useState(false);
   const [newSiteForm, setNewSiteForm] = useState<NewGradilisteForm>(emptyNewGradilisteForm);
   const [investitori, setInvestitori] = useState<Investitor[]>([]);
+  const [objekti, setObjekti] = useState<Objekt[]>([]);
+  const [investorMode, setInvestorMode] = useState<'manual' | 'select'>('manual');
+  const [objectMode, setObjectMode] = useState<'manual' | 'select'>('manual');
+  const [newInvestorName, setNewInvestorName] = useState('');
+  const [newObjectName, setNewObjectName] = useState('');
   const [objava, setObjava] = useState<RasporedObjava | null>(null);
   const [sendingSchedule, setSendingSchedule] = useState(false);
   const [rasporedTab, setRasporedTab] = useState<'slaganje' | 'posalji'>('slaganje');
@@ -274,6 +283,24 @@ export function RasporedView() {
   // Otvoreni zadaci vidljivi su i kad ih drži drugi (nezavršeni) nalog, da se mogu prebaciti na ovaj.
   const visibleZadaci = nalogZadaci.filter((z) => !z.gotovo);
   const visibleStavke = nalogStavke.filter((item) => !item.gotovo && !item.uzeto);
+
+  useEffect(() => {
+    if (!newSiteForm.investitorId) {
+      setObjekti([]);
+      return;
+    }
+    let cancelled = false;
+    fetchObjekti(newSiteForm.investitorId)
+      .then((items) => {
+        if (!cancelled) setObjekti(items);
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(errMsg(reason, 'Greška pri učitavanju objekata'));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [newSiteForm.investitorId]);
 
   useEffect(() => {
     if (!formGradilisteId && !formNalogId) {
@@ -508,6 +535,11 @@ export function RasporedView() {
     setError(null);
     setNotice(null);
     setNewSiteForm(emptyNewGradilisteForm);
+    setObjekti([]);
+    setInvestorMode('manual');
+    setObjectMode('manual');
+    setNewInvestorName('');
+    setNewObjectName('');
     setNewSiteOpen(true);
     void fetchInvestitori()
       .then(setInvestitori)
@@ -529,13 +561,15 @@ export function RasporedView() {
     try {
       let objektId: string | null = null;
       if (investorName && objectName) {
-        const investor = investitori.find((item) => item.naziv.trim().toLocaleLowerCase() === investorName.toLocaleLowerCase())
+        const investor = investitori.find((item) => item.id === newSiteForm.investitorId)
+          ?? investitori.find((item) => item.naziv.trim().toLocaleLowerCase() === investorName.toLocaleLowerCase())
           ?? await createInvestitor({ naziv: investorName });
         if (!investitori.some((item) => item.id === investor.id)) {
           setInvestitori((previous) => [...previous, investor].sort((a, b) => a.naziv.localeCompare(b.naziv)));
         }
-        const objects = await fetchObjekti(investor.id);
-        const existingObject = objects.find((item) => item.naziv.trim().toLocaleLowerCase() === objectName.toLocaleLowerCase());
+        const objects = investor.id === newSiteForm.investitorId ? objekti : await fetchObjekti(investor.id);
+        const existingObject = objects.find((item) => item.id === newSiteForm.objektId)
+          ?? objects.find((item) => item.naziv.trim().toLocaleLowerCase() === objectName.toLocaleLowerCase());
         const object = existingObject ?? await createObjekt({ naziv: objectName, investitor_id: investor.id });
         objektId = object.id;
       }
@@ -567,6 +601,45 @@ export function RasporedView() {
       setError(errMsg(e, 'Greška pri spremanju novog gradilišta'));
     } finally {
       setNewSiteSaving(false);
+    }
+  };
+
+  const addNewSiteInvestor = async () => {
+    const naziv = newInvestorName.trim();
+    if (!naziv) return;
+    setError(null);
+    try {
+      const existing = investitori.find((item) => item.naziv.trim().toLocaleLowerCase() === naziv.toLocaleLowerCase());
+      const investor = existing ?? await createInvestitor({ naziv });
+      setInvestitori((previous) => [...previous.filter((item) => item.id !== investor.id), investor].sort((a, b) => a.naziv.localeCompare(b.naziv)));
+      setNewSiteForm((previous) => ({ ...previous, investitorId: investor.id, investitorNaziv: investor.naziv, objektId: '', objektNaziv: '' }));
+      setNewInvestorName('');
+      setInvestorMode('manual');
+    } catch (reason) {
+      setError(errMsg(reason, 'Greška pri spremanju investitora'));
+    }
+  };
+
+  const addNewSiteObject = async () => {
+    const naziv = newObjectName.trim() || newSiteForm.objektNaziv.trim();
+    const investorName = newSiteForm.investitorNaziv.trim();
+    if (!naziv || !investorName) return;
+    setError(null);
+    try {
+      const investor = investitori.find((item) => item.id === newSiteForm.investitorId)
+        ?? investitori.find((item) => item.naziv.trim().toLocaleLowerCase() === investorName.toLocaleLowerCase())
+        ?? await createInvestitor({ naziv: investorName });
+      if (!investitori.some((item) => item.id === investor.id)) {
+        setInvestitori((previous) => [...previous, investor].sort((a, b) => a.naziv.localeCompare(b.naziv)));
+      }
+      const existing = (investor.id === newSiteForm.investitorId ? objekti : await fetchObjekti(investor.id))
+        .find((item) => item.naziv.trim().toLocaleLowerCase() === naziv.toLocaleLowerCase());
+      const objekt = existing ?? await createObjekt({ naziv, investitor_id: investor.id });
+      setNewSiteForm((previous) => ({ ...previous, investitorId: investor.id, investitorNaziv: investor.naziv, objektId: objekt.id, objektNaziv: objekt.naziv }));
+      setNewObjectName('');
+      setObjectMode('select');
+    } catch (reason) {
+      setError(errMsg(reason, 'Greška pri spremanju objekta'));
     }
   };
 
@@ -1998,18 +2071,145 @@ export function RasporedView() {
             </Select>
           </Field>
           <Field label="Investitor">
-            <TextInput
-              value={newSiteForm.investitorNaziv}
-              onChange={(event) => setNewSiteForm((previous) => ({ ...previous, investitorNaziv: event.target.value }))}
-              placeholder="npr. Sunce d.o.o."
-            />
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setInvestorMode('manual')}
+                  className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium ${investorMode === 'manual' ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                >
+                  Upiši ručno
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInvestorMode('select')}
+                  className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium ${investorMode === 'select' ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                >
+                  Iz baze
+                </button>
+              </div>
+              {investorMode === 'manual' ? (
+                <TextInput
+                  value={newSiteForm.investitorNaziv}
+                  onChange={(event) => {
+                    const investitorNaziv = event.target.value;
+                    const match = investitori.find((item) => item.naziv.trim().toLocaleLowerCase() === investitorNaziv.trim().toLocaleLowerCase());
+                    setNewSiteForm((previous) => ({
+                      ...previous,
+                      investitorNaziv,
+                      investitorId: match?.id ?? '',
+                      objektId: match?.id === previous.investitorId ? previous.objektId : '',
+                      objektNaziv: match?.id === previous.investitorId ? previous.objektNaziv : '',
+                    }));
+                  }}
+                  placeholder="npr. Sunce d.o.o."
+                />
+              ) : (
+                <div className="space-y-2">
+                  <Select
+                    value={newSiteForm.investitorId}
+                    onChange={(event) => {
+                      const investor = investitori.find((item) => item.id === event.target.value);
+                      setNewSiteForm((previous) => ({
+                        ...previous,
+                        investitorId: investor?.id ?? '',
+                        investitorNaziv: investor?.naziv ?? '',
+                        objektId: '',
+                        objektNaziv: '',
+                      }));
+                    }}
+                  >
+                    <option value="">- Odaberi iz baze -</option>
+                    {investitori.map((investitor) => <option key={investitor.id} value={investitor.id}>{investitor.naziv}</option>)}
+                  </Select>
+                  <div className="flex gap-2">
+                    <TextInput
+                      className="min-w-0"
+                      value={newInvestorName}
+                      onChange={(event) => setNewInvestorName(event.target.value)}
+                      placeholder="Naziv novog investitora"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void addNewSiteInvestor()}
+                      disabled={!newInvestorName.trim()}
+                      className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                    >
+                      Dodaj
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </Field>
           <Field label="Objekt">
-            <TextInput
-              value={newSiteForm.objektNaziv}
-              onChange={(event) => setNewSiteForm((previous) => ({ ...previous, objektNaziv: event.target.value }))}
-              placeholder="Naziv objekta"
-            />
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setObjectMode('manual')}
+                  className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium ${objectMode === 'manual' ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                >
+                  Upiši ručno
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setObjectMode('select')}
+                  disabled={!newSiteForm.investitorId}
+                  className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${objectMode === 'select' ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                >
+                  Iz baze
+                </button>
+              </div>
+              {objectMode === 'manual' ? (
+                <div className="flex gap-2">
+                  <TextInput
+                    className="min-w-0"
+                    value={newSiteForm.objektNaziv}
+                    onChange={(event) => setNewSiteForm((previous) => ({ ...previous, objektNaziv: event.target.value, objektId: '' }))}
+                    placeholder="Naziv objekta"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void addNewSiteObject()}
+                    disabled={!newSiteForm.objektNaziv.trim() || !newSiteForm.investitorNaziv.trim()}
+                    className="shrink-0 rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                  >
+                    Dodaj u bazu
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Select
+                    value={newSiteForm.objektId}
+                    onChange={(event) => {
+                      const objekt = objekti.find((item) => item.id === event.target.value);
+                      setNewSiteForm((previous) => ({ ...previous, objektId: objekt?.id ?? '', objektNaziv: objekt?.naziv ?? '' }));
+                    }}
+                    disabled={!newSiteForm.investitorId}
+                  >
+                    <option value="">- Odaberi objekt iz baze -</option>
+                    {objekti.map((objekt) => <option key={objekt.id} value={objekt.id}>{objekt.naziv}</option>)}
+                  </Select>
+                  <div className="flex gap-2">
+                    <TextInput
+                      className="min-w-0"
+                      value={newObjectName}
+                      onChange={(event) => setNewObjectName(event.target.value)}
+                      placeholder="Naziv novog objekta"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void addNewSiteObject()}
+                      disabled={!newObjectName.trim() || !newSiteForm.investitorNaziv.trim()}
+                      className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                    >
+                      Dodaj
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </Field>
           <Field label="Status">
             <Select

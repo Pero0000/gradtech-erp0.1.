@@ -33,6 +33,7 @@ import type {
   GradilisteZadatak,
   Investitor,
   Kooperant,
+  KooperantAngazman,
   RadniNalog,
   RadnoVrijeme,
   Rok,
@@ -54,6 +55,7 @@ import {
   createTrosak,
   createKooperant,
   fetchKooperanti,
+  fetchKooperantAngazmani,
   fetchInvestitori,
   deleteTrosak,
   fetchFullRekapitulacija,
@@ -238,6 +240,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     datum: new Date().toISOString().slice(0, 10),
   });
   const [kooperanti, setKooperanti] = useState<Kooperant[]>([]);
+  const [kooperantAngazmani, setKooperantAngazmani] = useState<KooperantAngazman[]>([]);
 
   const sortedRadniNalogFoto = [...radniNalogFoto].sort((first, second) =>
     (second.created_at ?? '').localeCompare(first.created_at ?? ''),
@@ -337,9 +340,21 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   }, [activePhotoIndex, sortedRadniNalogFoto.length]);
 
   useEffect(() => {
-    fetchKooperanti().then(setKooperanti).catch(() => setKooperanti([]));
+    fetchKooperanti().then(setKooperanti).catch((reason) => setError(errText(reason, 'Greška pri učitavanju kooperanata.')));
     fetchInvestitori().then(setInvoiceInvestitori).catch(() => setInvoiceInvestitori([]));
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchKooperantAngazmani()
+      .then((angazmani) => {
+        if (!cancelled) setKooperantAngazmani(angazmani.filter((angazman) => angazman.gradiliste_id === gradiliste.id));
+      })
+      .catch((reason) => {
+        if (!cancelled) setError(errText(reason, 'Greška pri učitavanju angažmana kooperanata.'));
+      });
+    return () => { cancelled = true; };
+  }, [gradiliste.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -431,6 +446,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const [zadaci, setZadaci] = useState<GradilisteZadatak[]>([]);
   const [newZadatak, setNewZadatak] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
   const [newZadatakRok, setNewZadatakRok] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
+  const [newZadatakKooperant, setNewZadatakKooperant] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
   const [editingZadatakId, setEditingZadatakId] = useState<string | null>(null);
   const [editingZadatakText, setEditingZadatakText] = useState('');
 
@@ -439,7 +455,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
       setZadaci(await fetchGradilisteZadaci(gradiliste.id));
     } catch (reason) {
       setZadaci([]);
-      setError(errText(reason, 'Greška pri učitavanju zadataka. Pokreni migraciju 20261015200000_create_gradiliste_zadaci.sql.'));
+      setError(errText(reason, 'Greška pri učitavanju zadataka. Provjeri migracije za zadatke gradilišta.'));
     }
   };
 
@@ -478,9 +494,10 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     const naziv = newZadatak[vrsta].trim();
     if (!naziv) return;
     try {
-      await createGradilisteZadatak(gradiliste.id, naziv, newZadatakRok[vrsta], vrsta);
+      await createGradilisteZadatak(gradiliste.id, naziv, newZadatakRok[vrsta], vrsta, newZadatakKooperant[vrsta] || null);
       setNewZadatak((prev) => ({ ...prev, [vrsta]: '' }));
       setNewZadatakRok((prev) => ({ ...prev, [vrsta]: '' }));
+      setNewZadatakKooperant((prev) => ({ ...prev, [vrsta]: '' }));
       await afterZadatakChange();
     } catch (reason) {
       setError(errText(reason, 'Greška pri spremanju zadatka.'));
@@ -504,6 +521,15 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
       await afterZadatakChange();
     } catch (reason) {
       setError(errText(reason, 'Greška pri spremanju roka zadatka. Pokreni migraciju 20261015210000_zadaci_rok.sql.'));
+    }
+  };
+
+  const setZadatakKooperant = async (z: GradilisteZadatak, kooperantId: string) => {
+    try {
+      await updateGradilisteZadatak(z.id, { kooperant_id: kooperantId || null });
+      await afterZadatakChange();
+    } catch (reason) {
+      setError(errText(reason, 'Greška pri spremanju kooperanta na zadatku.'));
     }
   };
 
@@ -535,7 +561,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const [deadlineModalOpen, setDeadlineModalOpen] = useState(false);
   const [editingDeadline, setEditingDeadline] = useState<Rok | null>(null);
   const [savingDeadline, setSavingDeadline] = useState(false);
-  const [deadlineForm, setDeadlineForm] = useState({ naziv: '', datum: '', opis: '' });
+  const [deadlineForm, setDeadlineForm] = useState({ naziv: '', datum_pocetka: '', datum_zavrsetka: '', kooperant_id: '', opis: '' });
 
   const afterDeadlineChange = async () => {
     await reloadDetails();
@@ -544,17 +570,35 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
 
   const openDeadlineEditor = (item?: Rok) => {
     setEditingDeadline(item ?? null);
-    setDeadlineForm({ naziv: item?.naziv ?? '', datum: item?.datum ?? '', opis: item?.opis ?? '' });
+    const deadlineDate = item?.datum ?? '';
+    setDeadlineForm({
+      naziv: item?.naziv ?? '',
+      datum_pocetka: item?.datum_pocetka ?? deadlineDate,
+      datum_zavrsetka: item?.datum_zavrsetka ?? deadlineDate,
+      kooperant_id: item?.kooperant_id ?? '',
+      opis: item?.opis ?? '',
+    });
     setError(null);
     setDeadlineModalOpen(true);
   };
 
   const saveDeadline = async () => {
-    if (!deadlineForm.naziv.trim() || !deadlineForm.datum) return;
+    if (!deadlineForm.naziv.trim() || !deadlineForm.datum_pocetka || !deadlineForm.datum_zavrsetka) return;
+    if (deadlineForm.datum_zavrsetka < deadlineForm.datum_pocetka) {
+      setError('Datum kraja ne može biti prije datuma početka.');
+      return;
+    }
     setSavingDeadline(true);
     setError(null);
     try {
-      const payload = { naziv: deadlineForm.naziv.trim(), datum: deadlineForm.datum, opis: deadlineForm.opis.trim() || null };
+      const payload = {
+        naziv: deadlineForm.naziv.trim(),
+        datum: deadlineForm.datum_zavrsetka,
+        datum_pocetka: deadlineForm.datum_pocetka,
+        datum_zavrsetka: deadlineForm.datum_zavrsetka,
+        kooperant_id: deadlineForm.kooperant_id || null,
+        opis: deadlineForm.opis.trim() || null,
+      };
       if (editingDeadline) await updateRok(editingDeadline.id, payload);
       else await createRok({ ...payload, gradiliste_id: gradiliste.id, status: 'otvoren' });
       await afterDeadlineChange();
@@ -581,6 +625,20 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
       await afterDeadlineChange();
     } catch (reason) {
       setError(errText(reason, 'Greška pri brisanju roka.'));
+    }
+  };
+
+  const setDeadlineKooperant = async (item: Rok, kooperantId: string) => {
+    try {
+      if (item.zadatak_id) {
+        await updateGradilisteZadatak(item.zadatak_id, { kooperant_id: kooperantId || null });
+        await afterZadatakChange();
+      } else {
+        await updateRok(item.id, { kooperant_id: kooperantId || null });
+        await afterDeadlineChange();
+      }
+    } catch (reason) {
+      setError(errText(reason, 'Greška pri spremanju kooperanta uz rok.'));
     }
   };
 
@@ -858,6 +916,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const deadlines = (details?.rokovi ?? []) as Rok[];
   const openDeadlines = deadlines.filter((item) => item.status !== 'zavrsen');
   const completedDeadlines = deadlines.filter((item) => item.status === 'zavrsen');
+  const currentKooperantAngazmani = kooperantAngazmani.filter((item) => item.status !== 'otkazano');
   const invoices = (details?.fakture ?? []) as Faktura[];
   const contractedWorks = (details?.ugovoreniRadovi ?? []) as UgovoreniRad[];
   const tasks = (details?.nalozi ?? []) as RadniNalog[];
@@ -886,7 +945,10 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const collectionDebt = invoiced - paid;
   const baseOffer = gradiliste.ugovorena_vrijednost ?? 0;
   const renderDeadline = (item: Rok) => {
-    const late = item.status === 'otvoren' && item.datum < new Date().toISOString().slice(0, 10);
+    const endDate = item.datum_zavrsetka ?? item.datum;
+    const startDate = item.datum_pocetka ?? item.datum;
+    const late = item.status === 'otvoren' && endDate < new Date().toISOString().slice(0, 10);
+    const dateLabel = startDate === endDate ? date(endDate) : `${date(startDate)} – ${date(endDate)}`;
     return (
       <div key={item.id} className="group flex items-start gap-2 text-xs">
         <input
@@ -901,7 +963,16 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
           <p className={item.status === 'zavrsen' ? 'text-slate-400 line-through' : 'text-slate-700'}>{item.naziv}</p>
           {item.opis && <p className="text-[11px] text-slate-500">{item.opis}</p>}
         </div>
-        <span className={`flex-shrink-0 font-medium ${late ? 'text-red-600' : 'text-slate-600'}`}>{date(item.datum)}</span>
+        <Select
+          value={item.kooperant_id ?? ''}
+          onChange={(event) => void setDeadlineKooperant(item, event.target.value)}
+          aria-label={`Kooperant za rok ${item.naziv}`}
+          className="max-w-36 flex-shrink-0 !px-1.5 !py-1 text-[11px]"
+        >
+          <option value="">Bez kooperanta</option>
+          {kooperanti.map((kooperant) => <option key={kooperant.id} value={kooperant.id}>{kooperant.naziv}</option>)}
+        </Select>
+        <span className={`flex-shrink-0 font-medium ${late ? 'text-red-600' : 'text-slate-600'}`}>{dateLabel}</span>
         {item.zadatak_id ? (
           <span className="flex-shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{item.opis === 'Dodatni rad' ? 'Dodatni rad' : 'Zadatak'}</span>
         ) : (
@@ -1221,6 +1292,32 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                   <p className="mt-0.5 text-xs font-bold text-slate-900">{date(gradiliste.datum_zavrsetka)}</p>
                 </div>
               </div>
+              <div className="mb-3 rounded-md border border-amber-100 bg-amber-50/60 p-2.5">
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-amber-900">Angažmani kooperanata</p>
+                {currentKooperantAngazmani.length === 0 ? (
+                  <p className="text-xs text-slate-500">Nema evidentiranih angažmana kooperanata za ovo gradilište.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {currentKooperantAngazmani
+                      .slice()
+                      .sort((first, second) => (first.datum_pocetka ?? '').localeCompare(second.datum_pocetka ?? ''))
+                      .map((angazman) => (
+                        <div key={angazman.id} className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 text-xs">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-slate-800">{angazman.kooperanti?.naziv ?? 'Nepoznat kooperant'}</p>
+                            {angazman.napomena && <p className="text-[11px] text-slate-500">{angazman.napomena}</p>}
+                          </div>
+                          <span className="whitespace-nowrap text-slate-600">
+                            {date(angazman.datum_pocetka)} – {date(angazman.datum_zavrsetka)}
+                          </span>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${angazman.status === 'aktivno' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-800'}`}>
+                            {angazman.status === 'aktivno' ? 'Aktivan' : 'Završen'}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
               {openDeadlines.length === 0 ? <p className="text-xs text-slate-400">Nema otvorenih rokova.</p> : (
                 <div className="space-y-1.5">{openDeadlines.map(renderDeadline)}</div>
               )}
@@ -1272,6 +1369,16 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                     title="Rok izvršenja"
                     className={`w-[7.5rem] flex-shrink-0 rounded border px-1 py-0.5 text-[11px] ${z.gotovo ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : z.rok && z.rok < new Date().toISOString().slice(0, 10) ? 'border-red-300 text-red-600' : 'border-slate-200 text-slate-600'}`}
                   />
+                  <select
+                    value={z.kooperant_id ?? ''}
+                    onChange={(event) => void setZadatakKooperant(z, event.target.value)}
+                    title="Kooperant zadužen za zadatak"
+                    aria-label={`Kooperant za zadatak ${z.naziv}`}
+                    className="max-w-36 flex-shrink-0 rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] text-slate-600"
+                  >
+                    <option value="">Bez kooperanta</option>
+                    {kooperanti.map((kooperant) => <option key={kooperant.id} value={kooperant.id}>{kooperant.naziv}</option>)}
+                  </select>
                   <button type="button" onClick={() => { setEditingZadatakId(z.id); setEditingZadatakText(z.naziv); }} className="flex-shrink-0 text-slate-400 hover:text-sky-600" aria-label="Uredi zadatak">
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
@@ -1307,6 +1414,15 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                   title="Rok izvršenja (neobavezno)"
                   className="w-full flex-shrink-0 rounded-lg border border-slate-300 px-2 py-1.5 text-xs xl:w-[8rem]"
                 />
+                <select
+                  value={newZadatakKooperant[sekcija.vrsta]}
+                  onChange={(event) => setNewZadatakKooperant((prev) => ({ ...prev, [sekcija.vrsta]: event.target.value }))}
+                  aria-label="Kooperant zadužen za novi zadatak"
+                  className="w-full flex-shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs xl:w-48"
+                >
+                  <option value="">Bez kooperanta</option>
+                  {kooperanti.map((kooperant) => <option key={kooperant.id} value={kooperant.id}>{kooperant.naziv}</option>)}
+                </select>
                 <button
                   type="button"
                   onClick={() => void addZadatak(sekcija.vrsta)}
@@ -1552,7 +1668,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                               className="block min-h-0 w-full flex-1 bg-slate-50"
                               title={`${foto.nalog_broj}${foto.nalog_naslov ? ` · ${foto.nalog_naslov}` : ''}`}
                             >
-                              <img loading="lazy" src={foto.url} alt={foto.naziv ?? `Fotografija naloga ${foto.nalog_broj}`} className="h-full w-full object-contain" />
+                              <img loading="lazy" src={foto.thumbnailUrl} alt={foto.naziv ?? `Fotografija naloga ${foto.nalog_broj}`} className="h-full w-full object-contain" />
                             </button>
                             <span className="block shrink-0 truncate px-2 py-1.5 text-[10px] text-slate-600">
                               {foto.created_at ? new Date(foto.created_at).toLocaleDateString('hr-HR') : 'Bez datuma'}
@@ -1650,6 +1766,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               </button>
             </div>
             <img
+              loading="lazy"
               src={sortedRadniNalogFoto[activePhotoIndex].url}
               alt={sortedRadniNalogFoto[activePhotoIndex].naziv ?? `Fotografija naloga ${sortedRadniNalogFoto[activePhotoIndex].nalog_broj}`}
               className="mx-auto max-h-[78vh] max-w-full rounded-lg object-contain"
@@ -1934,7 +2051,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
             <button type="button" onClick={() => setDeadlineModalOpen(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
               Odustani
             </button>
-            <button type="button" onClick={() => void saveDeadline()} disabled={savingDeadline || !deadlineForm.naziv.trim() || !deadlineForm.datum} className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">
+            <button type="button" onClick={() => void saveDeadline()} disabled={savingDeadline || !deadlineForm.naziv.trim() || !deadlineForm.datum_pocetka || !deadlineForm.datum_zavrsetka} className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">
               {savingDeadline ? 'Spremanje…' : 'Spremi'}
             </button>
           </>
@@ -1944,8 +2061,19 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
           <Field label="Naziv *">
             <TextInput value={deadlineForm.naziv} onChange={(event) => setDeadlineForm((previous) => ({ ...previous, naziv: event.target.value }))} placeholder="npr. Dolazak materijala" />
           </Field>
-          <Field label="Datum *">
-            <TextInput type="date" value={deadlineForm.datum} onChange={(event) => setDeadlineForm((previous) => ({ ...previous, datum: event.target.value }))} />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Početak *">
+              <TextInput type="date" value={deadlineForm.datum_pocetka} onChange={(event) => setDeadlineForm((previous) => ({ ...previous, datum_pocetka: event.target.value }))} />
+            </Field>
+            <Field label="Kraj *">
+              <TextInput type="date" value={deadlineForm.datum_zavrsetka} onChange={(event) => setDeadlineForm((previous) => ({ ...previous, datum_zavrsetka: event.target.value }))} min={deadlineForm.datum_pocetka || undefined} />
+            </Field>
+          </div>
+          <Field label="Kooperant">
+            <Select value={deadlineForm.kooperant_id} onChange={(event) => setDeadlineForm((previous) => ({ ...previous, kooperant_id: event.target.value }))}>
+              <option value="">Bez kooperanta</option>
+              {kooperanti.map((kooperant) => <option key={kooperant.id} value={kooperant.id}>{kooperant.naziv}</option>)}
+            </Select>
           </Field>
           <Field label="Napomena">
             <Textarea rows={2} value={deadlineForm.opis} onChange={(event) => setDeadlineForm((previous) => ({ ...previous, opis: event.target.value }))} />

@@ -176,6 +176,108 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+@page terminski-plan {
+  size: landscape;
+  margin: 6mm;
+}
+
+@media print {
+  body {
+    overflow: visible !important;
+    background: #fff !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .app-shell-print-terminski {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  .app-shell-print-terminski > :not(.app-main),
+  .app-shell-print-terminski .app-topbar,
+  .app-shell-print-terminski .terminski-plan-hide-print {
+    display: none !important;
+  }
+
+  .app-shell-print-terminski .app-main,
+  .app-shell-print-terminski .app-content,
+  .app-shell-print-terminski .terminski-plan-view {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .app-shell-print-terminski .terminski-plan-grid {
+    width: 100% !important;
+    max-width: none !important;
+    overflow: visible !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .app-shell-print-terminski .terminski-plan-grid-inner {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .app-shell-print-terminski .terminski-plan-grid-header,
+  .app-shell-print-terminski .terminski-plan-site-row,
+  .app-shell-print-terminski .terminski-plan-task-row {
+    grid-template-columns: 220px minmax(0, 1fr) !important;
+    break-inside: avoid;
+  }
+
+  .app-shell-print-terminski .terminski-plan-day-header {
+    min-height: 32px !important;
+    padding: 1px !important;
+  }
+
+  .app-shell-print-terminski .terminski-plan-day-name,
+  .app-shell-print-terminski .terminski-plan-day-month {
+    display: none !important;
+  }
+
+  .app-shell-print-terminski .terminski-plan-month-band {
+    height: 14px !important;
+  }
+
+  .app-shell-print-terminski .terminski-plan-month-band > span {
+    padding: 0 !important;
+    font-size: 7px !important;
+  }
+
+  .app-shell-print-terminski .terminski-plan-day-header {
+    min-height: 20px !important;
+    height: 20px !important;
+    font-size: 8px !important;
+  }
+
+  .app-shell-print-terminski .terminski-plan-day-header > span:nth-child(2) {
+    font-size: 8px !important;
+    line-height: 1 !important;
+  }
+
+  .app-shell-print-terminski .terminski-plan-task-row {
+    min-height: 30px !important;
+  }
+
+  .app-shell-print-terminski .terminski-plan-grid,
+  .app-shell-print-terminski .terminski-plan-grid-inner {
+    print-color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+  }
+}
+
 @container gradilista-view (max-width: 1600px) {
   .gradilista-view-container .gradilista-page-header {
     margin-bottom: 0.75rem;

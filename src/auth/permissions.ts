@@ -40,6 +40,7 @@ const viewModules: Partial<Record<View, AppModule>> = {
   alat: 'alat',
   strojevi: 'strojevi',
   raspored: 'raspored',
+  terminski_plan: 'gradilista',
   troskovi: 'troskovi',
   radno_vrijeme: 'radno_vrijeme',
   fakture: 'fakture',

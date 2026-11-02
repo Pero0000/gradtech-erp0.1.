@@ -136,6 +136,8 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
         nalog_id: n.id,
         naziv: rokForm.naziv.trim(),
         datum: rokForm.datum,
+        datum_pocetka: rokForm.datum,
+        datum_zavrsetka: rokForm.datum,
         status: 'otvoren',
         opis: rokForm.opis.trim() || null,
       });

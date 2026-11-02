@@ -304,7 +304,7 @@ export function GradilisteMaterijalDokumenti({
               {slike.map((d) => (
                 <div key={d.id} className="group relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200">
                   <button type="button" onClick={() => setActivePhotoId(d.id)} className="block min-h-0 w-full flex-1 bg-slate-50" aria-label={`Pregledaj ${d.naziv}`}>
-                    <img loading="lazy" src={d.url} alt={d.naziv} className="h-full w-full object-contain" />
+                    <img loading="lazy" src={d.thumbnailUrl} alt={d.naziv} className="h-full w-full object-contain" />
                   </button>
                   <button
                     type="button"
@@ -338,6 +338,7 @@ export function GradilisteMaterijalDokumenti({
             <Plus className="h-3.5 w-3.5" />
             {uploading ? 'Učitavanje…' : 'Dodaj slike'}
           </button>
+          <p className="mt-2 text-xs text-slate-500">Slike se automatski spremaju kao WebP (širina do 1600 px), uz malu thumbnail verziju za brži pregled.</p>
         </SectionBox>
       </div>
     </>
@@ -363,7 +364,7 @@ export function GradilisteMaterijalDokumenti({
                 <ChevronRight className="h-5 w-5" />
               </button>
             </div>
-            <img src={activePhoto.url} alt={activePhoto.naziv} className="mx-auto max-h-[70vh] max-w-full rounded-lg object-contain" />
+            <img loading="lazy" src={activePhoto.url} alt={activePhoto.naziv} className="mx-auto max-h-[70vh] max-w-full rounded-lg object-contain" />
             <div className="flex justify-end">
               <button type="button" onClick={() => void downloadPhoto(activePhoto)} disabled={downloadingPhotoId !== null} className="inline-flex items-center gap-2 rounded-lg border border-sky-200 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50">
                 <Download className="h-4 w-4" />

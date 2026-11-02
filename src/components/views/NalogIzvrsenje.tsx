@@ -503,16 +503,11 @@ export function NalogIzvrsenje({
 
   const toggleZavrsen = (value: boolean, bezPotvrdeDjelatnika = false, zavrsiBezIzvrsenja = false) => {
     if (zavrsiBezIzvrsenja) {
-      const nijeZapoceo = !nalog.mobile_status
-        ? nalog.status === 'otvoren'
-        : nalog.mobile_status === 'dodijeljen'
-          && nalog.status !== 'zavrsen'
-          && nalog.status !== 'otkazan';
-      if (!nijeZapoceo) {
-        setError('Bez izvršenja može se završiti samo otvoren nalog ili poslan nalog na kojem djelatnik još nije započeo rad.');
+      if (nalog.status === 'zavrsen' || nalog.status === 'otkazan') {
+        setError('Bez izvršenja može se završiti samo otvoren nalog koji još nije zaključen ili otkazan.');
         return;
       }
-      if (!window.confirm('Ovaj radni nalog bit će uklonjen iz otvorenih naloga djelatnika i označen kao završen bez izvršenja. Neće se obračunati sati ni troškovi, a nezavršeni zadaci vratit će se na gradilište. Nastaviti?')) return;
+      if (!window.confirm('Ovaj radni nalog bit će uklonjen iz otvorenih naloga djelatnika i označen kao završen bez izvršenja, neovisno o tome je li djelatnik započeo rad ili predao izvještaj. Neće se obračunati sati ni troškovi, a nezavršeni zadaci vratit će se na gradilište. Nastaviti?')) return;
     }
     if (value) {
       if (!zavrsiBezIzvrsenja && !bezPotvrdeDjelatnika && (nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku')) {
@@ -595,8 +590,13 @@ export function NalogIzvrsenje({
     if (!files || files.length === 0) return;
     setUploading(true);
     await guard(async () => {
-      for (const file of Array.from(files)) await uploadNalogFoto(nalog.id, file);
+      const warnings: string[] = [];
+      for (const file of Array.from(files)) {
+        const warning = await uploadNalogFoto(nalog.id, file);
+        if (warning) warnings.push(warning);
+      }
       setFoto(await fetchNalogFoto(nalog.id));
+      if (warnings.length > 0) setError(warnings.join('\n'));
     }, 'Greška pri učitavanju fotografije.');
     setUploading(false);
     if (fileRef.current) fileRef.current.value = '';
@@ -652,8 +652,13 @@ export function NalogIzvrsenje({
     if (!files || files.length === 0) return;
     setUploading(true);
     await guard(async () => {
-      for (const file of Array.from(files)) await uploadNalogDokument(nalog.id, file);
+      const warnings: string[] = [];
+      for (const file of Array.from(files)) {
+        const warning = await uploadNalogDokument(nalog.id, file);
+        if (warning) warnings.push(warning);
+      }
       setDokumenti(await fetchNalogDokumenti(nalog.id));
+      if (warnings.length > 0) setError(warnings.join('\n'));
     }, 'Greška pri učitavanju dokumenta.');
     setUploading(false);
     if (docRef.current) docRef.current.value = '';
@@ -694,8 +699,7 @@ export function NalogIzvrsenje({
               <Check className="h-4 w-4" />
               {nalog.mobile_status === 'predan' ? 'Odobri i zaključi nalog' : nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku' ? 'Čeka izvještaj djelatnika' : 'Zaključi radni nalog'}
             </button>
-            {((!nalog.mobile_status && nalog.status === 'otvoren')
-              || (nalog.mobile_status === 'dodijeljen' && nalog.status !== 'zavrsen' && nalog.status !== 'otkazan')) && (
+            {nalog.status !== 'zavrsen' && nalog.status !== 'otkazan' && (
               <button
                 onClick={() => toggleZavrsen(true, false, true)}
                 className="ml-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -936,7 +940,7 @@ export function NalogIzvrsenje({
             {pickerDocs.map((d) => (
               <label key={d.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-sky-100 bg-white px-3 py-1.5 text-sm">
                 <input type="checkbox" checked={gradLinked.includes(d.id)} onChange={(e) => void toggleGradDok(d.id, e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-sky-600" />
-                {d.vrsta === 'slika' ? <img src={d.url} alt="" className="h-6 w-6 rounded object-cover" /> : <FileText className="h-4 w-4 flex-shrink-0 text-slate-400" />}
+                {d.vrsta === 'slika' ? <img loading="lazy" src={d.thumbnailUrl} alt="" className="h-6 w-6 rounded object-cover" /> : <FileText className="h-4 w-4 flex-shrink-0 text-slate-400" />}
                 <a href={d.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-sky-700 hover:underline">{d.naziv}</a>
               </label>
             ))}
@@ -992,7 +996,7 @@ export function NalogIzvrsenje({
                   aria-label={`Pregledaj fotografiju ${f.naziv ?? ''}`}
                   className="block w-full cursor-zoom-in"
                 >
-                  <img src={f.url} alt={f.naziv ?? 'Fotografija'} className="h-28 w-full object-cover" />
+                  <img loading="lazy" src={f.thumbnailUrl} alt={f.naziv ?? 'Fotografija'} className="h-28 w-full object-cover" />
                 </button>
                 <button
                   onClick={() => removeFoto(f)}
@@ -1038,6 +1042,7 @@ export function NalogIzvrsenje({
           )}
           <div className="flex max-h-full max-w-full flex-col items-center gap-3" onClick={(event) => event.stopPropagation()}>
             <img
+              loading="lazy"
               src={selectedFoto.url}
               alt={selectedFoto.naziv ?? 'Fotografija radnog naloga'}
               className="max-h-[82dvh] max-w-[85vw] object-contain"

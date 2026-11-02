@@ -11,6 +11,7 @@ import { RadniciView } from '@/components/views/RadniciView';
 import { VozilaView } from '@/components/views/VozilaView';
 import { OpremaView } from '@/components/views/OpremaView';
 import { RasporedView } from '@/components/views/RasporedView';
+import { TerminskiPlanView } from '@/components/views/TerminskiPlanView';
 import { TroskoviView } from '@/components/views/TroskoviView';
 import { FaktureView } from '@/components/views/FaktureView';
 import { RadnoVrijemeView } from '@/components/views/RadnoVrijemeView';
@@ -164,7 +165,7 @@ function App() {
   }
 
   return (
-    <div className="flex h-dvh min-w-0 bg-slate-50">
+    <div className={`app-shell ${view === 'terminski_plan' ? 'app-shell-print-terminski' : ''} flex h-dvh min-w-0 bg-slate-50`}>
       <Sidebar
         current={view}
         onNavigate={navigate}
@@ -186,11 +187,11 @@ function App() {
           className="fixed inset-y-0 left-0 z-[60] w-3 cursor-pointer"
         />
       )}
-      <main className={`min-h-0 min-w-0 max-w-full flex-1 ${view === 'dashboard' ? 'overflow-y-auto xl:overflow-hidden' : 'overflow-y-auto'}`}>
-        <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4">
+      <main className={`app-main min-h-0 min-w-0 max-w-full flex-1 ${view === 'dashboard' ? 'overflow-y-auto xl:overflow-hidden' : 'overflow-y-auto'}`}>
+        <header className="app-topbar sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4">
           <div className="min-w-0 break-words">
             <p className="text-sm font-bold text-slate-900">GradTech · {company?.naziv}</p>
-            <p className="text-xs text-slate-500">{MODULES.find((module) => module.id === view)?.label ?? 'Aplikacija'}</p>
+            <p className="text-xs text-slate-500">{view === 'terminski_plan' ? 'Terminski plan' : MODULES.find((module) => module.id === view)?.label ?? 'Aplikacija'}</p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {hasWorkerPortal && (
@@ -207,7 +208,7 @@ function App() {
             </button>
           </div>
         </header>
-        <div className={`mx-auto min-w-0 w-full max-w-[2560px] px-3 py-4 sm:px-4 sm:py-6 xl:px-8 2xl:px-12 xl:py-8 ${view === 'dashboard' ? 'xl:h-full xl:min-h-0' : ''}`}>
+        <div className={`app-content mx-auto min-w-0 w-full max-w-[2560px] px-3 py-4 sm:px-4 sm:py-6 xl:px-8 2xl:px-12 xl:py-8 ${view === 'dashboard' ? 'xl:h-full xl:min-h-0' : ''}`}>
           {!viewAuthorized && <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">Provjera prava pristupa…</p>}
           {viewAuthorized && module && !canAccess(module, 'edit') && (
             <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -232,6 +233,10 @@ function App() {
           {viewAuthorized && view === 'raspored' && (
             <RasporedView />
           )}
+          {viewAuthorized && view === 'terminski_plan' && <TerminskiPlanView onOpenGradiliste={(id) => {
+            setFocusGradilisteId(id);
+            setView('gradilista');
+          }} />}
           {viewAuthorized && view === 'troskovi' && <TroskoviView onOpenGradiliste={canAccess('gradilista') ? (id) => {
             setFocusGradilisteId(id);
             setView('gradilista');

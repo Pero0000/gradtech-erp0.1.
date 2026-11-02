@@ -88,8 +88,6 @@ const emptyReport: MobileReport = {
 
 const DEFAULT_POCETAK_RADA = '06:00';
 const DEFAULT_KRAJ_RADA = '16:00';
-const MAX_FOTO_STRANICA = 1600;
-
 interface PhotoUpload {
   id: string;
   nalogId: string;
@@ -97,28 +95,6 @@ interface PhotoUpload {
   previewUrl: string;
   status: 'ceka' | 'salje' | 'greska';
   poruka?: string;
-}
-
-// Fotografije s mobitela (5–12 MB) smanjuju se prije slanja da upload bude brz i pouzdan.
-async function compressPhoto(file: File): Promise<File> {
-  if (file.type && !file.type.startsWith('image/')) return file;
-  try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, MAX_FOTO_STRANICA / Math.max(bitmap.width, bitmap.height));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(bitmap.width * scale);
-    canvas.height = Math.round(bitmap.height * scale);
-    const context = canvas.getContext('2d');
-    if (!context) return file;
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    bitmap.close();
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
-    if (!blob || (file.size > 0 && blob.size >= file.size)) return file;
-    const baseName = (file.name || 'fotografija').replace(/\.[^.]+$/, '');
-    return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg' });
-  } catch {
-    return file;
-  }
 }
 
 const uploadId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -488,7 +464,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     setPhotoQueue((current) => current.map((photo) => photo.id === next.id ? { ...photo, status: 'salje' } : photo));
     void (async () => {
       try {
-        await uploadNalogFoto(next.nalogId, await compressPhoto(next.file), false);
+        await uploadNalogFoto(next.nalogId, next.file, false);
         removeQueuedPhoto(next.id);
         const foto = await fetchNalogFoto(next.nalogId).catch(() => null);
         if (foto && selectedIdRef.current === next.nalogId) {
@@ -882,7 +858,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                         {details.dokumenti.length ? details.dokumenti.map((document) => <a key={document.id} href={document.url} target="_blank" rel="noreferrer" className="block min-h-10 py-2 text-sm font-medium text-sky-700 underline">{document.naziv}</a>) : <p className="text-sm text-slate-500">Nema priloženih dokumenata.</p>}
                         {details.foto.length > 0 && (
                           <div className="mt-2 grid min-w-0 grid-cols-1 xl:grid-cols-2 2xl:grid-cols-4 gap-2">
-                            {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.naziv ?? 'Slika naloga'} className="aspect-square w-full rounded-lg object-cover" /></a>)}
+                            {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer"><img loading="lazy" src={photo.thumbnailUrl} alt={photo.naziv ?? 'Slika naloga'} className="aspect-square w-full rounded-lg object-cover" /></a>)}
                           </div>
                         )}
                       </ReviewBlock>
@@ -1005,7 +981,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                     <WorkOrderPanel title="Fotografije izvedenog rada" icon={<Camera className="h-5 w-5" />} tone="rose" summary={`${details.foto.length} fotografija`}>
                       {details.foto.length > 0 && (
                         <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-2">
-                          {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.naziv ?? 'Fotografija naloga'} className="aspect-square w-full rounded-lg object-cover" /></a>)}
+                          {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer"><img loading="lazy" src={photo.thumbnailUrl} alt={photo.naziv ?? 'Fotografija naloga'} className="aspect-square w-full rounded-lg object-cover" /></a>)}
                         </div>
                       )}
                       {selectedPhotoQueue.length > 0 && (
@@ -1018,7 +994,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                           <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-2">
                             {selectedPhotoQueue.map((photo) => (
                               <div key={photo.id} className="relative">
-                                <img src={photo.previewUrl} alt="Fotografija u slanju" className={`aspect-square w-full rounded-lg object-cover ${photo.status === 'greska' ? 'opacity-40' : 'opacity-60'}`} />
+                                <img loading="lazy" src={photo.previewUrl} alt="Fotografija u slanju" className={`aspect-square w-full rounded-lg object-cover ${photo.status === 'greska' ? 'opacity-40' : 'opacity-60'}`} />
                                 {photo.status === 'salje' && <RefreshCw className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 animate-spin text-white drop-shadow" />}
                                 {photo.status === 'greska' && (
                                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-1">

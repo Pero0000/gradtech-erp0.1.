@@ -54,7 +54,7 @@ export function GradilisteTroskovnik({ gradilisteId, naziv }: { gradilisteId: st
 
   if (groups.length === 0) {
     return (
-      <section className="mb-4 break-inside-avoid rounded-xl border border-orange-200 border-l-4 border-l-orange-500 bg-gradient-to-br from-orange-50/70 to-white p-3 shadow-sm sm:p-4">
+      <section className="gradiliste-estimate mb-4 break-inside-avoid rounded-xl border border-orange-200 border-l-4 border-l-orange-500 bg-gradient-to-br from-orange-50/70 to-white p-3 shadow-sm sm:p-4">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-bold text-orange-950">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 text-orange-700">
             <FileSignature className="h-4 w-4" />
@@ -70,7 +70,7 @@ export function GradilisteTroskovnik({ gradilisteId, naziv }: { gradilisteId: st
   }
 
   return (
-    <section className="mb-4 break-inside-avoid rounded-xl border border-orange-200 border-l-4 border-l-orange-500 bg-white p-3 shadow-sm sm:p-4">
+    <section className="gradiliste-estimate mb-4 break-inside-avoid rounded-xl border border-orange-200 border-l-4 border-l-orange-500 bg-white p-3 shadow-sm sm:p-4">
       <div className="mb-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
         <h3 className="flex items-center gap-2 text-sm font-bold text-orange-950">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 text-orange-700"><FileSignature className="h-4 w-4" /></span>

@@ -1332,13 +1332,13 @@ export function RasporedView() {
                         {(() => {
                           const next = nextDeadline(g, rokovi);
                           return next ? (
-                            <p className="mt-1 truncate rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-900" title={next.label}>
+                            <p className="dark-deadline-next mt-1 truncate rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-900" title={next.label}>
                               <span className="font-semibold">Idući:</span> {next.label} · {formatShortDate(next.datum)}
                             </p>
                           ) : null;
                         })()}
                         {g.opis && (
-                          <div className="mt-1.5 rounded border-l-2 border-red-500 bg-red-50 px-1.5 py-1">
+                          <div className="dark-deadline-note mt-1.5 rounded border-l-2 border-red-500 bg-red-50 px-1.5 py-1">
                             <p className="text-[8px] font-bold uppercase text-red-700">Napomena</p>
                             <p className="line-clamp-3 text-[10px] leading-3 text-red-900">{g.opis}</p>
                           </div>

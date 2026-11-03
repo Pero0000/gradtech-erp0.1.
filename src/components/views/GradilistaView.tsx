@@ -549,7 +549,7 @@ export function GradilistaView({
         </div>
       </div>
 
-      <div className="mb-5 flex flex-wrap gap-2 border-b border-slate-200 pb-3" role="tablist" aria-label="Kategorije gradilišta">
+      <div className="gradilista-category-tabs mb-5 flex flex-wrap gap-2 border-b border-slate-200 pb-3" role="tablist" aria-label="Kategorije gradilišta">
         {gradilisteCategories.map((category) => {
           const count = items.filter((item) => category.statuses.includes(item.status)).length;
           const active = activeCategory === category.key;
@@ -560,11 +560,12 @@ export function GradilistaView({
               type="button"
               role="tab"
               aria-selected={active}
+              data-unpaid={hasUnpaidSites}
               onClick={() => setActiveCategory(category.key)}
-              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${hasUnpaidSites ? active ? 'bg-red-100 text-red-800' : 'bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800' : active ? 'bg-sky-100 text-sky-800' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
+              className={`gradilista-category-tab inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${hasUnpaidSites ? active ? 'bg-red-100 text-red-800' : 'bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800' : active ? 'bg-sky-100 text-sky-800' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
             >
               {category.label}
-              <span className={`rounded-full px-2 py-0.5 text-xs ${hasUnpaidSites ? 'bg-white/80 text-red-800' : active ? 'bg-white/70 text-sky-800' : 'bg-slate-100 text-slate-500'}`}>{count}</span>
+              <span className={`gradilista-category-count rounded-full px-2 py-0.5 text-xs ${hasUnpaidSites ? 'bg-white/80 text-red-800' : active ? 'bg-white/70 text-sky-800' : 'bg-slate-100 text-slate-500'}`}>{count}</span>
             </button>
           );
         })}
@@ -759,7 +760,7 @@ export function GradilistaView({
                   setDropTargetId(null);
                 }}
                 onDrop={(event) => handleDrop(event, columnIndex)}
-                className={`min-h-72 min-w-0 space-y-3 rounded-xl border border-dashed p-3 transition-colors ${dropTargetColumn === columnIndex && !dropTargetId ? 'border-sky-400 bg-sky-50/70' : 'border-slate-200 bg-slate-50/50'}`}
+                className={`gradilista-board-column min-h-72 min-w-0 space-y-3 rounded-xl border border-dashed p-3 transition-colors ${dropTargetColumn === columnIndex && !dropTargetId ? 'is-drop-target border-sky-400 bg-sky-50/70' : 'border-slate-200 bg-slate-50/50'}`}
               >
                 <div className="space-y-2 px-1 pb-1">
                   <div className="flex items-center justify-between">
@@ -859,7 +860,7 @@ export function GradilistaView({
                       ? 'Danas'
                       : `Za ${alert.days} ${alert.days === 1 ? 'dan' : 'dana'}`;
                   return (
-                    <div className={`mt-2 flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-semibold ${style}`}>
+                    <div className={`dark-deadline-badge mt-2 flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-semibold ${style}`}>
                       <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
                       <span className="flex-shrink-0">{text}</span>
                       <span className="min-w-0 flex-1 truncate font-normal">· {alert.label}</span>
@@ -891,7 +892,7 @@ export function GradilistaView({
                 {(() => {
                   const next = nextDeadline(g, rokovi);
                   return next ? (
-                    <div className="mt-2 flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-900">
+                    <div className="dark-deadline-next mt-2 flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-900">
                       <Calendar className="h-3.5 w-3.5 flex-shrink-0 text-amber-600" />
                       <span className="font-semibold uppercase text-[9px]">Idući rok</span>
                       <span className="min-w-0 flex-1 truncate">{next.label}</span>
@@ -901,7 +902,7 @@ export function GradilistaView({
                 })()}
 
                 {g.opis && (
-                  <div className="mt-2 rounded-md border-l-2 border-red-500 bg-red-50 px-2.5 py-1.5">
+                  <div className="dark-deadline-note mt-2 rounded-md border-l-2 border-red-500 bg-red-50 px-2.5 py-1.5">
                     <p className="mb-0.5 text-[9px] font-bold uppercase text-red-700">Napomena</p>
                     <p className="text-xs leading-4 text-red-900 line-clamp-2">{g.opis}</p>
                   </div>

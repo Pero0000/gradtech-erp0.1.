@@ -1056,7 +1056,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     zavrseno: 'Završeno',
   }[gradiliste.status];
   return (
-    <aside className="flex min-h-[28rem] min-w-0 flex-col border-l border-slate-200 bg-white xl:sticky xl:top-4 xl:max-h-[calc(100vh-4rem)]">
+    <aside className="gradiliste-details-panel flex min-h-[28rem] min-w-0 flex-col border-l border-slate-200 bg-white xl:sticky xl:top-4 xl:max-h-[calc(100vh-4rem)]">
       <header className="flex flex-col gap-3 border-b border-slate-200 px-4 py-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

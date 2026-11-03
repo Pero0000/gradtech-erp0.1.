@@ -77,6 +77,30 @@ export function PostavkeView() {
 
       <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-2">
         <div className="min-w-0 space-y-5">
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="font-semibold text-slate-900">Izgled aplikacije</h2>
+            <p className="mb-4 mt-1 text-xs text-slate-500">Odaberi svijetlu ili tamnu temu. Postavka se sprema za ovu tvrtku u ovom pregledniku.</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {([
+                { value: 'light', label: 'Svijetla', description: 'Uobičajeni svijetli izgled', icon: Sun },
+                { value: 'dark', label: 'Tamna', description: 'Tamniji moderan izgled', icon: Moon },
+              ] as const).map(({ value, label, description, icon: Icon }) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={p.theme === value}
+                  onClick={() => update({ ...p, theme: value })}
+                  className={`flex items-center gap-3 rounded-xl border p-4 text-left transition-colors ${p.theme === value ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-200' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                >
+                  <span className={`flex h-10 w-10 items-center justify-center rounded-lg ${p.theme === value ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-600'}`}><Icon className="h-5 w-5" /></span>
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-900">{label}</span>
+                    <span className="block text-xs text-slate-500">{description}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
           {canEditLabels && (
             <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="font-semibold text-slate-900">Vrste gradilišta</h2>

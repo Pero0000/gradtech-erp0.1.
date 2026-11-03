@@ -38,6 +38,7 @@ export interface Postavke {
   nocOd: string;
   obavijesti: Record<ObavijestTip, { on: boolean; dana: number }>;
   push: boolean;
+  theme: 'light' | 'dark';
 }
 
 const KEY = 'tm_postavke';
@@ -47,6 +48,7 @@ export function defaultPostavke(): Postavke {
     danOd: '06:00',
     nocOd: '22:00',
     push: false,
+    theme: 'light',
     obavijesti: Object.fromEntries(obavijestTipovi.map((t) => [t.tip, { on: true, dana: t.defaultDana }])) as Postavke['obavijesti'],
   };
 }
@@ -57,7 +59,12 @@ export function loadPostavke(): Postavke {
   try {
     const saved = JSON.parse(companyStorage.getItem(KEY) ?? 'null') as Partial<Postavke> | null;
     if (!saved) return base;
-    return { ...base, ...saved, obavijesti: { ...base.obavijesti, ...(saved.obavijesti ?? {}) } };
+    return {
+      ...base,
+      ...saved,
+      theme: saved.theme === 'dark' ? 'dark' : 'light',
+      obavijesti: { ...base.obavijesti, ...(saved.obavijesti ?? {}) },
+    };
   } catch {
     return base;
   }
@@ -65,6 +72,13 @@ export function loadPostavke(): Postavke {
 
 export function savePostavke(p: Postavke) {
   companyStorage.setItem(KEY, JSON.stringify(p));
+  applyTheme(p.theme);
+}
+
+export function applyTheme(theme: Postavke['theme']) {
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  window.dispatchEvent(new Event('tm-theme-change'));
 }
 
 // Početak noćnog rada i dnevnog rada u minutama od ponoći (koristi se u obračunu noćnih sati)

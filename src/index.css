@@ -329,3 +329,533 @@
     gap: 0.75rem;
   }
 }
+
+@media screen {
+  html[data-theme='dark'],
+  html[data-theme='dark'] body {
+    color: #e2e8f0;
+    background-color: #0b1220;
+  }
+
+  html[data-theme='dark'] .app-shell,
+  html[data-theme='dark'] .app-main {
+    background-color: #0b1220;
+  }
+
+  html[data-theme='dark'] .bg-white {
+    background-color: #172033;
+  }
+
+  html[data-theme='dark'] .bg-slate-50 {
+    background-color: #111827;
+  }
+
+  html[data-theme='dark'] .bg-slate-100 {
+    background-color: #1e293b;
+  }
+
+  html[data-theme='dark'] .bg-slate-200 {
+    background-color: #334155;
+  }
+
+  html[data-theme='dark'] .bg-slate-300 {
+    background-color: #475569;
+  }
+
+  html[data-theme='dark'] .text-slate-900,
+  html[data-theme='dark'] .text-slate-800 {
+    color: #f1f5f9;
+  }
+
+  html[data-theme='dark'] .text-slate-700,
+  html[data-theme='dark'] .text-slate-600 {
+    color: #cbd5e1;
+  }
+
+  html[data-theme='dark'] .text-slate-500,
+  html[data-theme='dark'] .text-slate-400 {
+    color: #94a3b8;
+  }
+
+  html[data-theme='dark'] .border-slate-100,
+  html[data-theme='dark'] .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
+    border-color: #263449;
+  }
+
+  html[data-theme='dark'] .border-slate-200 {
+    border-color: #334155;
+  }
+
+  html[data-theme='dark'] .border-slate-300 {
+    border-color: #475569;
+  }
+
+  html[data-theme='dark'] input:not([type='checkbox']):not([type='radio']),
+  html[data-theme='dark'] textarea,
+  html[data-theme='dark'] select {
+    color: #e2e8f0;
+    background-color: #111827;
+    border-color: #475569;
+  }
+
+  html[data-theme='dark'] input::placeholder,
+  html[data-theme='dark'] textarea::placeholder {
+    color: #94a3b8;
+  }
+
+  html[data-theme='dark'] option {
+    color: #e2e8f0;
+    background-color: #111827;
+  }
+
+  html[data-theme='dark'] .hover\:bg-slate-50:hover,
+  html[data-theme='dark'] .hover\:bg-slate-100:hover {
+    background-color: #263449;
+  }
+
+  html[data-theme='dark'] .hover\:bg-white:hover {
+    background-color: #263449;
+  }
+
+  html[data-theme='dark'] .bg-amber-50,
+  html[data-theme='dark'] .bg-amber-100,
+  html[data-theme='dark'] .bg-orange-50,
+  html[data-theme='dark'] .bg-orange-100,
+  html[data-theme='dark'] .bg-yellow-50,
+  html[data-theme='dark'] .bg-yellow-100 {
+    background-color: #332719;
+  }
+
+  html[data-theme='dark'] .text-amber-800,
+  html[data-theme='dark'] .text-amber-900,
+  html[data-theme='dark'] .text-orange-800,
+  html[data-theme='dark'] .text-orange-900,
+  html[data-theme='dark'] .text-yellow-800,
+  html[data-theme='dark'] .text-yellow-900 {
+    color: #fcd34d;
+  }
+
+  html[data-theme='dark'] .border-amber-100,
+  html[data-theme='dark'] .border-amber-200,
+  html[data-theme='dark'] .border-orange-100,
+  html[data-theme='dark'] .border-orange-200,
+  html[data-theme='dark'] .border-yellow-100,
+  html[data-theme='dark'] .border-yellow-200 {
+    border-color: #725522;
+  }
+
+  html[data-theme='dark'] .bg-emerald-50,
+  html[data-theme='dark'] .bg-emerald-100,
+  html[data-theme='dark'] .bg-green-50,
+  html[data-theme='dark'] .bg-green-100 {
+    background-color: #123226;
+  }
+
+  html[data-theme='dark'] .text-emerald-700,
+  html[data-theme='dark'] .text-emerald-800,
+  html[data-theme='dark'] .text-green-700,
+  html[data-theme='dark'] .text-green-800 {
+    color: #86efac;
+  }
+
+  html[data-theme='dark'] .border-emerald-100,
+  html[data-theme='dark'] .border-emerald-200,
+  html[data-theme='dark'] .border-green-100,
+  html[data-theme='dark'] .border-green-200 {
+    border-color: #1f6348;
+  }
+
+  html[data-theme='dark'] .bg-red-50,
+  html[data-theme='dark'] .bg-red-100,
+  html[data-theme='dark'] .bg-rose-50,
+  html[data-theme='dark'] .bg-rose-100 {
+    background-color: #351c28;
+  }
+
+  html[data-theme='dark'] .text-red-700,
+  html[data-theme='dark'] .text-red-800,
+  html[data-theme='dark'] .text-red-900,
+  html[data-theme='dark'] .text-rose-700,
+  html[data-theme='dark'] .text-rose-800 {
+    color: #fda4af;
+  }
+
+  html[data-theme='dark'] .border-red-100,
+  html[data-theme='dark'] .border-red-200,
+  html[data-theme='dark'] .border-rose-100,
+  html[data-theme='dark'] .border-rose-200 {
+    border-color: #713044;
+  }
+
+  html[data-theme='dark'] .bg-sky-50,
+  html[data-theme='dark'] .bg-sky-100,
+  html[data-theme='dark'] .bg-blue-50,
+  html[data-theme='dark'] .bg-blue-100,
+  html[data-theme='dark'] .bg-indigo-50,
+  html[data-theme='dark'] .bg-indigo-100 {
+    background-color: #1b2b45;
+  }
+
+  html[data-theme='dark'] .text-sky-700,
+  html[data-theme='dark'] .text-sky-800,
+  html[data-theme='dark'] .text-blue-700,
+  html[data-theme='dark'] .text-blue-800,
+  html[data-theme='dark'] .text-indigo-700,
+  html[data-theme='dark'] .text-indigo-800 {
+    color: #93c5fd;
+  }
+
+  html[data-theme='dark'] .border-sky-100,
+  html[data-theme='dark'] .border-sky-200,
+  html[data-theme='dark'] .border-blue-100,
+  html[data-theme='dark'] .border-blue-200,
+  html[data-theme='dark'] .border-indigo-100,
+  html[data-theme='dark'] .border-indigo-200 {
+    border-color: #35547f;
+  }
+
+  html[data-theme='dark'] .text-red-600,
+  html[data-theme='dark'] .text-red-500,
+  html[data-theme='dark'] .text-rose-700,
+  html[data-theme='dark'] .text-rose-800 {
+    color: #fda4af;
+  }
+
+  html[data-theme='dark'] .text-violet-700,
+  html[data-theme='dark'] .text-violet-800,
+  html[data-theme='dark'] .text-purple-700,
+  html[data-theme='dark'] .text-purple-800 {
+    color: #c4b5fd;
+  }
+
+  html[data-theme='dark'] .bg-rose-50,
+  html[data-theme='dark'] .bg-rose-100,
+  html[data-theme='dark'] .bg-violet-50,
+  html[data-theme='dark'] .bg-violet-100,
+  html[data-theme='dark'] .bg-purple-50,
+  html[data-theme='dark'] .bg-purple-100 {
+    background-color: #30243d;
+  }
+
+  html[data-theme='dark'] .border-rose-200,
+  html[data-theme='dark'] .border-rose-300,
+  html[data-theme='dark'] .border-violet-200,
+  html[data-theme='dark'] .border-purple-200 {
+    border-color: #61466f;
+  }
+
+  html[data-theme='dark'] .bg-pink-50,
+  html[data-theme='dark'] .bg-pink-100 {
+    background-color: #51263f;
+  }
+
+  html[data-theme='dark'] .text-pink-400,
+  html[data-theme='dark'] .text-pink-500,
+  html[data-theme='dark'] .text-pink-600,
+  html[data-theme='dark'] .text-pink-700 {
+    color: #ff9dcc;
+  }
+
+  html[data-theme='dark'] .border-pink-100,
+  html[data-theme='dark'] .border-pink-200,
+  html[data-theme='dark'] .border-pink-300 {
+    border-color: #b94d82;
+  }
+
+  html[data-theme='dark'] .gradilista-view-container .gradiliste-board-card {
+    border-color: #3b4b62;
+    background-color: #172033;
+  }
+
+  html[data-theme='dark'] .gradilista-view-container .gradiliste-board-card:hover {
+    border-color: #60a5fa;
+  }
+
+  html[data-theme='dark'] .gradilista-view-container .gradiliste-board-card .bg-white\/90 {
+    background-color: #111827;
+  }
+
+  html[data-theme='dark'] .gradilista-view-container .gradilista-category-tabs {
+    border-color: #334155;
+  }
+
+  html[data-theme='dark'] .gradilista-view-container .gradilista-category-tab:not([aria-selected='true']) {
+    color: #cbd5e1;
+  }
+
+  html[data-theme='dark'] .gradilista-view-container .gradilista-category-tab:not([aria-selected='true']):hover {
+    background-color: #263449;
+    color: #f1f5f9;
+  }
+
+  html[data-theme='dark'] .gradilista-view-container .gradilista-category-tab[aria-selected='true'] {
+    background-color: #1e3a5f;
+    color: #bfdbfe;
+  }
+
+  html[data-theme='dark'] .gradilista-view-container .gradilista-category-tab[data-unpaid='true'][aria-selected='true'] {
+    background-color: #5a2430;
+    color: #ffe4e6;
+  }
+
+  html[data-theme='dark'] .gradilista-view-container .gradilista-category-tab[data-unpaid='true']:not([aria-selected='true']) {
+    background-color: #351c28;
+    color: #fda4af;
+  }
+
+  html[data-theme='dark'] .gradilista-view-container .gradilista-category-count {
+    background-color: #334155;
+    color: #e2e8f0;
+  }
+
+  html[data-theme='dark'] .gradilista-view-container .gradilista-category-tab[aria-selected='true'] .gradilista-category-count {
+    background-color: #35547f;
+    color: #eff6ff;
+  }
+
+  html[data-theme='dark'] .gradilista-view-container .gradilista-category-tab[data-unpaid='true'] .gradilista-category-count {
+    background-color: #713044;
+    color: #fff1f2;
+  }
+
+  html[data-theme='dark'] .gradilista-view-container .gradilista-board-column {
+    border-color: #3b4b62;
+    background-color: #111827;
+  }
+
+  html[data-theme='dark'] .gradilista-view-container .gradilista-board-column.is-drop-target {
+    border-color: #60a5fa;
+    background-color: #1b2b45;
+  }
+
+  html[data-theme='dark'] .gradiliste-details-panel .text-amber-950 {
+    color: #fcd34d;
+  }
+
+  html[data-theme='dark'] .gradiliste-details-panel .text-sky-950 {
+    color: #93c5fd;
+  }
+
+  html[data-theme='dark'] .gradiliste-details-panel .text-violet-950 {
+    color: #c4b5fd;
+  }
+
+  html[data-theme='dark'] .gradiliste-details-panel .text-rose-950 {
+    color: #fda4af;
+  }
+
+  html[data-theme='dark'] .gradiliste-details-panel .text-emerald-950 {
+    color: #86efac;
+  }
+
+  html[data-theme='dark'] .gradiliste-details-panel .bg-amber-100,
+  html[data-theme='dark'] .gradiliste-details-panel .bg-sky-100,
+  html[data-theme='dark'] .gradiliste-details-panel .bg-violet-100,
+  html[data-theme='dark'] .gradiliste-details-panel .bg-rose-100,
+  html[data-theme='dark'] .gradiliste-details-panel .bg-emerald-100 {
+    border: 1px solid currentColor;
+  }
+
+  html[data-theme='dark'] .gradiliste-estimate {
+    border-color: #8a5b1d;
+    border-left-color: #f59e0b;
+    background-color: #282116 !important;
+    background-image: none !important;
+    color: #e2e8f0;
+  }
+
+  html[data-theme='dark'] .gradiliste-estimate h3 {
+    color: #fcd9a0;
+  }
+
+  html[data-theme='dark'] .gradiliste-estimate h3 > span {
+    border: 1px solid #a65c16;
+    background-color: #4a2d16;
+    color: #fdba74;
+  }
+
+  html[data-theme='dark'] .gradiliste-estimate button {
+    border-color: #6b7280;
+    color: #cbd5e1;
+  }
+
+  html[data-theme='dark'] .gradiliste-estimate button:hover {
+    border-color: #60a5fa;
+    color: #bfdbfe;
+  }
+
+  html[data-theme='dark'] .gradiliste-estimate .bg-slate-50 {
+    border-color: #475569;
+    background-color: #172033;
+  }
+
+  html[data-theme='dark'] .gradiliste-estimate .text-orange-700 {
+    color: #fdba74;
+  }
+
+  html[data-theme='dark'] .daily-schedule-view .schedule-sites-grid,
+  html[data-theme='dark'] .daily-schedule-view .schedule-support-grid > *,
+  html[data-theme='dark'] .daily-schedule-view .schedule-vehicle-card {
+    border-color: #3b4b62;
+  }
+
+  html[data-theme='dark'] .daily-schedule-view .schedule-site-card {
+    border-color: #3b4b62;
+    background-color: #172033;
+  }
+
+  html[data-theme='dark'] .daily-schedule-view .schedule-site-card .text-red-600,
+  html[data-theme='dark'] .daily-schedule-view .schedule-vehicle-card .text-red-600,
+  html[data-theme='dark'] .daily-schedule-view .schedule-vehicle-card .text-emerald-700 {
+    color: #fda4af;
+  }
+
+  html[data-theme='dark'] .daily-schedule-view .schedule-vehicle-card .text-emerald-700 {
+    color: #86efac;
+  }
+
+  html[data-theme='dark'] .daily-schedule-view .schedule-vehicle-card {
+    background-color: #1e293b;
+  }
+
+  html[data-theme='dark'] .daily-schedule-view .schedule-vehicle-row-label,
+  html[data-theme='dark'] .daily-schedule-view .schedule-vehicle-crew > div,
+  html[data-theme='dark'] .daily-schedule-view .schedule-vehicle-sites > div {
+    border-color: #475569;
+    background-color: #111827;
+  }
+
+  html[data-theme='dark'] .daily-schedule-view .schedule-vehicle-header > span[title] {
+    border-color: #facc15;
+    background-color: #6b5010;
+    color: #fff7c2;
+  }
+
+  html[data-theme='dark'] .daily-schedule-view .schedule-vehicle-header .bg-amber-200 {
+    background-color: #5b4516;
+    color: #fff1b3;
+    box-shadow: inset 0 0 0 1px #eab308;
+  }
+
+  html[data-theme='dark'] .daily-schedule-view .schedule-vehicle-card input[aria-label='Radno vrijeme'] {
+    border: 1px solid #facc15;
+    background-color: #5b4516;
+    color: #fff7c2;
+    font-weight: 600;
+  }
+
+  html[data-theme='dark'] .daily-schedule-view .schedule-vehicle-card input[aria-label='Radno vrijeme']:disabled {
+    background-color: #3d3219;
+    color: #e8d99a;
+  }
+
+  html[data-theme='dark'] .daily-schedule-view .schedule-vehicle-card input[aria-label='Ručni unos'] {
+    color: #e2e8f0;
+  }
+
+  html[data-theme='dark'] .dark-deadline-next {
+    border: 1px solid #eab308;
+    background-color: #5b4516 !important;
+    color: #fff7c2 !important;
+    box-shadow: 0 0 0 1px rgb(234 179 8 / 25%);
+  }
+
+  html[data-theme='dark'] .dark-deadline-next svg {
+    color: #fde047 !important;
+  }
+
+  html[data-theme='dark'] .dark-deadline-badge {
+    border-color: #fb7185 !important;
+    background-color: #6b2432 !important;
+    color: #fff1f2 !important;
+    box-shadow: 0 0 0 1px rgb(251 113 133 / 28%);
+  }
+
+  html[data-theme='dark'] .dark-deadline-note {
+    border-left-color: #fb7185 !important;
+    background-color: #5a2430 !important;
+    color: #ffe4e6 !important;
+  }
+
+  html[data-theme='dark'] .dark-deadline-note p {
+    color: #ffe4e6 !important;
+  }
+
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-grid {
+    border-color: #3b4b62;
+    background-color: #111827;
+  }
+
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-grid-header,
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-grid-header > div:first-child {
+    border-color: #3b4b62;
+    background-color: #1e293b;
+  }
+
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-site-row {
+    background-color: #1b2b45;
+  }
+
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-site-row > button {
+    border-color: #3b4b62;
+    background-color: #223755;
+    color: #bfdbfe;
+  }
+
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-site-row > button:hover {
+    background-color: #2b4568;
+  }
+
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-task-row > button {
+    border-color: #334155;
+    background-color: #172033;
+    color: #e2e8f0;
+  }
+
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-task-row > button:hover {
+    background-color: #263449;
+  }
+
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-task-row,
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-site-row,
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-month-band {
+    border-color: #334155;
+  }
+
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-day-header.bg-sky-100 {
+    background-color: #1e3a5f;
+    color: #bfdbfe;
+  }
+
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-day-header.bg-rose-100 {
+    background-color: #662b49;
+    color: #ffe4f1;
+    box-shadow: inset 0 -2px 0 #fb7185;
+  }
+
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-day-header.bg-slate-100 {
+    background-color: #263449;
+    color: #cbd5e1;
+  }
+
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-task-row > div > .bg-rose-50,
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-site-timeline > .bg-rose-50 {
+    background-color: #402337;
+  }
+
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-task-row > div > .border-rose-200,
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-site-timeline > .border-rose-200 {
+    border-color: #a44773;
+  }
+
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-task-row > div > .bg-slate-50,
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-site-timeline > .bg-slate-50 {
+    background-color: #182232;
+  }
+
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-task-row [style*='background-color'],
+  html[data-theme='dark'] .terminski-plan-view .terminski-plan-site-timeline [style*='background-color'] {
+    filter: brightness(1.7) saturate(1.05);
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 65%), 0 0 8px rgb(244 114 182 / 55%);
+  }
+}

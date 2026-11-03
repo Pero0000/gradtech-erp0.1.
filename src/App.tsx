@@ -23,7 +23,7 @@ import { AsistentView } from '@/components/views/AsistentView';
 import { KorisniciView } from '@/components/views/KorisniciView';
 import { TvrtkeView } from '@/components/views/TvrtkeView';
 import { loadObavijesti, sendPushNotifications } from '@/lib/obavijesti';
-import { applyTheme, loadPostavke } from '@/lib/postavke';
+import { applyTheme, applyUserLayout, loadPostavke, loadUserLayout, loadUserTheme } from '@/lib/postavke';
 import {
   fetchGradilista,
   fetchRadnici,
@@ -69,9 +69,14 @@ function App() {
   }, [profile?.id]);
 
   useEffect(() => {
-    if (!company?.id || !profile?.approved) return;
-    applyTheme(loadPostavke().theme);
-  }, [company?.id, profile?.approved]);
+    if (!company?.id || !profile?.approved) {
+      applyTheme('light');
+      applyUserLayout('standardni');
+      return;
+    }
+    applyTheme(loadUserTheme(profile.id));
+    applyUserLayout(loadUserLayout(profile.id));
+  }, [company?.id, profile?.approved, profile?.id]);
 
   useEffect(() => {
     if (!profile?.approved || !canAccess('obavijesti')) return;

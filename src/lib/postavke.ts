@@ -41,7 +41,11 @@ export interface Postavke {
   theme: 'light' | 'dark';
 }
 
+export type RasporedSučelja = 'standardni' | 'pregledni';
+
 const KEY = 'tm_postavke';
+const RASPORED_KEY_PREFIX = 'tm_raspored_sucelja_';
+const TEMA_KEY_PREFIX = 'tm_tema_';
 
 export function defaultPostavke(): Postavke {
   return {
@@ -71,14 +75,52 @@ export function loadPostavke(): Postavke {
 }
 
 export function savePostavke(p: Postavke) {
-  companyStorage.setItem(KEY, JSON.stringify(p));
-  applyTheme(p.theme);
+  const companySettings: Omit<Postavke, 'theme'> = {
+    danOd: p.danOd,
+    nocOd: p.nocOd,
+    obavijesti: p.obavijesti,
+    push: p.push,
+  };
+  companyStorage.setItem(KEY, JSON.stringify(companySettings));
 }
 
 export function applyTheme(theme: Postavke['theme']) {
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
   window.dispatchEvent(new Event('tm-theme-change'));
+}
+
+export function loadUserTheme(userId: string | null | undefined): Postavke['theme'] {
+  if (!userId) return 'light';
+  const key = `${TEMA_KEY_PREFIX}${userId}`;
+  const saved = window.localStorage.getItem(key);
+  if (saved === 'light' || saved === 'dark') return saved;
+
+  const legacyTheme = loadPostavke().theme;
+  saveUserTheme(userId, legacyTheme);
+  return legacyTheme;
+}
+
+export function saveUserTheme(userId: string, theme: Postavke['theme']) {
+  window.localStorage.setItem(`${TEMA_KEY_PREFIX}${userId}`, theme);
+  applyTheme(theme);
+}
+
+export function loadUserLayout(userId: string | null | undefined): RasporedSučelja {
+  if (!userId) return 'standardni';
+  return window.localStorage.getItem(`${RASPORED_KEY_PREFIX}${userId}`) === 'pregledni'
+    ? 'pregledni'
+    : 'standardni';
+}
+
+export function saveUserLayout(userId: string, layout: RasporedSučelja) {
+  window.localStorage.setItem(`${RASPORED_KEY_PREFIX}${userId}`, layout);
+  applyUserLayout(layout);
+}
+
+export function applyUserLayout(layout: RasporedSučelja) {
+  document.documentElement.dataset.layout = layout;
+  window.dispatchEvent(new Event('tm-layout-change'));
 }
 
 // Početak noćnog rada i dnevnog rada u minutama od ponoći (koristi se u obračunu noćnih sati)

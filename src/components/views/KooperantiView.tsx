@@ -6,10 +6,15 @@ import {
   ClipboardList,
   FileText,
   Handshake,
+  LayoutGrid,
   ChevronDown,
   Pencil,
   Plus,
   Search,
+  Table2,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   Trash2,
   UploadCloud,
 } from 'lucide-react';
@@ -109,6 +114,8 @@ interface CostDisplayGroup {
   invoiceId: string | null;
 }
 
+type SortKey = 'naziv' | 'djelatnost' | 'aktivna_gradilista' | 'ukupni_trosak' | 'ovogodisnji_trosak' | 'otvoreno';
+
 function groupCostsForDisplay(costs: Trosak[]): CostDisplayGroup[] {
   const groups = new Map<string, CostDisplayGroup>();
   for (const cost of costs) {
@@ -171,6 +178,11 @@ export function KooperantiView() {
   const [fakture, setFakture] = useState<Faktura[]>([]);
   const [angazmani, setAngazmani] = useState<KooperantAngazman[]>([]);
   const [query, setQuery] = useState('');
+  const [prikaz, setPrikaz] = useState<'kartice' | 'tablica'>(() => (
+    localStorage.getItem('tm_kooperanti_prikaz') === 'tablica' ? 'tablica' : 'kartice'
+  ));
+  const [sortKey, setSortKey] = useState<SortKey>('naziv');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -343,6 +355,44 @@ export function KooperantiView() {
     return !q || [item.naziv, item.djelatnost, item.oib, item.kontakt_osoba, item.mjesto, item.telefon, item.email]
       .some((value) => (value ?? '').toLocaleLowerCase('hr').includes(q));
   });
+  const filteredRows = filtered.map((kooperant) => ({ kooperant, summary: summaryFor(kooperant.id) }));
+  const sortedRows = [...filteredRows].sort((first, second) => {
+    const value = (row: typeof filteredRows[number]) => {
+      switch (sortKey) {
+        case 'djelatnost': return row.kooperant.djelatnost ?? '';
+        case 'aktivna_gradilista': return row.summary.activeCount;
+        case 'ukupni_trosak': return row.summary.total;
+        case 'ovogodisnji_trosak': return row.summary.annual;
+        case 'otvoreno': return row.summary.openTotal;
+        default: return row.kooperant.naziv;
+      }
+    };
+    const firstValue = value(first);
+    const secondValue = value(second);
+    const comparison = typeof firstValue === 'number' && typeof secondValue === 'number'
+      ? firstValue - secondValue
+      : String(firstValue).localeCompare(String(secondValue), 'hr', { numeric: true, sensitivity: 'base' });
+    return comparison * (sortDir === 'asc' ? 1 : -1);
+  });
+  const setView = (next: 'kartice' | 'tablica') => {
+    setPrikaz(next);
+    localStorage.setItem('tm_kooperanti_prikaz', next);
+  };
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir((direction) => direction === 'asc' ? 'desc' : 'asc');
+    else {
+      setSortKey(key);
+      setSortDir(key === 'naziv' || key === 'djelatnost' ? 'asc' : 'desc');
+    }
+  };
+  const SortTh = ({ k, label, right = false }: { k: SortKey; label: string; right?: boolean }) => (
+    <th aria-sort={sortKey === k ? sortDir === 'asc' ? 'ascending' : 'descending' : 'none'} className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 ${right ? 'text-right' : 'text-left'}`}>
+      <button type="button" onClick={() => toggleSort(k)} className={`inline-flex items-center gap-1 hover:text-sky-700 ${sortKey === k ? 'text-sky-700' : ''}`}>
+        {label}
+        {sortKey === k ? (sortDir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-40" />}
+      </button>
+    </th>
+  );
 
   const openForm = (kooperant?: Kooperant) => {
     setEditing(kooperant ?? null);
@@ -829,6 +879,14 @@ export function KooperantiView() {
           <p className="mt-1 text-sm text-slate-500">Poslovni odnosi, angažmani, dokumenti i troškovi · ukupno {eur(totalCosts)}</p>
         </div>
         <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
+          <div className="inline-flex self-start rounded-lg border border-slate-200 bg-white p-0.5">
+            <button type="button" onClick={() => setView('kartice')} aria-pressed={prikaz === 'kartice'} className={`rounded-md p-2 ${prikaz === 'kartice' ? 'bg-sky-100 text-sky-700' : 'text-slate-500 hover:bg-slate-50'}`} title="Kartice" aria-label="Kartični prikaz">
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+            <button type="button" onClick={() => setView('tablica')} aria-pressed={prikaz === 'tablica'} className={`rounded-md p-2 ${prikaz === 'tablica' ? 'bg-sky-100 text-sky-700' : 'text-slate-500 hover:bg-slate-50'}`} title="Tablica" aria-label="Tablični prikaz">
+              <Table2 className="h-4 w-4" />
+            </button>
+          </div>
           <ExportMenu
             disabled={filtered.length === 0}
             build={() => ({
@@ -870,10 +928,60 @@ export function KooperantiView() {
           description="Dodajte kooperanta pa evidentirajte angažmane, troškove i dokumentaciju."
         />
       ) : (
-        <div className="grid min-w-0 gap-3 2xl:grid-cols-2">
-          {filtered.map((kooperant) => {
-            const summary = summaryFor(kooperant.id);
-            return (
+        prikaz === 'tablica' ? (
+          <div className="min-w-0 max-w-full overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50">
+                  <SortTh k="naziv" label="Kooperant" />
+                  <SortTh k="djelatnost" label="Djelatnost" />
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Kontakt</th>
+                  <SortTh k="aktivna_gradilista" label="Aktivni angažmani" right />
+                  <SortTh k="ukupni_trosak" label="Ukupan trošak" right />
+                  <SortTh k="ovogodisnji_trosak" label="Ove godine" right />
+                  <SortTh k="otvoreno" label="Otvoreno za plaćanje" right />
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Akcije</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {sortedRows.map(({ kooperant, summary }, index) => (
+                  <tr key={kooperant.id} className="group hover:bg-slate-50">
+                    <td className="px-4 py-3">
+                      <button type="button" onClick={() => void openProfile(kooperant)} className="text-left font-medium text-slate-900 hover:text-sky-700 hover:underline">
+                        <span className="mr-2 text-slate-400">{index + 1}.</span>{kooperant.naziv}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{kooperant.djelatnost || '—'}</td>
+                    <td className="px-4 py-3">
+                      <div className="max-w-64 space-y-0.5 text-xs text-slate-500">
+                        {kooperant.kontakt_osoba && <p className="truncate">{kooperant.kontakt_osoba}</p>}
+                        {kooperant.telefon && <p className="truncate">{kooperant.telefon}</p>}
+                        {kooperant.email && <p className="truncate">{kooperant.email}</p>}
+                        {!kooperant.kontakt_osoba && !kooperant.telefon && !kooperant.email && '—'}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right text-slate-600">{summary.activeCount}</td>
+                    <td className="px-4 py-3 text-right font-medium text-slate-700">{eur(summary.total)}</td>
+                    <td className="px-4 py-3 text-right text-slate-600">{eur(summary.annual)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <span className={summary.openTotal > 0 ? 'font-semibold text-amber-700' : 'text-slate-500'}>{eur(summary.openTotal)}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {canEditKooperanti && (
+                        <div className="flex justify-end gap-1">
+                          <button type="button" onClick={() => openForm(kooperant)} aria-label={`Uredi ${kooperant.naziv}`} className="rounded p-1.5 text-slate-500 hover:bg-slate-100 hover:text-sky-700"><Pencil className="h-4 w-4" /></button>
+                          <button type="button" onClick={() => setDeleteTarget(kooperant)} aria-label={`Izbriši ${kooperant.naziv}`} className="rounded p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-700"><Trash2 className="h-4 w-4" /></button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="grid min-w-0 gap-3 2xl:grid-cols-2">
+            {sortedRows.map(({ kooperant, summary }) => (
               <article key={kooperant.id} className="min-w-0 rounded-xl border border-slate-200 bg-white shadow-sm">
                 <button type="button" onClick={() => void openProfile(kooperant)} className="block w-full min-w-0 p-4 text-left hover:bg-slate-50">
                   <div className="flex min-w-0 items-start justify-between gap-3">
@@ -915,9 +1023,9 @@ export function KooperantiView() {
                   </div>
                 </div>
               </article>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )
       )}
 
       <Modal

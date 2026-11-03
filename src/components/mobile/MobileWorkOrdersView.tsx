@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Camera, Fuel, ImagePlus, Trash2, Check, ChevronLeft, ChevronRight, ClipboardCheck, Clock3, CreditCard, FileText, Flag, Gauge, ListChecks, LogOut, MapPin, Package, Play, Plus, RefreshCw, Truck, Wrench } from 'lucide-react';
+import { AlertTriangle, Camera, Fuel, ImagePlus, Trash2, Check, ChevronLeft, ChevronRight, ClipboardCheck, Clock3, CreditCard, FileText, Flag, Gauge, ListChecks, LogOut, MapPin, Moon, Package, Play, Plus, RefreshCw, Sun, Truck, Wrench } from 'lucide-react';
 import { useAuth } from '@/auth/useAuth';
+import { loadUserTheme, saveUserTheme } from '@/lib/postavke';
 import { usePushRegistration } from '@/components/mobile/usePushRegistration';
 import {
   addNalogStavka,
@@ -153,6 +154,7 @@ function Button({
 export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) {
   const { profile, company, signOut } = useAuth();
   const pushError = usePushRegistration(profile?.id ?? '');
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
   const [workerName, setWorkerName] = useState<string | null>(null);
   const [orders, setOrders] = useState<MobileRadniNalog[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -182,6 +184,10 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     && selected.mobile_status !== 'odobren'
     && selected.mobile_status !== 'zakljucen_bez_potvrde',
   );
+
+  useEffect(() => {
+    if (profile?.id && company?.id) setTheme(loadUserTheme(profile.id));
+  }, [profile?.id, company?.id]);
 
   useEffect(() => {
     if (!profile?.radnik_id) return;
@@ -650,6 +656,20 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     }
   };
 
+  const toggleTheme = () => {
+    if (!profile?.id) {
+      setError('Tema se ne može spremiti jer korisnički račun nije učitan.');
+      return;
+    }
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    try {
+      saveUserTheme(profile.id, nextTheme);
+      setTheme(nextTheme);
+    } catch (reason) {
+      setError(errorMessage(reason, 'Promjena teme nije spremljena.'));
+    }
+  };
+
   return (
     <main className="min-h-[100dvh] min-w-0 bg-slate-100 pb-[env(safe-area-inset-bottom)] [overflow-wrap:anywhere]">
       <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 pt-[max(env(safe-area-inset-top),0.75rem)]">
@@ -665,6 +685,9 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
               ERP
             </button>
           )}
+          <button type="button" onClick={toggleTheme} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label={theme === 'dark' ? 'Uključi svijetlu temu' : 'Uključi tamnu temu'} title={theme === 'dark' ? 'Svijetla tema' : 'Tamna tema'}>
+            {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+          </button>
           <button type="button" onClick={() => void refreshOrders().catch((reason: unknown) => setError(errorMessage(reason, 'Osvježavanje nije uspjelo.')))} className="rounded-lg p-2 text-slate-500" aria-label="Osvježi naloge">
             <RefreshCw className="h-5 w-5" />
           </button>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Moon, Sun } from 'lucide-react';
-import { loadPostavke, obavijestTipovi, savePostavke, type ObavijestTip, type Postavke } from '@/lib/postavke';
+import { LayoutDashboard, Moon, PanelsTopLeft, Sun } from 'lucide-react';
+import { loadPostavke, loadUserLayout, loadUserTheme, obavijestTipovi, savePostavke, saveUserLayout, saveUserTheme, type ObavijestTip, type Postavke, type RasporedSučelja } from '@/lib/postavke';
 import { useAuth } from '@/auth/useAuth';
 import { DEFAULT_GRADILISTE_COLUMN_LABELS, manageCompany } from '@/lib/company';
 import { Field, TextInput } from '@/components/ui/Field';
@@ -21,8 +21,11 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (value: boolean) => v
 }
 
 export function PostavkeView() {
-  const { company, isAdmin, isPlatformOwner, refreshAccess } = useAuth();
+  const { company, profile, isAdmin, isPlatformOwner, refreshAccess } = useAuth();
   const [p, setP] = useState<Postavke>(loadPostavke);
+  const [layout, setLayout] = useState<RasporedSučelja>(() => loadUserLayout(profile?.id));
+  const [layoutError, setLayoutError] = useState('');
+  const [themeError, setThemeError] = useState('');
   const [columnLabels, setColumnLabels] = useState<string[]>([...DEFAULT_GRADILISTE_COLUMN_LABELS]);
   const [savingLabels, setSavingLabels] = useState(false);
   const [labelsError, setLabelsError] = useState('');
@@ -31,6 +34,14 @@ export function PostavkeView() {
   useEffect(() => {
     setColumnLabels(company?.postavke.gradiliste_column_labels ?? [...DEFAULT_GRADILISTE_COLUMN_LABELS]);
   }, [company]);
+
+  useEffect(() => {
+    setLayout(loadUserLayout(profile?.id));
+  }, [profile?.id]);
+
+  useEffect(() => {
+    setP((previous) => ({ ...previous, theme: loadUserTheme(profile?.id) }));
+  }, [profile?.id, company?.id]);
 
   const update = (next: Postavke) => {
     setP(next);
@@ -72,14 +83,14 @@ export function PostavkeView() {
     <div className="min-w-0 max-w-full break-words">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Postavke sustava</h1>
-        <p className="mt-1 text-sm text-slate-500">Obavijesti i dnevni/noćni rad spremaju se u ovom pregledniku; nazivi vrsta gradilišta spremaju se za cijelu tvrtku.</p>
+        <p className="mt-1 text-sm text-slate-500">Tema i raspored spremaju se zasebno po korisničkom računu na ovom uređaju. Obavijesti i dnevni/noćni rad spremaju se u ovom pregledniku, a nazivi vrsta gradilišta za cijelu tvrtku.</p>
       </div>
 
       <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-2">
         <div className="min-w-0 space-y-5">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="font-semibold text-slate-900">Izgled aplikacije</h2>
-            <p className="mb-4 mt-1 text-xs text-slate-500">Odaberi svijetlu ili tamnu temu. Postavka se sprema za ovu tvrtku u ovom pregledniku.</p>
+            <p className="mb-4 mt-1 text-xs text-slate-500">Odaberi svijetlu ili tamnu temu. Postavka se sprema zasebno za tvoj korisnički račun na ovom uređaju.</p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {([
                 { value: 'light', label: 'Svijetla', description: 'Uobičajeni svijetli izgled', icon: Sun },
@@ -89,8 +100,18 @@ export function PostavkeView() {
                   key={value}
                   type="button"
                   aria-pressed={p.theme === value}
-                  onClick={() => update({ ...p, theme: value })}
-                  className={`flex items-center gap-3 rounded-xl border p-4 text-left transition-colors ${p.theme === value ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-200' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                  disabled={!profile?.id}
+                  onClick={() => {
+                    if (!profile?.id) return;
+                    setThemeError('');
+                    try {
+                      saveUserTheme(profile.id, value);
+                      setP((previous) => ({ ...previous, theme: value }));
+                    } catch (reason) {
+                      setThemeError(reason instanceof Error ? reason.message : 'Tema nije spremljena.');
+                    }
+                  }}
+                  className={`flex items-center gap-3 rounded-xl border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${p.theme === value ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-200' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
                 >
                   <span className={`flex h-10 w-10 items-center justify-center rounded-lg ${p.theme === value ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-600'}`}><Icon className="h-5 w-5" /></span>
                   <span>
@@ -100,6 +121,42 @@ export function PostavkeView() {
                 </button>
               ))}
             </div>
+            {themeError && <p role="alert" className="mt-3 text-sm text-red-700">{themeError}</p>}
+          </section>
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="font-semibold text-slate-900">Raspored sučelja</h2>
+            <p className="mb-4 mt-1 text-xs text-slate-500">Odaberi raspored ERP sučelja. Sprema se zasebno za tvoj korisnički račun na ovom uređaju; portal djelatnika zadržava svoj mobilni raspored.</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {([
+                { value: 'standardni', label: 'Standardni', description: 'Postojeći raspored stranica', icon: LayoutDashboard },
+                { value: 'pregledni', label: 'Pregledni', description: 'Kartični pregled detalja gradilišta na većim ekranima', icon: PanelsTopLeft },
+              ] as const).map(({ value, label, description, icon: Icon }) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={layout === value}
+                  disabled={!profile?.id}
+                  onClick={() => {
+                    if (!profile?.id) return;
+                    setLayoutError('');
+                    try {
+                      saveUserLayout(profile.id, value);
+                      setLayout(value);
+                    } catch (reason) {
+                      setLayoutError(reason instanceof Error ? reason.message : 'Raspored sučelja nije spremljen.');
+                    }
+                  }}
+                  className={`flex items-center gap-3 rounded-xl border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${layout === value ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-200' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                >
+                  <span className={`flex h-10 w-10 items-center justify-center rounded-lg ${layout === value ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-600'}`}><Icon className="h-5 w-5" /></span>
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-900">{label}</span>
+                    <span className="block text-xs text-slate-500">{description}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            {layoutError && <p role="alert" className="mt-3 text-sm text-red-700">{layoutError}</p>}
           </section>
           {canEditLabels && (
             <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

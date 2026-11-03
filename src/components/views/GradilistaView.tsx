@@ -813,9 +813,9 @@ export function GradilistaView({
                       onClick={() => setSelectedGradilisteId(g.id)}
                       className={`gradiliste-board-card group relative cursor-grab rounded-xl border bg-white p-3 shadow-sm transition-all active:cursor-grabbing hover:shadow-md ${selectedGradilisteId === g.id ? 'border-sky-500 ring-1 ring-sky-200' : 'border-slate-200'} ${draggedId === g.id ? 'opacity-50' : ''} ${dropTargetId === g.id ? 'ring-2 ring-sky-400' : ''}`}
                     >
-                      <div className="mb-2 flex min-w-0 items-center gap-2">
-                        <div className="flex min-w-0 flex-1 items-center gap-1">
-                          <h3 title={g.naziv} className="min-w-0 flex-1 truncate whitespace-nowrap text-xs font-semibold leading-tight text-slate-900">{g.naziv}</h3>
+                      <div className="mb-2 flex min-w-0 flex-col items-start gap-1.5 pr-12">
+                        <h3 title={g.naziv} className="w-full whitespace-normal break-words text-xs font-semibold leading-snug text-slate-900">{g.naziv}</h3>
+                        <div className="flex min-w-0 flex-wrap items-center gap-1">
                           <span className={`inline-flex flex-shrink-0 items-center rounded-full border px-1 py-0 text-[9px] font-medium leading-3 ${compactStatusBadgeStyle[sb.variant]}`}>
                             {sb.label}
                           </span>

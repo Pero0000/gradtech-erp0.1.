@@ -78,6 +78,16 @@ import { GradilisteTroskovnik } from '@/components/views/GradilisteTroskovnik';
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Field, Select, TextInput, Textarea } from '@/components/ui/Field';
+import { useOverviewLayout } from '@/lib/useOverviewLayout';
+
+type DetailTab = 'pregled' | 'radovi' | 'financije' | 'dokumenti';
+
+const detailTabs: { id: DetailTab; label: string }[] = [
+  { id: 'pregled', label: 'Pregled' },
+  { id: 'radovi', label: 'Radovi i nalozi' },
+  { id: 'financije', label: 'Financije i troškovi' },
+  { id: 'dokumenti', label: 'Dokumenti i fotografije' },
+];
 import { fetchPonude, fetchSvePonudeStavke, ponudaBroj, ponudaUkupno, updatePonuda, type Ponuda, type PonudaStavka } from '@/lib/ponude';
 
 const ZADATAK_SEKCIJE: { vrsta: ZadatakVrsta; naslov: string; prazno: string; placeholder: string }[] = [
@@ -164,6 +174,8 @@ function Section({
 
 export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilisteUpdate, onRokoviChange, onOpenNalog }: GradilisteDetailsPanelProps) {
   const { company } = useAuth();
+  const overviewLayout = useOverviewLayout();
+  const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>('pregled');
   const [details, setDetails] = useState<GradilisteDetails | null>(null);
   const [radniNalogFoto, setRadniNalogFoto] = useState<GradilisteRadniNalogFoto[]>([]);
   const [loadingRadniNalogFoto, setLoadingRadniNalogFoto] = useState(true);
@@ -241,6 +253,10 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   });
   const [kooperanti, setKooperanti] = useState<Kooperant[]>([]);
   const [kooperantAngazmani, setKooperantAngazmani] = useState<KooperantAngazman[]>([]);
+
+  useEffect(() => {
+    setActiveDetailTab('pregled');
+  }, [gradiliste.id]);
 
   const sortedRadniNalogFoto = [...radniNalogFoto].sort((first, second) =>
     (second.created_at ?? '').localeCompare(first.created_at ?? ''),
@@ -1263,15 +1279,50 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
         {loading && <p className="py-6 text-center text-sm text-slate-400">Učitavanje detalja…</p>}
         {error && <p className="my-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
 
-        {gradiliste.opis && (
-          <section className="border-t border-slate-200 py-4">
-            <h3 className="mb-2 text-sm font-semibold text-slate-900">Napomena</h3>
-            <p className="whitespace-pre-wrap text-xs leading-5 text-slate-600">{gradiliste.opis}</p>
-          </section>
-        )}
-
         {!loading && details && (
           <>
+            {overviewLayout && (
+              <div className="gradiliste-details-tabs mb-4 grid grid-cols-2 gap-2 xl:grid-cols-4" role="tablist" aria-label="Pregled gradilišta">
+                {detailTabs.map((tab) => {
+                  const active = activeDetailTab === tab.id;
+                  const count = tab.id === 'pregled'
+                    ? openDeadlines.length
+                    : tab.id === 'radovi'
+                      ? tasks.filter((item) => item.status !== 'zavrsen').length + contractedWorks.length
+                      : tab.id === 'financije'
+                        ? invoices.length
+                        : radniNalogFoto.length;
+                  return (
+                    <button
+                      key={tab.id}
+                      id={`gradiliste-details-tab-${tab.id}`}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      aria-controls={`gradiliste-details-panel-${tab.id}`}
+                      onClick={() => setActiveDetailTab(tab.id)}
+                      className="gradiliste-details-tab flex min-h-16 items-center justify-between gap-2 rounded-xl border p-3 text-left"
+                    >
+                      <span className="text-xs font-semibold sm:text-sm">{tab.label}</span>
+                      <span className="gradiliste-details-tab-count rounded-full px-2 py-0.5 text-xs">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div
+              id="gradiliste-details-panel-pregled"
+              role={overviewLayout ? 'tabpanel' : undefined}
+              aria-labelledby={overviewLayout ? 'gradiliste-details-tab-pregled' : undefined}
+              hidden={overviewLayout && activeDetailTab !== 'pregled'}
+              className={`gradiliste-details-tab-panel ${overviewLayout ? 'is-overview' : ''}`}
+            >
+            {gradiliste.opis && (
+              <section className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h3 className="mb-2 text-sm font-semibold text-slate-900">Napomena</h3>
+                <p className="whitespace-pre-wrap text-xs leading-5 text-slate-600">{gradiliste.opis}</p>
+              </section>
+            )}
             <Section
               title="Rokovi i važni datumi"
               icon={<Calendar className="h-4 w-4" />}
@@ -1331,7 +1382,15 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                 </details>
               )}
             </Section>
+            </div>
 
+            <div
+              id="gradiliste-details-panel-radovi"
+              role={overviewLayout ? 'tabpanel' : undefined}
+              aria-labelledby={overviewLayout ? 'gradiliste-details-tab-radovi' : undefined}
+              hidden={overviewLayout && activeDetailTab !== 'radovi'}
+              className={`gradiliste-details-tab-panel ${overviewLayout ? 'is-overview' : ''}`}
+            >
             {ZADATAK_SEKCIJE.map((sekcija) => {
               const lista = zadaci.filter((z) => zadatakVrsta(z) === sekcija.vrsta);
               const otvoreni = lista.filter((z) => !z.gotovo);
@@ -1437,12 +1496,28 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
             </Section>
               );
             })}
+            </div>
 
             <GradilisteMaterijalDokumenti gradilisteId={gradiliste.id}>
               {({ documents, materials }) => (
                 <>
-                  {documents}
+                  <div
+                    id="gradiliste-details-panel-dokumenti"
+                    role={overviewLayout ? 'tabpanel' : undefined}
+                    aria-labelledby={overviewLayout ? 'gradiliste-details-tab-dokumenti' : undefined}
+                    hidden={overviewLayout && activeDetailTab !== 'dokumenti'}
+                    className={`gradiliste-details-tab-panel ${overviewLayout ? 'is-overview' : ''}`}
+                  >
+                    {documents}
+                  </div>
 
+                  <div
+                    id="gradiliste-details-panel-financije"
+                    role={overviewLayout ? 'tabpanel' : undefined}
+                    aria-labelledby={overviewLayout ? 'gradiliste-details-tab-financije' : undefined}
+                    hidden={overviewLayout && activeDetailTab !== 'financije'}
+                    className={`gradiliste-details-tab-panel ${overviewLayout ? 'is-overview' : ''}`}
+                  >
                   <Section
               title={`Obračun troškova (${currency(totalCosts)})`}
               icon={<Receipt className="h-4 w-4" />}
@@ -1539,6 +1614,11 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
 
                   <GradilisteTroskovnik gradilisteId={gradiliste.id} naziv={gradiliste.naziv} />
 
+                  </div>
+                  <div
+                    className={`gradiliste-details-tab-panel ${overviewLayout ? 'is-overview' : ''}`}
+                    hidden={overviewLayout && activeDetailTab !== 'radovi'}
+                  >
                   <Section
               title={`Ugovoreni radovi (${contractedWorks.length})`}
               icon={<FileText className="h-4 w-4" />}
@@ -1587,7 +1667,12 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                 </div>
               )}
             </Section>
+                  </div>
 
+                  <div
+                    className={`gradiliste-details-tab-panel ${overviewLayout ? 'is-overview' : ''}`}
+                    hidden={overviewLayout && activeDetailTab !== 'financije'}
+                  >
                   <Section
               title={`Fakture (${invoices.length})`}
               icon={<Receipt className="h-4 w-4" />}
@@ -1618,7 +1703,12 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                 </div>
               )}
                   </Section>
+                  </div>
 
+                  <div
+                    className={`gradiliste-details-tab-panel ${overviewLayout ? 'is-overview' : ''}`}
+                    hidden={overviewLayout && activeDetailTab !== 'dokumenti'}
+                  >
                   <Section
                     title={`Fotografije radnika (${radniNalogFoto.length})`}
                     icon={<Camera className="h-4 w-4" />}
@@ -1691,11 +1781,16 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                   </Section>
 
                   {materials}
+                  </div>
                 </>
               )}
             </GradilisteMaterijalDokumenti>
 
-            <section className="border-t border-slate-200 py-4">
+            <section
+              className={`gradiliste-details-tab-panel ${overviewLayout ? 'is-overview' : ''}`}
+              hidden={overviewLayout && activeDetailTab !== 'radovi'}
+            >
+            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
               <details className="group rounded-lg border border-slate-200 bg-white">
                 <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 [&::-webkit-details-marker]:hidden">
                   <ClipboardList className="h-4 w-4 flex-shrink-0 text-sky-700" />
@@ -1724,6 +1819,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                   )}
                 </div>
               </details>
+            </section>
             </section>
           </>
         )}

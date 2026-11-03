@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Bell, BellRing, CheckCircle2, Search } from 'lucide-react';
 import type { View } from '@/components/Sidebar';
 import { loadObavijesti, relativeLabel, sendPushNotifications, type Obavijest, type ObavijestLevel } from '@/lib/obavijesti';
+import { resolveVoziloObavijest } from '@/lib/api';
 import { loadPostavke, obavijestTipovi, savePostavke } from '@/lib/postavke';
 
 const levelStyle: Record<ObavijestLevel, { row: string; badge: string; label: string }> = {
@@ -11,7 +12,7 @@ const levelStyle: Record<ObavijestLevel, { row: string; badge: string; label: st
   upcoming: { row: 'border-slate-200', badge: 'bg-slate-100 text-slate-600', label: 'Nadolazeće' },
 };
 
-export function ObavijestiView({ onNavigate }: { onNavigate: (view: View) => void }) {
+export function ObavijestiView({ onNavigate, canResolveVozila }: { onNavigate: (view: View) => void; canResolveVozila: boolean }) {
   const [items, setItems] = useState<Obavijest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,16 +20,49 @@ export function ObavijestiView({ onNavigate }: { onNavigate: (view: View) => voi
   const [tip, setTip] = useState('');
   const [level, setLevel] = useState('');
   const [query, setQuery] = useState('');
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
   );
 
   useEffect(() => {
-    loadObavijesti(loadPostavke())
-      .then(setItems)
-      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Greška pri učitavanju obavijesti.'))
-      .finally(() => setLoading(false));
+    let active = true;
+    const refresh = () => {
+      setLoading(true);
+      loadObavijesti(loadPostavke())
+        .then((nextItems) => {
+          if (active) {
+            setItems(nextItems);
+            setError(null);
+          }
+        })
+        .catch((reason: unknown) => {
+          if (active) setError(reason instanceof Error ? reason.message : 'Greška pri učitavanju obavijesti.');
+        })
+        .finally(() => { if (active) setLoading(false); });
+    };
+    window.addEventListener('vozila-obavijest-updated', refresh);
+    refresh();
+    return () => {
+      active = false;
+      window.removeEventListener('vozila-obavijest-updated', refresh);
+    };
   }, []);
+
+  const resolveIssue = async (item: Obavijest) => {
+    if (!item.voziloObavijestId) return;
+    setResolvingId(item.voziloObavijestId);
+    setError(null);
+    try {
+      await resolveVoziloObavijest(item.voziloObavijestId);
+      setItems((current) => current.filter((entry) => entry.voziloObavijestId !== item.voziloObavijestId));
+      window.dispatchEvent(new Event('vozila-obavijest-updated'));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Greška pri označavanju prijave riješenom.');
+    } finally {
+      setResolvingId(null);
+    }
+  };
 
   const enablePush = async () => {
     if (typeof Notification === 'undefined') return;
@@ -54,7 +88,7 @@ export function ObavijestiView({ onNavigate }: { onNavigate: (view: View) => voi
       <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:flex-wrap xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Obavijesti</h1>
-          <p className="mt-1 text-sm text-slate-500">Svi rokovi na jednom mjestu · što se prikazuje i koliko unaprijed, postavlja se u Postavkama</p>
+          <p className="mt-1 text-sm text-slate-500">Rokovi i prijave vozila na jednom mjestu · rokovi i postavke prikaza podešavaju se u Postavkama</p>
         </div>
         {permission === 'granted' ? (
           <span className="inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700"><BellRing className="h-4 w-4" /> Push obavijesti uključene</span>
@@ -109,16 +143,29 @@ export function ObavijestiView({ onNavigate }: { onNavigate: (view: View) => voi
       ) : (
         <div className="space-y-2">
           {filtered.map((o) => (
-            <button key={o.id} type="button" onClick={() => onNavigate(o.view)} className={`flex min-w-0 w-full flex-col items-start gap-3 rounded-xl border-l-4 border bg-white p-3 text-left shadow-sm hover:bg-slate-50 xl:flex-row xl:items-center xl:gap-4 ${levelStyle[o.level].row}`}>
-              <span className={`w-24 shrink-0 rounded-full px-2 py-1 text-center text-xs font-semibold ${levelStyle[o.level].badge}`}>
-                {o.days === null ? levelStyle[o.level].label : relativeLabel(o.days)}
-              </span>
-              <div className="min-w-0 w-full xl:flex-1">
-                <p className="truncate text-sm font-semibold text-slate-900">{o.title}</p>
-                <p className="truncate text-xs text-slate-500">{o.tipLabel} · {o.detail}</p>
-              </div>
-              {o.datum && <span className="text-xs text-slate-500">{new Date(`${o.datum}T00:00:00`).toLocaleDateString('hr-HR')}</span>}
-            </button>
+            <div key={o.id} className={`flex min-w-0 flex-col items-stretch gap-2 rounded-xl border-l-4 border bg-white p-3 shadow-sm xl:flex-row xl:items-center xl:gap-3 ${levelStyle[o.level].row}`}>
+              <button type="button" onClick={() => onNavigate(o.view)} className="flex min-w-0 flex-1 flex-col items-start gap-3 text-left hover:bg-slate-50 xl:flex-row xl:items-center xl:gap-4">
+                <span className={`w-24 shrink-0 rounded-full px-2 py-1 text-center text-xs font-semibold ${levelStyle[o.level].badge}`}>
+                  {o.days === null ? levelStyle[o.level].label : relativeLabel(o.days)}
+                </span>
+                <div className="min-w-0 w-full xl:flex-1">
+                  <p className="truncate text-sm font-semibold text-slate-900">{o.title}</p>
+                  <p className="truncate text-xs text-slate-500">{o.tipLabel} · {o.detail}</p>
+                </div>
+                {o.datum && <span className="text-xs text-slate-500">{new Date(`${o.datum}T00:00:00`).toLocaleDateString('hr-HR')}</span>}
+              </button>
+              {canResolveVozila && o.voziloObavijestId && (
+                <button
+                  type="button"
+                  disabled={resolvingId === o.voziloObavijestId}
+                  onClick={() => void resolveIssue(o)}
+                  className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-emerald-50 px-3 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  {resolvingId === o.voziloObavijestId ? 'Spremanje…' : 'Označi riješenim'}
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}

@@ -987,7 +987,7 @@ export function NalogIzvrsenje({
           {uploading ? 'Učitavanje…' : 'Dodaj fotografije'}
         </button>
         {foto.length > 0 && (
-          <div className="grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-2 2xl:grid-cols-4">
+          <div className="grid min-w-0 grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 xl:grid-cols-2 2xl:grid-cols-4">
             {foto.map((f) => (
               <div key={f.id} className="group relative overflow-hidden rounded-lg border border-slate-200">
                 <button
@@ -996,7 +996,7 @@ export function NalogIzvrsenje({
                   aria-label={`Pregledaj fotografiju ${f.naziv ?? ''}`}
                   className="block w-full cursor-zoom-in"
                 >
-                  <img loading="lazy" src={f.thumbnailUrl} alt={f.naziv ?? 'Fotografija'} className="h-28 w-full object-cover" />
+                  <img loading="lazy" src={f.thumbnailUrl} alt={f.naziv ?? 'Fotografija'} className="aspect-square w-full object-cover sm:aspect-auto sm:h-24 2xl:h-28" />
                 </button>
                 <button
                   onClick={() => removeFoto(f)}

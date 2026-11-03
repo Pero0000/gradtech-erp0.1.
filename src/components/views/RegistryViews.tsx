@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, Building2, Pencil, Plus, RotateCcw, Search, Trash2, Users } from 'lucide-react';
-import type { Faktura, Gradiliste, Investitor, InvestitorKontakt, Objekt, RadniNalog, RadnoVrijeme, Trosak } from '@/types';
+import { ArrowDown, ArrowUp, ArrowUpDown, BookOpen, Building2, Pencil, Plus, RotateCcw, Search, Trash2, Users } from 'lucide-react';
+import type { Faktura, Gradiliste, Investitor, InvestitorKontakt, Objekt, ObjektZnanje, RadniNalog, RadnoVrijeme, Trosak } from '@/types';
 import {
   createInvestitor,
   deleteInvestitor,
@@ -16,6 +16,7 @@ import {
   fetchRadnoVrijeme,
   fetchTroskovi,
   saveObjekt,
+  saveObjektZnanje,
   updateInvestitor,
   iznosFakture,
 } from '@/lib/api';
@@ -909,6 +910,11 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Objekt | null>(null);
   const [selectedObjekt, setSelectedObjekt] = useState<Objekt | null>(null);
+  const [znanjeFormOpen, setZnanjeFormOpen] = useState(false);
+  const [znanjeEditingId, setZnanjeEditingId] = useState<string | null>(null);
+  const [znanjeSaving, setZnanjeSaving] = useState(false);
+  const [znanjeError, setZnanjeError] = useState<string | null>(null);
+  const [znanjeForm, setZnanjeForm] = useState({ kategorija: 'Materijali', naslov: '', opis: '' });
 
   useEffect(() => {
     let cancelled = false;
@@ -1062,6 +1068,72 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
     setModalOpen(true);
   };
 
+  const openObjektKnowledge = (objekt: Objekt) => {
+    setSelectedObjekt(objekt);
+    setZnanjeError(null);
+    setZnanjeFormOpen(false);
+    setZnanjeEditingId(null);
+    setZnanjeForm({ kategorija: 'Materijali', naslov: '', opis: '' });
+  };
+
+  const editObjektKnowledge = (entry: ObjektZnanje) => {
+    setZnanjeEditingId(entry.id);
+    setZnanjeForm({ kategorija: entry.kategorija, naslov: entry.naslov, opis: entry.opis });
+    setZnanjeError(null);
+    setZnanjeFormOpen(true);
+  };
+
+  const saveKnowledgeEntry = async () => {
+    if (!selectedObjekt || !znanjeForm.naslov.trim()) return;
+    setZnanjeSaving(true);
+    setZnanjeError(null);
+    const entry: ObjektZnanje = {
+      id: znanjeEditingId ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+      kategorija: znanjeForm.kategorija.trim(),
+      naslov: znanjeForm.naslov.trim(),
+      opis: znanjeForm.opis.trim(),
+    };
+    const nextKnowledge = [
+      ...(selectedObjekt.znanje ?? []).filter((item) => item.id !== entry.id),
+      entry,
+    ];
+    try {
+      await saveObjektZnanje(selectedObjekt.id, nextKnowledge);
+      const updated = { ...selectedObjekt, znanje: nextKnowledge };
+      setSelectedObjekt(updated);
+      setObjekti((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setZnanjeFormOpen(false);
+      setZnanjeEditingId(null);
+      setZnanjeForm({ kategorija: 'Materijali', naslov: '', opis: '' });
+    } catch (reason) {
+      setZnanjeError(errorMessage(reason));
+    } finally {
+      setZnanjeSaving(false);
+    }
+  };
+
+  const removeKnowledgeEntry = async (entryId: string) => {
+    if (!selectedObjekt) return;
+    setZnanjeSaving(true);
+    setZnanjeError(null);
+    const nextKnowledge = (selectedObjekt.znanje ?? []).filter((item) => item.id !== entryId);
+    try {
+      await saveObjektZnanje(selectedObjekt.id, nextKnowledge);
+      const updated = { ...selectedObjekt, znanje: nextKnowledge };
+      setSelectedObjekt(updated);
+      setObjekti((current) => current.map((item) => item.id === updated.id ? updated : item));
+      if (znanjeEditingId === entryId) {
+        setZnanjeEditingId(null);
+        setZnanjeFormOpen(false);
+        setZnanjeForm({ kategorija: 'Materijali', naslov: '', opis: '' });
+      }
+    } catch (reason) {
+      setZnanjeError(errorMessage(reason));
+    } finally {
+      setZnanjeSaving(false);
+    }
+  };
+
   const submitObjekt = async () => {
     if (!form.naziv.trim() || !form.investitor_id) return;
     setSaving(true);
@@ -1125,7 +1197,7 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
 
   const objektDetails = (objekt: Objekt) => (
     <>
-      <button type="button" onClick={() => setSelectedObjekt(objekt)} className="text-left font-semibold text-sky-700 hover:text-sky-900 hover:underline">
+      <button type="button" onClick={() => openObjektKnowledge(objekt)} className="text-left font-semibold text-sky-700 hover:text-sky-900 hover:underline">
         {objekt.naziv}
       </button>
       {(objekt.adresa || objekt.mjesto || objekt.postanski_broj) && (
@@ -1306,6 +1378,87 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
               <div><p className="text-xs text-slate-500">Investitor</p><p className="mt-1 text-sm font-medium">{selectedObjekt.investitori?.naziv ?? investitori.find((item) => item.id === selectedObjekt.investitor_id)?.naziv ?? '—'}</p></div>
               <div><p className="text-xs text-slate-500">Gradilišta</p><p className="mt-1 text-sm font-medium">{selectedObjektHistory.length} ukupno · {selectedObjektHistory.filter(({ site }) => site.status === 'aktivno').length} aktivnih</p></div>
               <div><p className="text-xs text-slate-500">Posljednja aktivnost</p><p className="mt-1 text-sm font-medium">{formatDate(selectedObjektActivity)}</p></div>
+            </section>
+            <section className="rounded-xl border border-sky-200 bg-white p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <BookOpen className="h-4 w-4 text-sky-700" />
+                    Znanje o objektu
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">Zabilježi materijale, boje, keramiku, PVC, smještaj, zbrinjavanje i važne kontakte ili brojeve.</p>
+                </div>
+                {!znanjeFormOpen && (
+                  <button
+                    type="button"
+                    onClick={() => { setZnanjeFormOpen(true); setZnanjeEditingId(null); setZnanjeForm({ kategorija: 'Materijali', naslov: '', opis: '' }); setZnanjeError(null); }}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white hover:bg-sky-700"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Dodaj podatak
+                  </button>
+                )}
+              </div>
+              {znanjeError && <p role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-700">{znanjeError}</p>}
+              {znanjeFormOpen && (
+                <div className="mb-4 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-2">
+                  <Field label="Kategorija">
+                    <Select value={znanjeForm.kategorija} onChange={(event) => setZnanjeForm((current) => ({ ...current, kategorija: event.target.value }))}>
+                      {['Materijali', 'Boje', 'Keramika', 'PVC', 'Instalacije', 'Smještaj', 'Zbrinjavanje otpada', 'Kontakti i brojevi', 'Ostalo'].map((category) => <option key={category} value={category}>{category}</option>)}
+                    </Select>
+                  </Field>
+                  <Field label="Naziv podatka *">
+                    <TextInput value={znanjeForm.naslov} onChange={(event) => setZnanjeForm((current) => ({ ...current, naslov: event.target.value }))} placeholder="npr. Oznaka boje, naziv hotela ili broj kontejnera" />
+                  </Field>
+                  <div className="md:col-span-2">
+                    <Field label="Detalji">
+                      <Textarea rows={3} value={znanjeForm.opis} onChange={(event) => setZnanjeForm((current) => ({ ...current, opis: event.target.value }))} placeholder="Upiši šifru, dobavljača, adresu, telefon, upute ili druge korisne detalje." />
+                    </Field>
+                  </div>
+                  <div className="flex justify-end gap-2 md:col-span-2">
+                    <button
+                      type="button"
+                      onClick={() => { setZnanjeFormOpen(false); setZnanjeEditingId(null); setZnanjeError(null); }}
+                      disabled={znanjeSaving}
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-white disabled:opacity-50"
+                    >
+                      Odustani
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void saveKnowledgeEntry()}
+                      disabled={znanjeSaving || !znanjeForm.naslov.trim()}
+                      className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+                    >
+                      {znanjeSaving ? 'Spremanje…' : znanjeEditingId ? 'Spremi promjene' : 'Spremi podatak'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {(selectedObjekt.znanje ?? []).length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-xs text-slate-500">Još nema spremljenih podataka za ovaj objekt.</p>
+              ) : (
+                <div className="grid gap-2 md:grid-cols-2">
+                  {(selectedObjekt.znanje ?? []).map((entry) => (
+                    <article key={entry.id} className="min-w-0 rounded-lg border border-slate-200 p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="inline-flex rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-800">{entry.kategorija}</span>
+                          <h4 className="mt-1 break-words text-sm font-semibold text-slate-900">{entry.naslov}</h4>
+                        </div>
+                        <div className="flex shrink-0 gap-1">
+                          <button type="button" onClick={() => editObjektKnowledge(entry)} aria-label={`Uredi podatak ${entry.naslov}`} title="Uredi" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-700">
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button type="button" onClick={() => void removeKnowledgeEntry(entry.id)} disabled={znanjeSaving} aria-label={`Obriši podatak ${entry.naslov}`} title="Obriši" className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                      {entry.opis && <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{entry.opis}</p>}
+                    </article>
+                  ))}
+                </div>
+              )}
             </section>
             <section>
               <h3 className="mb-3 text-sm font-semibold text-slate-900">Povijest gradilišta na lokaciji</h3>

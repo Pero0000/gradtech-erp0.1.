@@ -180,8 +180,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   const dospjeliIznos = dospjele.reduce((sum, f) => sum + iznosFakture(f), 0);
   const siteFinancialPreview = [...financijskiRedovi]
     .filter((row) => row.brojZapisa > 0)
-    .sort((a, b) => Number(b.gradiliste.status === 'aktivno') - Number(a.gradiliste.status === 'aktivno')
-      || (b.trosak + b.prihod) - (a.trosak + a.prihod)
+    .sort((a, b) => b.trosak - a.trosak
       || a.gradiliste.naziv.localeCompare(b.gradiliste.naziv, 'hr'))
     .slice(0, 10);
 

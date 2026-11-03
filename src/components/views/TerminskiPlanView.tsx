@@ -121,7 +121,7 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
 
   const windowDays = viewWeeks * 7;
   const days = useMemo(() => Array.from({ length: windowDays }, (_, index) => shiftDate(rangeStart, index)), [rangeStart, windowDays]);
-  const timelineMinWidth = 320 + windowDays * 40;
+  const timelineMinWidth = 180 + windowDays * 42;
   const rangeEnd = shiftDate(rangeStart, windowDays);
   const today = dateKey(new Date());
   const todayOffset = (dateToUtc(today) - dateToUtc(rangeStart)) / DAY_MS;
@@ -310,10 +310,10 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
       amber: 'bg-amber-500',
     }[color];
     return (
-      <div key={id} className="terminski-plan-task-row grid min-h-12 border-b border-slate-100 last:border-b-0" style={{ gridTemplateColumns: '320px minmax(0, 1fr)' }}>
-        <button type="button" onClick={() => onOpenGradiliste(siteId)} className="border-r border-slate-200 px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50" title={`${title} · ${subtitle}`}>
+      <div key={id} className="terminski-plan-task-row grid min-h-12 border-b border-slate-100 last:border-b-0" style={{ gridTemplateColumns: 'var(--terminski-site-column-width) minmax(0, 1fr)' }}>
+        <button type="button" onClick={() => onOpenGradiliste(siteId)} className="sticky left-0 z-10 border-r border-slate-200 bg-white px-2 py-2 text-left text-xs text-slate-700 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.3)] hover:bg-slate-50 sm:px-3" title={`${title} · ${subtitle}`}>
           <span className="block break-words font-medium">{title}</span>
-          <span className="block break-words text-xs text-slate-500">{subtitle}</span>
+          <span className="block break-words text-[10px] text-slate-500">{subtitle}</span>
         </button>
         <div className="relative grid" style={{ gridTemplateColumns: `repeat(${windowDays}, minmax(0, 1fr))` }}>
           {days.map((day) => {
@@ -454,8 +454,8 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
       ) : (
         <div className="terminski-plan-grid overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="terminski-plan-grid-inner" style={{ minWidth: `${timelineMinWidth}px` }}>
-            <div className="terminski-plan-grid-header grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: '320px minmax(0, 1fr)' }}>
-              <div className="sticky left-0 z-10 flex items-center border-r border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Gradilište / aktivnost</div>
+            <div className="terminski-plan-grid-header grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: 'var(--terminski-site-column-width) minmax(0, 1fr)' }}>
+              <div className="sticky left-0 z-20 flex items-center border-r border-slate-200 bg-slate-50 px-2 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-500 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.3)] sm:px-3">Gradilište / aktivnost</div>
               <div className="grid grid-rows-[20px_1fr]">
                 <div className="terminski-plan-month-band grid border-b border-slate-200" style={{ gridTemplateColumns: `repeat(${windowDays}, minmax(0, 1fr))` }}>
                   {days.map((day, index) => {
@@ -484,13 +484,13 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
             </div>
             {groupedTimeline.map(({ site, deadlines, angazmani: siteAngazmani }) => (
               <div key={site.id} className="border-b-2 border-slate-300 last:border-b-0">
-                <div className="terminski-plan-site-row grid bg-sky-100/70" style={{ gridTemplateColumns: '320px minmax(0, 1fr)' }}>
+                <div className="terminski-plan-site-row grid bg-sky-100/70" style={{ gridTemplateColumns: 'var(--terminski-site-column-width) minmax(0, 1fr)' }}>
                   <button
                     type="button"
                     onClick={() => toggleSiteExpanded(site.id)}
                     aria-expanded={expandedSiteIds.includes(site.id)}
                     aria-controls={`site-details-${site.id}`}
-                    className="flex min-w-0 items-center gap-2 border-r border-slate-200 px-3 py-2.5 text-left text-sm font-semibold text-sky-800 hover:bg-sky-100"
+                    className="sticky left-0 z-10 flex min-w-0 items-center gap-1.5 border-r border-slate-200 bg-sky-100 px-2 py-2 text-left text-xs font-semibold text-sky-800 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.3)] hover:bg-sky-100 sm:gap-2 sm:px-3 sm:py-2.5"
                     title={expandedSiteIds.includes(site.id) ? 'Sakrij radove' : 'Prikaži radove'}
                   >
                     <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${expandedSiteIds.includes(site.id) ? '' : '-rotate-90'}`} />

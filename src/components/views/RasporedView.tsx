@@ -653,6 +653,9 @@ export function RasporedView() {
     && assignment.nalog_id
     && lockedNalozi.includes(assignment.nalog_id));
 
+  const isVehicleConfirmed = (voziloId: string) => siteAssignments.some((assignment) =>
+    assignment.vozilo_id === voziloId && assignment.gradiliste_potvrdeno);
+
   const toggleSiteConfirmation = (assignment: DnevniRasporedGradiliste, confirmed: boolean) => {
     if (confirmed && isVehicleLocked(assignment.vozilo_id)) {
       setError('Vozilo je već zaključano zbog druge potvrde ili zaključenog radnog naloga.');
@@ -888,11 +891,26 @@ export function RasporedView() {
     setSelectedDate(localDateString(d));
   };
 
+  const removeSiteAssignment = async (assignmentId: string) => {
+    const assignment = siteAssignments.find((item) => item.id === assignmentId);
+    if (assignment?.iz_ostalo && assignment.tekst) {
+      await addRasporedOstalo(selectedDate, { tekst: assignment.tekst });
+    }
+    await removeRasporedGradiliste(assignmentId);
+  };
+
+  const removeWorkerAssignment = async (assignmentId: string, workerId: string) => {
+    if (!ostalo.some((entry) => entry.datum === selectedDate && entry.radnik_id === workerId)) {
+      await addRasporedOstalo(selectedDate, { radnikId: workerId });
+    }
+    await removeRasporedRadnik(assignmentId);
+  };
+
   const dropOnVehicle = (event: React.DragEvent, voziloId: string) => {
     event.preventDefault();
     setDropTarget(null);
-    if (isVehicleLocked(voziloId)) {
-      setError('Vozilo je zaključano zbog zaključenog radnog naloga.');
+    if (isVehicleConfirmed(voziloId)) {
+      setError('Vozilo je zaključano zbog potvrđene stavke.');
       return;
     }
     const payload = readPayload(event);
@@ -957,7 +975,7 @@ export function RasporedView() {
       const assignment = siteAssignments.find((a) => a.id === payload.assignmentId);
       if (assignment?.gradiliste_id) placeSite(assignment.gradiliste_id, columnIndex, beforeId);
       const assignmentId = payload.assignmentId;
-      void run(() => removeRasporedGradiliste(assignmentId));
+      void run(() => removeSiteAssignment(assignmentId));
     } else {
       placeSite(payload.id, columnIndex, beforeId);
     }
@@ -1009,7 +1027,12 @@ export function RasporedView() {
       return;
     }
     const assignmentId = payload.assignmentId;
-    void run(() => type === 'gradiliste' ? removeRasporedGradiliste(assignmentId) : removeRasporedRadnik(assignmentId));
+    if (type === 'gradiliste') {
+      void run(() => removeSiteAssignment(assignmentId));
+      return;
+    }
+    const assignment = workerAssignments.find((item) => item.id === assignmentId);
+    if (assignment) void run(() => removeWorkerAssignment(assignmentId, assignment.radnik_id));
   };
 
   const allowDrop = (event: React.DragEvent, target: string) => {
@@ -1347,20 +1370,25 @@ export function RasporedView() {
               const over = vozilo.broj_mjesta > 0 && carWorkers.length > vozilo.broj_mjesta;
               const vehicleLocked = isVehicleLocked(vozilo.id);
               const vehicleHasLockedOrder = isVehicleOrderLocked(vozilo.id);
+              const vehicleConfirmed = isVehicleConfirmed(vozilo.id);
               const target = `car-${vozilo.id}`;
               return (
                 <section
                   key={vozilo.id}
                   onDragOver={(e) => {
                     e.preventDefault();
-                    if (!vehicleLocked) allowDrop(e, target);
+                    if (!vehicleConfirmed) allowDrop(e, target);
                     else setDropTarget(null);
                   }}
                   onDragLeave={(e) => {
                     if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null);
                   }}
                   onDrop={(e) => dropOnVehicle(e, vozilo.id)}
-                  title={vehicleLocked ? 'Premještanje vozila ograničeno zbog potvrđene stavke ili zaključenog radnog naloga' : undefined}
+                  title={vehicleConfirmed
+                    ? 'Dodavanje i premještanje stavki ograničeno zbog potvrđene stavke'
+                    : vehicleHasLockedOrder
+                      ? 'Postojeće stavke radnog naloga su zaključane; nove stavke možete dodati'
+                      : undefined}
                   className={`schedule-vehicle-card min-w-0 rounded-lg border-2 p-2 transition-colors ${dropTarget === target ? 'border-sky-400 bg-sky-50' : 'border-slate-400 bg-slate-200'}`}
                 >
                   <div className="schedule-vehicle-header mb-2 flex min-w-0 flex-wrap items-center gap-1.5">
@@ -1368,9 +1396,9 @@ export function RasporedView() {
                     <span className="min-w-0 flex-1 truncate rounded border border-slate-800 bg-amber-200 px-1 py-0.5 text-center text-xs font-bold uppercase text-slate-900" title={[vozilo.marka, vozilo.model].filter(Boolean).join(' ')}>
                       {[vozilo.marka, vozilo.model].filter(Boolean).join(' ')}
                     </span>
-                    {vehicleLocked && (
+                    {(vehicleLocked || vehicleHasLockedOrder) && (
                       <span className="rounded bg-amber-200 px-1 py-0.5 text-[8px] font-bold text-amber-900">
-                        {vehicleHasLockedOrder ? 'PREMJEŠTANJE OGRANIČENO' : 'POTVRĐENA STAVKA'}
+                        {vehicleConfirmed ? 'POTVRĐENA STAVKA' : 'NALOG ZAKLJUČEN – DODAVANJE DOPUŠTENO'}
                       </span>
                     )}
                   </div>
@@ -1406,7 +1434,7 @@ export function RasporedView() {
                                     disabled={vehicleLocked}
                                     onBlur={(e) => {
                                       const next = e.target.value.trim();
-                                      if (!next) void run(() => removeRasporedGradiliste(a.id));
+                                      if (!next) void run(() => removeSiteAssignment(a.id));
                                       else if (next !== a.tekst) void run(() => updateRasporedTekst(a.id, next));
                                     }}
                                     className={`min-w-0 flex-1 bg-transparent text-[13px] font-medium outline-none focus:ring-1 focus:ring-sky-500 ${a.iz_ostalo ? 'text-pink-500' : 'text-slate-900'}`}
@@ -1418,7 +1446,7 @@ export function RasporedView() {
                               {a.gradiliste_id && <WorkerCount kind="gradiliste" count={siteCount(a.gradiliste_id)} />}
                               <button
                                 type="button"
-                                onClick={() => void run(() => removeRasporedGradiliste(a.id))}
+                                onClick={() => void run(() => removeSiteAssignment(a.id))}
                                 disabled={vehicleLocked}
                                 aria-label="Ukloni gradilište"
                                 title={nalogLocked
@@ -1480,9 +1508,9 @@ export function RasporedView() {
                               onBlur={(e) => {
                                 const text = e.target.value.trim();
                                 e.target.value = '';
-                                if (text && !vehicleLocked) void run(() => addRasporedTekst(selectedDate, vozilo.id, text));
+                                if (text && !vehicleConfirmed) void run(() => addRasporedTekst(selectedDate, vozilo.id, text));
                               }}
-                              disabled={vehicleLocked}
+                              disabled={vehicleConfirmed}
                               className="h-full w-full bg-transparent px-1 text-[13px] text-slate-900 outline-none placeholder:text-slate-300 focus:ring-1 focus:ring-sky-500 disabled:cursor-not-allowed disabled:bg-slate-100"
                             />
                           )}
@@ -1528,7 +1556,7 @@ export function RasporedView() {
                               <WorkerCount count={workerCount(a.radnik_id)} />
                               <button
                                 type="button"
-                                onClick={() => void run(() => removeRasporedRadnik(a.id))}
+                                onClick={() => void run(() => removeWorkerAssignment(a.id, a.radnik_id))}
                                 disabled={vehicleLocked}
                                 aria-label="Ukloni radnika"
                                 title={vehicleLocked ? 'Vozilo je zaključano' : 'Ukloni radnika'}

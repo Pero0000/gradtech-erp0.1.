@@ -1,7 +1,8 @@
-import type { Faktura, Gradiliste, Radnik, Rok, Vozilo, VoziloDokument, RadnikDokument } from '@/types';
+import type { Faktura, Gradiliste, Radnik, Rok, Vozilo, VoziloDokument, RadnikDokument, VoziloObavijest } from '@/types';
 import { companyStorage } from './company';
 import {
   fetchFakture,
+  fetchOpenVoziloObavijesti,
   fetchGradilista,
   fetchRadnici,
   fetchRokovi,
@@ -29,6 +30,7 @@ export interface Obavijest {
   days: number | null;
   level: ObavijestLevel;
   view: 'radnici' | 'vozila' | 'gradilista' | 'fakture';
+  voziloObavijestId?: string;
 }
 
 const daysBetween = (from: string, to: string) =>
@@ -78,10 +80,11 @@ interface Source {
   fakture: Faktura[];
   radnikDok: RadnikDokument[];
   voziloDok: VoziloDokument[];
+  voziloObavijesti: VoziloObavijest[];
 }
 
 export async function loadObavijestiSource(): Promise<Source> {
-  const [gradilista, radnici, vozila, rokovi, fakture, radnikDok, voziloDok] = await Promise.all([
+  const [gradilista, radnici, vozila, rokovi, fakture, radnikDok, voziloDok, voziloObavijesti] = await Promise.all([
     fetchGradilista(),
     fetchRadnici(),
     fetchVozila(),
@@ -89,8 +92,9 @@ export async function loadObavijestiSource(): Promise<Source> {
     fetchFakture(),
     fetchSviRadnikDokumenti().catch(() => [] as RadnikDokument[]),
     fetchSviVoziloDokumenti().catch(() => [] as VoziloDokument[]),
+    fetchOpenVoziloObavijesti(),
   ]);
-  return { gradilista, radnici, vozila, rokovi, fakture, radnikDok, voziloDok };
+  return { gradilista, radnici, vozila, rokovi, fakture, radnikDok, voziloDok, voziloObavijesti };
 }
 
 export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
@@ -168,6 +172,28 @@ export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
 
   src.fakture.filter((f) => f.status !== 'placena' && f.datum_dospjecja).forEach((f) => {
     push('faktura_naplata', `fk-${f.id}`, `Faktura ${f.broj}`, `${f.kupac ?? ''} · ${iznosFakture(f).toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}`.replace(/^ · /, ''), f.datum_dospjecja as string, 'fakture');
+  });
+
+  src.voziloObavijesti.forEach((issue) => {
+    const vehicle = voziloById.get(issue.vozilo_id);
+    if (!vehicle) return;
+    const vehicleName = [vehicle.marka, vehicle.model].filter(Boolean).join(' ') || 'Vozilo';
+    const vrstaLabel = issue.vrsta === 'kvar' ? 'Kvar' : issue.vrsta === 'upozorenje' ? 'Upozorenje' : 'Ostalo';
+    const m = meta('vozilo_ostalo');
+    out.push({
+      id: `vo-${issue.id}`,
+      voziloObavijestId: issue.id,
+      subjectId: issue.vozilo_id,
+      tip: 'vozilo_ostalo',
+      grupa: m.grupa,
+      tipLabel: `Prijava vozila · ${vrstaLabel}`,
+      title: vehicleName,
+      detail: `${issue.prijavio_ime}: ${issue.opis}`,
+      datum: issue.datum,
+      days: 0,
+      level: 'today',
+      view: 'vozila',
+    });
   });
 
   const order: Record<ObavijestLevel, number> = { overdue: 0, today: 1, soon: 2, upcoming: 3 };

@@ -26,6 +26,15 @@
   container-name: gradilista-view;
 }
 
+.terminski-plan-view {
+  container-type: inline-size;
+  container-name: terminski-plan;
+}
+
+.terminski-plan-grid-inner {
+  --terminski-site-column-width: clamp(148px, 22cqw, 260px);
+}
+
 @container daily-schedule (min-width: 1601px) {
   .daily-schedule-view .schedule-main-grid {
     grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.75fr) minmax(250px, 0.75fr);
@@ -235,6 +244,13 @@
   .app-shell-print-terminski .terminski-plan-task-row {
     grid-template-columns: 220px minmax(0, 1fr) !important;
     break-inside: avoid;
+  }
+
+  .app-shell-print-terminski .terminski-plan-grid-header > :first-child,
+  .app-shell-print-terminski .terminski-plan-site-row > :first-child,
+  .app-shell-print-terminski .terminski-plan-task-row > :first-child {
+    position: static !important;
+    box-shadow: none !important;
   }
 
   .app-shell-print-terminski .terminski-plan-day-header {

@@ -17,7 +17,7 @@ import { OBRACUN_KATEGORIJE, computeObracun } from '@/lib/obracunSati';
 import { dokumentVrste } from '@/lib/radnikDokumenti';
 import type { RadnikDokument } from '@/types';
 
-export type WorkerPortalTab = 'nalozi' | 'raspored' | 'vrijeme' | 'dokumenti';
+export type WorkerPortalTab = 'nalozi' | 'raspored' | 'gorivo' | 'obavijesti' | 'vrijeme' | 'dokumenti';
 
 const errText = (reason: unknown, fallback: string) =>
   reason && typeof reason === 'object' && 'message' in reason ? String((reason as { message: unknown }).message) : fallback;

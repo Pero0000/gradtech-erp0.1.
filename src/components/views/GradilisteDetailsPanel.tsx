@@ -950,7 +950,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     const late = item.status === 'otvoren' && endDate < new Date().toISOString().slice(0, 10);
     const dateLabel = startDate === endDate ? date(endDate) : `${date(startDate)} – ${date(endDate)}`;
     return (
-      <div key={item.id} className="group flex items-start gap-2 text-xs">
+      <div key={item.id} className="group flex flex-wrap items-start gap-2 text-xs">
         <input
           type="checkbox"
           checked={item.status === 'zavrsen'}
@@ -959,7 +959,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
           title={item.zadatak_id ? 'Upravlja se iz radnog zadatka' : 'Označi kao završeno'}
           className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300"
         />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[12rem] flex-[1_1_12rem]">
           <p className={item.status === 'zavrsen' ? 'text-slate-400 line-through' : 'text-slate-700'}>{item.naziv}</p>
           {item.opis && <p className="text-[11px] text-slate-500">{item.opis}</p>}
         </div>
@@ -967,7 +967,8 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
           value={item.kooperant_id ?? ''}
           onChange={(event) => void setDeadlineKooperant(item, event.target.value)}
           aria-label={`Kooperant za rok ${item.naziv}`}
-          className="max-w-36 flex-shrink-0 !px-1.5 !py-1 text-[11px]"
+          className="flex-shrink-0 !px-1.5 !py-1 text-[11px]"
+          style={{ width: '9rem', maxWidth: '9rem', flex: '0 0 9rem' }}
         >
           <option value="">Bez kooperanta</option>
           {kooperanti.map((kooperant) => <option key={kooperant.id} value={kooperant.id}>{kooperant.naziv}</option>)}
@@ -1659,7 +1660,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                     ) : radniNalogFoto.length === 0 ? (
                       <p className="text-xs text-slate-400">Još nema fotografija učitanih na radne naloge ovog gradilišta.</p>
                     ) : (
-                      <div className="grid max-h-[34rem] auto-rows-[11rem] grid-cols-1 gap-2 overflow-y-auto overscroll-contain xl:grid-cols-2 2xl:grid-cols-5" tabIndex={0} role="region" aria-label="Fotografije radnika — pomaknite za ostale slike">
+                      <div className="grid max-h-[34rem] auto-rows-[8rem] grid-cols-2 gap-1.5 overflow-y-auto overscroll-contain sm:auto-rows-[9rem] sm:grid-cols-3 sm:gap-2 xl:auto-rows-[10rem] xl:grid-cols-4 2xl:grid-cols-5" tabIndex={0} role="region" aria-label="Fotografije radnika — pomaknite za ostale slike">
                         {sortedRadniNalogFoto.map((foto, index) => (
                           <div key={foto.id} className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white">
                             <button
@@ -1668,7 +1669,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                               className="block min-h-0 w-full flex-1 bg-slate-50"
                               title={`${foto.nalog_broj}${foto.nalog_naslov ? ` · ${foto.nalog_naslov}` : ''}`}
                             >
-                              <img loading="lazy" src={foto.thumbnailUrl} alt={foto.naziv ?? `Fotografija naloga ${foto.nalog_broj}`} className="h-full w-full object-contain" />
+                              <img loading="lazy" src={foto.thumbnailUrl} alt={foto.naziv ?? `Fotografija naloga ${foto.nalog_broj}`} className="h-full w-full object-cover" />
                             </button>
                             <span className="block shrink-0 truncate px-2 py-1.5 text-[10px] text-slate-600">
                               {foto.created_at ? new Date(foto.created_at).toLocaleDateString('hr-HR') : 'Bez datuma'}

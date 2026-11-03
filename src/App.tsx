@@ -82,10 +82,12 @@ function App() {
         // obavijesti view shows its own errors
       }
     };
+    window.addEventListener('vozila-obavijest-updated', refresh);
     void refresh();
     const timer = window.setInterval(() => void refresh(), 30 * 60 * 1000);
     return () => {
       active = false;
+      window.removeEventListener('vozila-obavijest-updated', refresh);
       window.clearInterval(timer);
     };
   }, [view, profile?.approved, canAccess]);
@@ -245,7 +247,7 @@ function App() {
           {viewAuthorized && view === 'radno_vrijeme' && <RadnoVrijemeView />}
           {viewAuthorized && view === 'radni_nalozi' && <RadniNaloziView key={focusNalogId ?? 'none'} focusNalogId={focusNalogId} />}
           {viewAuthorized && view === 'rekapitulacija' && <RekapitulacijaView />}
-          {viewAuthorized && view === 'obavijesti' && <ObavijestiView onNavigate={navigate} />}
+          {viewAuthorized && view === 'obavijesti' && <ObavijestiView onNavigate={navigate} canResolveVozila={canAccess('vozila', 'edit')} />}
           {viewAuthorized && view === 'postavke' && <PostavkeView />}
           {viewAuthorized && view === 'asistent' && <AsistentView />}
           {viewAuthorized && view === 'korisnici' && <KorisniciView />}

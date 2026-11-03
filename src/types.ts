@@ -53,7 +53,7 @@ export type GradilisteStatus = 'ponuda' | 'planirano' | 'aktivno' | 'pauzirano' 
 export type GradilisteRegija = 'dalmacija' | 'istra_kvarner' | 'slavonija' | 'zagreb_i_okolica' | 'medimurje';
 export type RadnikStatus = 'aktivan' | 'neaktivan' | 'bolovanje';
 export type VoziloStatus = 'slobodno' | 'zauzeto' | 'servis' | 'neispravno';
-export type VoziloTip = 'teretno' | 'dostavno' | 'radno' | 'putnicko';
+export type VoziloTip = string;
 export type OpremaKategorija = 'alat' | 'stroj';
 export type OpremaStatus = 'slobodno' | 'na_gradilistu' | 'servis' | 'neaktivno';
 export type OpremaStanje = 'novo' | 'dobro' | 'osteceno';
@@ -145,9 +145,17 @@ export interface Objekt {
   kontakt_osoba?: string | null;
   telefon?: string | null;
   napomena?: string | null;
+  znanje?: ObjektZnanje[];
   created_at: string;
   updated_at: string;
   investitori?: Pick<Investitor, 'id' | 'naziv'> | null;
+}
+
+export interface ObjektZnanje {
+  id: string;
+  kategorija: string;
+  naslov: string;
+  opis: string;
 }
 
 export type ObjektInput = Pick<Objekt, 'naziv'> & Partial<Pick<Objekt,
@@ -253,6 +261,36 @@ export interface DnevniRasporedRadnik {
                                                                                             created_at: string;
                                                                                               updated_at: string;
                                                                                               }
+
+export interface VoziloGorivo {
+  id: string;
+  vozilo_id: string;
+  datum: string;
+  litara: number;
+  kilometraza: number;
+  tocio_radnik_id: string | null;
+  tocio_ime: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type VoziloObavijestVrsta = 'kvar' | 'upozorenje' | 'ostalo';
+
+export interface VoziloObavijest {
+  id: string;
+  vozilo_id: string;
+  prijavio_radnik_id: string | null;
+  prijavio_ime: string;
+  vrsta: VoziloObavijestVrsta;
+  opis: string;
+  datum: string;
+  rijeseno_at: string | null;
+  rijesio: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
 
                                                                                               export interface Raspored {
                                                                                                 id: string;

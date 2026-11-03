@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Users, Plus, Pencil, Trash2, Phone, Mail, HardHat, ArrowDown, ArrowUp, ArrowUpDown, History } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Phone, Mail, HardHat, ArrowDown, ArrowUp, ArrowUpDown, History, AlertTriangle } from 'lucide-react';
 import type { Radnik, RadnikStatus, BonusTip, RadnikPovijest, RadnikDokument, RadnikDokumentVrsta } from '@/types';
 import { RadnikDokumenti } from '@/components/views/RadnikDokumenti';
-import { fetchRadnici, createRadnik, updateRadnik, deleteRadnik, fetchRadnikPovijest, addRadnikPovijest, fetchSviRadnikDokumenti } from '@/lib/api';
+import { fetchRadnici, createRadnik, updateRadnik, deleteRadnik, fetchRadnikPovijest, addRadnikPovijest, fetchSviRadnikDokumenti, fetchRadnikKategorije, addRadnikKategorija } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Field, TextInput, Select } from '@/components/ui/Field';
@@ -32,7 +32,7 @@ function emptyBonus() {
 const emptyForm = {
   ime: '',
   prezime: '',
-  uloga: 'radnik',
+  uloga: 'Radnik',
   telefon: '',
   email: '',
   status: 'aktivan' as RadnikStatus,
@@ -108,6 +108,10 @@ export function RadniciView() {
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [selectedRadnik, setSelectedRadnik] = useState<Radnik | null>(null);
+  const [kategorije, setKategorije] = useState<string[]>(['radnik']);
+  const [novaKategorija, setNovaKategorija] = useState('');
+  const [kategorijaSaving, setKategorijaSaving] = useState(false);
+  const [kategorijaError, setKategorijaError] = useState<string | null>(null);
 
   const loadPovijest = (id: string) => {
     fetchRadnikPovijest(id).then(setPovijest).catch(() => setPovijest([]));
@@ -117,9 +121,14 @@ export function RadniciView() {
     setLoading(true);
     setError(null);
     try {
-      const [workers, workerDocuments] = await Promise.all([fetchRadnici(), fetchSviRadnikDokumenti()]);
+      const [workers, workerDocuments, workerCategories] = await Promise.all([
+        fetchRadnici(),
+        fetchSviRadnikDokumenti(),
+        fetchRadnikKategorije(),
+      ]);
       setItems(workers);
       setDocuments(workerDocuments);
+      setKategorije(workerCategories);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
     } finally {
@@ -170,7 +179,7 @@ export function RadniciView() {
       const payload = {
         ime: form.ime.trim(),
         prezime: form.prezime.trim(),
-        uloga: form.uloga.trim() || 'radnik',
+        uloga: form.uloga.trim() || 'Radnik',
         telefon: form.telefon.trim() || null,
         email: form.email.trim() || null,
         status: form.status,
@@ -184,6 +193,7 @@ export function RadniciView() {
         godisnji_dani_pravo: Math.max(0, Math.floor(Number(form.godisnji_dani_pravo) || 0)),
         bonusi: form.bonusi.map((b) => ({ naziv: b.naziv.trim(), iznos: b.iznos ? parseFloat(b.iznos) : 0, tip: b.tip })),
       };
+
       if (editing) {
         await updateRadnik(editing.id, payload);
         setSelectedRadnik(null);
@@ -208,6 +218,25 @@ export function RadniciView() {
       setError(e instanceof Error ? e.message : 'Greška pri spremanju');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const addCategory = async () => {
+    if (!novaKategorija.trim()) {
+      setKategorijaError('Upišite naziv kategorije.');
+      return;
+    }
+    setKategorijaSaving(true);
+    setKategorijaError(null);
+    try {
+      const created = await addRadnikKategorija(novaKategorija);
+      setKategorije((current) => [...current, created].sort((a, b) => a.localeCompare(b, 'hr')));
+      setForm((current) => ({ ...current, uloga: created }));
+      setNovaKategorija('');
+    } catch (reason) {
+      setKategorijaError(reason instanceof Error ? reason.message : 'Greška pri dodavanju kategorije.');
+    } finally {
+      setKategorijaSaving(false);
     }
   };
 
@@ -257,7 +286,7 @@ export function RadniciView() {
       <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Djelatnici</h1>
-          <p className="text-sm text-slate-500 mt-1">Upravljajte djelatnicima i njihovim ulogama</p>
+          <p className="text-sm text-slate-500 mt-1">Upravljajte djelatnicima i njihovim kategorijama</p>
         </div>
         <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
           <ExportMenu
@@ -269,7 +298,7 @@ export function RadniciView() {
               columns: [
                 { header: 'Prezime', get: (r: Radnik) => r.prezime },
                 { header: 'Ime', get: (r: Radnik) => r.ime },
-                { header: 'Uloga', get: (r: Radnik) => r.uloga },
+                { header: 'Kategorija', get: (r: Radnik) => r.uloga },
                 { header: 'Status', get: (r: Radnik) => statusBadge[r.status].label },
                 { header: 'Telefon', get: (r: Radnik) => r.telefon ?? '' },
                 { header: 'Email', get: (r: Radnik) => r.email ?? '' },
@@ -323,7 +352,7 @@ export function RadniciView() {
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
                 {sortTh('ime', 'Radnik', 'left')}
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Uloga</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Kategorija</th>
                 <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Kontakt</th>
                 <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Status</th>
                 <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Dokumenti</th>
@@ -346,7 +375,7 @@ export function RadniciView() {
                         </button>
                       </div>
                     </td>
-                    <td className="px-5 py-3.5 text-sm text-slate-600">{r.uloga}</td>
+                    <td className="px-5 py-3.5 text-sm text-slate-600">                    {r.uloga.trim().toLowerCase() === 'radnik' ? 'Radnik' : r.uloga}</td>
                     <td className="px-5 py-3.5">
                       <div className="space-y-0.5 text-xs text-slate-500">
                         {r.telefon && (
@@ -436,12 +465,35 @@ export function RadniciView() {
               />
             </Field>
           </div>
-          <Field label="Uloga">
-            <TextInput
-              value={form.uloga}
-              onChange={(e) => setForm({ ...form, uloga: e.target.value })}
-              placeholder="npr. zidar, vozač, voditelj…"
-            />
+          <Field label="Kategorija djelatnika">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Select value={form.uloga} onChange={(e) => setForm({ ...form, uloga: e.target.value })} className="flex-1">
+                {!kategorije.includes(form.uloga) && form.uloga && <option value={form.uloga}>{form.uloga}</option>}
+                {kategorije.map((kategorija) => (
+                  <option key={kategorija} value={kategorija}>
+                    {kategorija.trim().toLowerCase() === 'radnik' ? 'Radnik' : kategorija}
+                  </option>
+                ))}
+              </Select>
+              <div className="flex min-w-0 flex-1 gap-2">
+                <TextInput
+                  value={novaKategorija}
+                  onChange={(e) => { setNovaKategorija(e.target.value); setKategorijaError(null); }}
+                  placeholder="Nova kategorija"
+                  aria-label="Naziv nove kategorije"
+                />
+                <button type="button" onClick={() => void addCategory()} disabled={kategorijaSaving} className="shrink-0 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                  {kategorijaSaving ? 'Dodavanje…' : 'Dodaj'}
+                </button>
+              </div>
+            </div>
+            {kategorijaError && <p role="alert" className="mt-2 text-sm text-red-700">{kategorijaError}</p>}
+            {form.uloga.trim().toLowerCase() === 'radnik' && (
+              <p role="status" className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                Kategorija „radnik” može evidentirati gorivo samo za teretna vozila. Ostale kategorije mogu za sva vozila.
+              </p>
+            )}
           </Field>
           <Field label="Telefon">
             <TextInput

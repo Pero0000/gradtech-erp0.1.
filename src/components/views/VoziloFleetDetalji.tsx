@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Clock3,
   FileText,
+  Fuel,
   Gauge,
   History,
   Pencil,
@@ -24,8 +25,10 @@ import { nextServis, servisAlert } from '@/lib/servis';
 import { todayISO } from '@/lib/rokovi';
 import { Modal } from '@/components/ui/Modal';
 import { VoziloDokumenti } from '@/components/views/VoziloDokumenti';
+import { VoziloGorivo } from '@/components/views/VoziloGorivo';
+import { useAuth } from '@/auth/useAuth';
 
-type Tab = 'pregled' | 'servisi' | 'koristenje';
+type Tab = 'pregled' | 'servisi' | 'koristenje' | 'gorivo';
 type RokVrsta = 'registracija' | 'tehnicki' | 'kasko' | 'osiguranje';
 
 const rokLabels: Record<RokVrsta, string> = {
@@ -91,6 +94,7 @@ export function VoziloFleetDetalji({
   onEdit: () => void;
   onDataChange?: () => void;
 }) {
+  const { canAccess } = useAuth();
   const [tab, setTab] = useState<Tab>('pregled');
   const [dokumenti, setDokumenti] = useState<VoziloDokument[]>([]);
   const [koristenje, setKoristenje] = useState<VoziloKoristenje[]>([]);
@@ -155,6 +159,7 @@ export function VoziloFleetDetalji({
     { id: 'pregled', label: 'Pregled', icon: <Truck className="h-4 w-4" /> },
     { id: 'servisi', label: 'Servisi i održavanje', icon: <Wrench className="h-4 w-4" /> },
     { id: 'koristenje', label: 'Povijest korištenja', icon: <History className="h-4 w-4" /> },
+    { id: 'gorivo', label: 'Gorivo', icon: <Fuel className="h-4 w-4" /> },
   ];
 
   return (
@@ -330,6 +335,10 @@ export function VoziloFleetDetalji({
               </ol>
             ) : <p className="py-8 text-center text-sm text-slate-500">Nema zabilježenih rasporeda za ovo vozilo.</p>}
           </section>
+        )}
+
+        {!loading && tab === 'gorivo' && (
+          <VoziloGorivo vozilo={vozilo} canEdit={canAccess('vozila', 'edit')} onChange={onDataChange} />
         )}
       </div>
     </Modal>

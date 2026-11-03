@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Camera, ImagePlus, Trash2, Check, ChevronLeft, ChevronRight, ClipboardCheck, Clock3, CreditCard, FileText, Flag, Gauge, ListChecks, LogOut, MapPin, Package, Play, Plus, RefreshCw, Truck, Wrench } from 'lucide-react';
+import { AlertTriangle, Camera, Fuel, ImagePlus, Trash2, Check, ChevronLeft, ChevronRight, ClipboardCheck, Clock3, CreditCard, FileText, Flag, Gauge, ListChecks, LogOut, MapPin, Package, Play, Plus, RefreshCw, Truck, Wrench } from 'lucide-react';
 import { useAuth } from '@/auth/useAuth';
 import { usePushRegistration } from '@/components/mobile/usePushRegistration';
 import {
@@ -36,10 +36,14 @@ import { supabase } from '@/lib/supabase';
 import type { GradilisteZadatak, Oprema, ZadatakVrsta } from '@/types';
 import { zadatakVrsta } from '@/types';
 import { WorkerDocumentsTab, WorkerScheduleTab, WorkerTimeTab, type WorkerPortalTab } from '@/components/mobile/WorkerPortalTabs';
+import { MobileFuelTab } from '@/components/mobile/MobileFuelTab';
+import { MobileVehicleIssuesTab } from '@/components/mobile/MobileVehicleIssuesTab';
 
 const portalTabs: Array<{ id: WorkerPortalTab; label: string; title: string; icon: React.ReactNode }> = [
   { id: 'nalozi', label: 'Nalozi', title: 'Moji radni nalozi', icon: <ClipboardCheck className="h-5 w-5" /> },
   { id: 'raspored', label: 'Raspored', title: 'Raspored ekipa i vozila', icon: <Truck className="h-5 w-5" /> },
+  { id: 'gorivo', label: 'Gorivo', title: 'Točenje goriva', icon: <Fuel className="h-5 w-5" /> },
+  { id: 'obavijesti', label: 'Kvarovi', title: 'Prijava problema s vozilom', icon: <AlertTriangle className="h-5 w-5" /> },
   { id: 'vrijeme', label: 'Vrijeme', title: 'Moje radno vrijeme', icon: <Clock3 className="h-5 w-5" /> },
   { id: 'dokumenti', label: 'Dokumenti', title: 'Moji dokumenti', icon: <FileText className="h-5 w-5" /> },
 ];
@@ -211,7 +215,10 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     };
   }, [profile?.radnik_id]);
 
-  const visiblePortalTabs = portalTabs.filter((tab) => tab.id !== 'vrijeme' || portalVrijeme);
+  const visiblePortalTabs = portalTabs.filter((tab) =>
+    (tab.id !== 'vrijeme' || portalVrijeme)
+    && (tab.id !== 'gorivo' || Boolean(profile?.radnik_id))
+    && (tab.id !== 'obavijesti' || Boolean(profile?.radnik_id)));
 
   const refreshOrders = useCallback(async () => {
     const list = await fetchMobileRadniNalozi();
@@ -857,8 +864,8 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                       <ReviewBlock title="Prilozi">
                         {details.dokumenti.length ? details.dokumenti.map((document) => <a key={document.id} href={document.url} target="_blank" rel="noreferrer" className="block min-h-10 py-2 text-sm font-medium text-sky-700 underline">{document.naziv}</a>) : <p className="text-sm text-slate-500">Nema priloženih dokumenata.</p>}
                         {details.foto.length > 0 && (
-                          <div className="mt-2 grid min-w-0 grid-cols-1 xl:grid-cols-2 2xl:grid-cols-4 gap-2">
-                            {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer"><img loading="lazy" src={photo.thumbnailUrl} alt={photo.naziv ?? 'Slika naloga'} className="aspect-square w-full rounded-lg object-cover" /></a>)}
+                          <div className="mt-2 grid min-w-0 grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 xl:grid-cols-2 2xl:grid-cols-4">
+                            {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" className="block min-w-0 overflow-hidden rounded-lg"><img loading="lazy" src={photo.thumbnailUrl} alt={photo.naziv ?? 'Slika naloga'} className="aspect-square w-full object-cover" /></a>)}
                           </div>
                         )}
                       </ReviewBlock>
@@ -980,8 +987,8 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
 
                     <WorkOrderPanel title="Fotografije izvedenog rada" icon={<Camera className="h-5 w-5" />} tone="rose" summary={`${details.foto.length} fotografija`}>
                       {details.foto.length > 0 && (
-                        <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-2">
-                          {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer"><img loading="lazy" src={photo.thumbnailUrl} alt={photo.naziv ?? 'Fotografija naloga'} className="aspect-square w-full rounded-lg object-cover" /></a>)}
+                        <div className="grid min-w-0 grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 xl:grid-cols-2 2xl:grid-cols-3">
+                          {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" className="block min-w-0 overflow-hidden rounded-lg"><img loading="lazy" src={photo.thumbnailUrl} alt={photo.naziv ?? 'Fotografija naloga'} className="aspect-square w-full object-cover" /></a>)}
                         </div>
                       )}
                       {selectedPhotoQueue.length > 0 && (
@@ -991,7 +998,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                               ? `Šaljem fotografije… (preostalo ${selectedPhotoQueue.filter((photo) => photo.status !== 'greska').length})`
                               : 'Neke fotografije nisu poslane.'}
                           </p>
-                          <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-2">
+                          <div className="grid min-w-0 grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 xl:grid-cols-2 2xl:grid-cols-3">
                             {selectedPhotoQueue.map((photo) => (
                               <div key={photo.id} className="relative">
                                 <img loading="lazy" src={photo.previewUrl} alt="Fotografija u slanju" className={`aspect-square w-full rounded-lg object-cover ${photo.status === 'greska' ? 'opacity-40' : 'opacity-60'}`} />
@@ -1264,6 +1271,8 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
             </nav>
             <h2 className="px-1 pt-2 text-lg font-bold text-slate-900">{portalTabs.find((tab) => tab.id === portalTab)?.title}</h2>
             {portalTab === 'raspored' && <WorkerScheduleTab radnikId={profile?.radnik_id ?? null} />}
+            {portalTab === 'gorivo' && <MobileFuelTab />}
+            {portalTab === 'obavijesti' && <MobileVehicleIssuesTab />}
             {portalTab === 'vrijeme' && portalVrijeme && <WorkerTimeTab />}
             {portalTab === 'dokumenti' && (profile?.radnik_id
               ? <WorkerDocumentsTab radnikId={profile.radnik_id} orders={orders} />

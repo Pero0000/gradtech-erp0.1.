@@ -300,11 +300,11 @@ export function GradilisteMaterijalDokumenti({
         <SectionBox title={`Slike (${slike.length})`} icon={<Camera className="h-4 w-4" />} tone="rose">
           <input ref={imgRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void upload(e.target.files, 'slika')} />
           {slike.length > 0 && (
-            <div className="mb-2 grid max-h-[34rem] auto-rows-[11rem] grid-cols-1 gap-2 overflow-y-auto xl:grid-cols-2 2xl:grid-cols-3 overscroll-contain" tabIndex={0} role="region" aria-label="Slike gradilišta — pomaknite za ostale slike">
+            <div className="mb-2 grid max-h-[34rem] auto-rows-[8rem] grid-cols-2 gap-1.5 overflow-y-auto sm:auto-rows-[9rem] sm:grid-cols-3 sm:gap-2 xl:auto-rows-[10rem] xl:grid-cols-3 overscroll-contain" tabIndex={0} role="region" aria-label="Slike gradilišta — pomaknite za ostale slike">
               {slike.map((d) => (
                 <div key={d.id} className="group relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200">
                   <button type="button" onClick={() => setActivePhotoId(d.id)} className="block min-h-0 w-full flex-1 bg-slate-50" aria-label={`Pregledaj ${d.naziv}`}>
-                    <img loading="lazy" src={d.thumbnailUrl} alt={d.naziv} className="h-full w-full object-contain" />
+                    <img loading="lazy" src={d.thumbnailUrl} alt={d.naziv} className="h-full w-full object-cover" />
                   </button>
                   <button
                     type="button"

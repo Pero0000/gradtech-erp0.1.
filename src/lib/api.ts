@@ -8,6 +8,9 @@ import { todayISO } from './rokovi';
 import { compressPhotoForUpload } from './imageCompression';
 import type {
   VoziloDokument,
+  VoziloGorivo,
+  VoziloObavijest,
+  VoziloObavijestVrsta,
   OdsustvoVrsta,
   RadnikOdsustvo,
   RadnikPovijest,
@@ -29,6 +32,7 @@ import type {
   KooperantDokumentVrsta,
   KooperantInput,
   Objekt,
+  ObjektZnanje,
   ObjektInput,
   Radnik,
   Vozilo,
@@ -207,6 +211,19 @@ export async function saveObjekt(id: string | null, objekt: ObjektInput) {
   return data as Objekt;
 }
 
+export async function saveObjektZnanje(objektId: string, znanje: ObjektZnanje[]): Promise<void> {
+  const { error } = await supabase
+    .from('objekti')
+    .update({ znanje, updated_at: new Date().toISOString() })
+    .eq('id', objektId);
+  if (error) {
+    if (error.code === '42703' || error.code === 'PGRST204' || String(error.message).toLowerCase().includes('znanje')) {
+      throw new Error('Pokreni migraciju 20261108100000_objekt_znanje.sql u Supabase SQL editoru.');
+    }
+    throw error;
+  }
+}
+
 export async function deleteObjekt(id: string) {
   const { data: sites, error: sitesError } = await supabase.from('gradilista').select('id').eq('objekt_id', id).limit(1);
   if (sitesError) throwActionableDbError(sitesError, 'gradilista');
@@ -309,6 +326,38 @@ export async function fetchRadnici(): Promise<Radnik[]> {
     .order('created_at', { ascending: false })
     .order('id')
     .range(from, to));
+}
+
+export async function fetchRadnikKategorije(): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('radnik_kategorije')
+    .select('naziv')
+    .order('naziv');
+  if (error) {
+    if (['42P01', 'PGRST205'].includes(error.code ?? '') || error.message.toLowerCase().includes('radnik_kategorije')) {
+      throw new Error('Nedostaje migracija 20261109120000_radnik_kategorije_gorivo.sql. Primijenite je u Supabase SQL editoru.');
+    }
+    throw error;
+  }
+  return (data ?? []).map((item) => item.naziv);
+}
+
+export async function addRadnikKategorija(naziv: string): Promise<string> {
+  const value = naziv.trim();
+  if (!value) throw new Error('Upišite naziv kategorije.');
+  const { data, error } = await supabase
+    .from('radnik_kategorije')
+    .insert({ naziv: value })
+    .select('naziv')
+    .single();
+  if (error) {
+    if (error.code === '23505') throw new Error('Kategorija s tim nazivom već postoji.');
+    if (['42P01', 'PGRST205'].includes(error.code ?? '') || error.message.toLowerCase().includes('radnik_kategorije')) {
+      throw new Error('Nedostaje migracija 20261109120000_radnik_kategorije_gorivo.sql. Primijenite je u Supabase SQL editoru.');
+    }
+    throw error;
+  }
+  return data.naziv;
 }
 
 export async function createRadnik(r: Omit<Radnik, 'id' | 'created_at' | 'updated_at'>) {
@@ -607,6 +656,213 @@ export async function deleteVoziloDokument(d: VoziloDokument) {
   const { error } = await supabase.from('vozila_dokumenti').delete().eq('id', d.id);
   if (error) throw error;
   if (d.putanja) await supabase.storage.from('nalozi-foto').remove([d.putanja]);
+}
+
+export interface VoziloGorivoInput {
+  vozilo_id: string;
+  datum: string;
+  litara: number;
+  kilometraza: number;
+  tocio_radnik_id: string;
+  tocio_ime: string;
+}
+
+export interface MobileVoziloGorivoOptions {
+  vozila: Array<{ id: string; marka: string; model: string | null; registracija: string; tip: Vozilo['tip'] }>;
+  radnici: Array<{ id: string; ime: string; prezime: string; uloga: string }>;
+}
+
+function vozilaGorivoError(error: { message?: string; code?: string }) {
+  const rawMessage = String(error?.message ?? '');
+  const message = rawMessage.toLowerCase();
+  const missingDatabaseObject = ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '');
+  if (missingDatabaseObject && (
+    message.includes('vozila_gorivo') || message.includes('get_mobile_vozila_gorivo')
+    || message.includes('get_vozila_gorivo_workers') || message.includes('add_mobile_vozila_gorivo')
+  )) {
+    return new Error('Nedostaje migracija 20261109100000_vozila_gorivo.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  if (message.includes('poslovođ')) {
+    return new Error(rawMessage.replace(/poslovođa|poslovođe|poslovođu/gi, 'djelatnika'));
+  }
+  return error;
+}
+
+export async function fetchVozilaGorivoWorkers(): Promise<Array<Pick<Radnik, 'id' | 'ime' | 'prezime' | 'uloga'>>> {
+  const { data, error } = await supabase.rpc('get_vozila_gorivo_workers');
+  if (error) throw vozilaGorivoError(error);
+  const workerRows = (data ?? []) as Array<{ uloga?: unknown }>;
+  if (workerRows.some((worker) => typeof worker.uloga !== 'string')) {
+    throw new Error('Nedostaje migracija 20261109120000_radnik_kategorije_gorivo.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return (data ?? []) as Array<Pick<Radnik, 'id' | 'ime' | 'prezime' | 'uloga'>>;
+}
+
+export async function fetchVoziloGorivo(voziloId: string): Promise<VoziloGorivo[]> {
+  const { data, error } = await supabase
+    .from('vozila_gorivo')
+    .select('*')
+    .eq('vozilo_id', voziloId)
+    .order('kilometraza', { ascending: true })
+    .order('datum', { ascending: true });
+  if (error) throw vozilaGorivoError(error);
+  return (data ?? []) as VoziloGorivo[];
+}
+
+export async function addVoziloGorivo(input: VoziloGorivoInput) {
+  const { error } = await supabase.from('vozila_gorivo').insert(input);
+  if (error) throw vozilaGorivoError(error);
+}
+
+export async function updateVoziloGorivo(id: string, input: VoziloGorivoInput) {
+  const { error } = await supabase
+    .from('vozila_gorivo')
+    .update({ ...input, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw vozilaGorivoError(error);
+}
+
+export async function deleteVoziloGorivo(id: string) {
+  const { error } = await supabase.from('vozila_gorivo').delete().eq('id', id);
+  if (error) throw vozilaGorivoError(error);
+}
+
+export async function fetchMobileVoziloGorivoOptions(): Promise<MobileVoziloGorivoOptions> {
+  const [vehicles, workers] = await Promise.all([
+    supabase.rpc('get_mobile_vozila_gorivo_vehicles'),
+    supabase.rpc('get_vozila_gorivo_workers'),
+  ]);
+  if (vehicles.error) throw vozilaGorivoError(vehicles.error);
+  if (workers.error) throw vozilaGorivoError(workers.error);
+  const vehicleRows = (vehicles.data ?? []) as Array<{ tip?: unknown }>;
+  const workerRows = (workers.data ?? []) as Array<{ uloga?: unknown }>;
+  if (vehicleRows.some((vehicle) => typeof vehicle.tip !== 'string' || !vehicle.tip.trim())
+    || workerRows.some((worker) => typeof worker.uloga !== 'string')) {
+    throw new Error('Nedostaje migracija 20261109120000_radnik_kategorije_gorivo.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return {
+    vozila: vehicles.data ?? [],
+    radnici: workers.data ?? [],
+  } as MobileVoziloGorivoOptions;
+}
+
+export async function fetchMobileVoziloGorivo(): Promise<VoziloGorivo[]> {
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError) throw authError;
+  if (!authData.user) throw new Error('Prijavite se za pregled svojih unosa goriva.');
+  const { data, error } = await supabase
+    .from('vozila_gorivo')
+    .select('*')
+    .eq('created_by', authData.user.id)
+    .order('datum', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) throw vozilaGorivoError(error);
+  return (data ?? []) as VoziloGorivo[];
+}
+
+export async function addMobileVoziloGorivo(input: Omit<VoziloGorivoInput, 'tocio_ime'>) {
+  const { error } = await supabase.rpc('add_mobile_vozila_gorivo', {
+    p_vozilo_id: input.vozilo_id,
+    p_datum: input.datum,
+    p_litara: input.litara,
+    p_kilometraza: input.kilometraza,
+    p_tocio_radnik_id: input.tocio_radnik_id,
+  });
+  if (error) throw vozilaGorivoError(error);
+}
+
+function vozilaObavijestiError(error: { message?: string; code?: string }) {
+  const message = String(error?.message ?? '').toLowerCase();
+  const missingDatabaseObject = ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '');
+  if (missingDatabaseObject && (
+    message.includes('vozila_obavijesti') || message.includes('get_mobile_vozila_obavijest')
+    || message.includes('add_mobile_vozila_obavijest') || message.includes('resolve_vozila_obavijest')
+  )) {
+    return new Error('Nedostaje migracija 20261109110000_vozila_obavijesti.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+export async function fetchMobileVoziloObavijestVehicles(): Promise<Array<Pick<MobileVoziloGorivoOptions['vozila'][number], 'id' | 'marka' | 'model' | 'registracija'>>> {
+  const { data, error } = await supabase.rpc('get_mobile_vozila_obavijest_vehicles');
+  if (error) throw vozilaObavijestiError(error);
+  return (data ?? []) as Array<Pick<MobileVoziloGorivoOptions['vozila'][number], 'id' | 'marka' | 'model' | 'registracija'>>;
+}
+
+export async function fetchMobileVoziloObavijesti(): Promise<VoziloObavijest[]> {
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError) throw authError;
+  if (!authData.user) throw new Error('Prijavite se za pregled prijava vozila.');
+  const { data, error } = await supabase
+    .from('vozila_obavijesti')
+    .select('*')
+    .eq('created_by', authData.user.id)
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) throw vozilaObavijestiError(error);
+  return (data ?? []) as VoziloObavijest[];
+}
+
+export async function addMobileVoziloObavijest(input: {
+  vozilo_id: string;
+  vrsta: VoziloObavijestVrsta;
+  opis: string;
+}) {
+  const { error } = await supabase.rpc('add_mobile_vozila_obavijest', {
+    p_vozilo_id: input.vozilo_id,
+    p_vrsta: input.vrsta,
+    p_opis: input.opis,
+  });
+  if (error) throw vozilaObavijestiError(error);
+}
+
+export async function fetchOpenVoziloObavijesti(): Promise<VoziloObavijest[]> {
+  const { data, error } = await supabase
+    .from('vozila_obavijesti')
+    .select('*')
+    .is('rijeseno_at', null)
+    .order('datum', { ascending: false })
+    .order('created_at', { ascending: false });
+  if (error) throw vozilaObavijestiError(error);
+  return (data ?? []) as VoziloObavijest[];
+}
+
+export async function resolveVoziloObavijest(id: string) {
+  const { error } = await supabase.rpc('resolve_vozila_obavijest', { p_id: id });
+  if (error) throw vozilaObavijestiError(error);
+}
+
+export async function fetchVozilaTipovi(): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('vozila_tipovi')
+    .select('naziv')
+    .order('naziv');
+  if (error) {
+    if (['42P01', 'PGRST205'].includes(error.code ?? '') || error.message.toLowerCase().includes('vozila_tipovi')) {
+      throw new Error('Nedostaje migracija 20261109130000_vozila_tipovi.sql. Primijenite je u Supabase SQL editoru.');
+    }
+    throw error;
+  }
+  return (data ?? []).map((item) => item.naziv);
+}
+
+export async function addVoziloTip(naziv: string): Promise<string> {
+  const value = naziv.trim();
+  if (!value) throw new Error('Upišite naziv tipa vozila.');
+  const { data, error } = await supabase
+    .from('vozila_tipovi')
+    .insert({ naziv: value })
+    .select('naziv')
+    .single();
+  if (error) {
+    if (error.code === '23505') throw new Error('Tip vozila s tim nazivom već postoji.');
+    if (['42P01', 'PGRST205'].includes(error.code ?? '') || error.message.toLowerCase().includes('vozila_tipovi')) {
+      throw new Error('Nedostaje migracija 20261109130000_vozila_tipovi.sql. Primijenite je u Supabase SQL editoru.');
+    }
+    throw error;
+  }
+  return data.naziv;
 }
 
 export async function fetchVozila(): Promise<Vozilo[]> {

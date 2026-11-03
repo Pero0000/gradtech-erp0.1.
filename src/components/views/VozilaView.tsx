@@ -1,11 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Truck, Plus, Pencil, Trash2, Gauge, Calendar, Users, Weight, LayoutGrid, Table2, ArrowDown, ArrowUp, ArrowUpDown, RefreshCw } from 'lucide-react';
+import { Truck, Plus, Pencil, Trash2, Gauge, Calendar, Users, Weight, LayoutGrid, Table2, ArrowDown, ArrowUp, ArrowUpDown, RefreshCw, AlertTriangle } from 'lucide-react';
 import type { DnevniRasporedGradiliste, Vozilo, VoziloStatus, VoziloTip, VoziloDokument } from '@/types';
 import { servisAlert, nextServis } from '@/lib/servis';
 import { jamstvoInfo } from '@/lib/jamstvo';
-import { AlertTriangle } from 'lucide-react';
 import { VoziloDokumenti } from '@/components/views/VoziloDokumenti';
-import { fetchVozila, createVozilo, updateVozilo, deleteVozilo, fetchSviServisi, fetchDnevniRaspored, recalculateVehicleKmCosts } from '@/lib/api';
+import { fetchVozila, createVozilo, updateVozilo, deleteVozilo, fetchSviServisi, fetchDnevniRaspored, recalculateVehicleKmCosts, fetchVozilaTipovi, addVoziloTip } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
@@ -36,11 +35,14 @@ function storedStatus(status: VehicleDisplayStatus): VoziloStatus {
   return status === 'na_gradilistu' ? 'zauzeto' : status;
 }
 
-const tipLabel: Record<VoziloTip, string> = {
-  teretno: 'Teretno',
-  dostavno: 'Dostavno',
-  radno: 'Radno',
-  putnicko: 'Putničko',
+const tipLabel = (tip: VoziloTip) => {
+  const known: Record<string, string> = {
+    teretno: 'Teretno',
+    dostavno: 'Dostavno',
+    radno: 'Radno',
+    putnicko: 'Putničko',
+  };
+  return known[tip.trim().toLowerCase()] ?? tip;
 };
 
 type SortKey = 'vozilo' | 'tip' | 'status' | 'kilometraza' | 'godina' | 'mjesta' | 'nosivost' | 'masa' | 'enc' | 'servis' | 'napomena';
@@ -49,7 +51,7 @@ const emptyForm = {
   registracija: '',
   marka: '',
   model: '',
-  tip: 'teretno' as VoziloTip,
+  tip: 'Teretno' as VoziloTip,
   status: 'slobodno' as VoziloStatus,
   kilometraza: '',
   godina_proizvodnje: '',
@@ -74,6 +76,10 @@ const emptyForm = {
 
 export function VozilaView() {
   const [items, setItems] = useState<Vozilo[]>([]);
+  const [tipovi, setTipovi] = useState<string[]>([]);
+  const [noviTip, setNoviTip] = useState('');
+  const [tipSaving, setTipSaving] = useState(false);
+  const [tipError, setTipError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -99,12 +105,14 @@ export function VozilaView() {
     setLoading(true);
     setError(null);
     try {
-      const [vehicles, services, schedule] = await Promise.all([
+      const [vehicles, services, schedule, vehicleTypes] = await Promise.all([
         fetchVozila(),
         fetchSviServisi(),
         fetchDnevniRaspored(todayISO()),
+        fetchVozilaTipovi(),
       ]);
       setItems(vehicles);
+      setTipovi(vehicleTypes);
       setServisi(services);
       setTodaysAssignments(schedule.gradilista);
     } catch (e) {
@@ -132,7 +140,7 @@ export function VozilaView() {
       registracija: v.registracija,
       marka: v.marka,
       model: v.model ?? '',
-      tip: v.tip,
+      tip: tipovi.find((item) => item.trim().toLowerCase() === v.tip.trim().toLowerCase()) ?? v.tip,
       status: v.status,
       kilometraza: v.kilometraza?.toString() ?? '',
       godina_proizvodnje: v.godina_proizvodnje?.toString() ?? '',
@@ -182,7 +190,7 @@ export function VozilaView() {
   };
 
   const save = async () => {
-    if (!form.registracija.trim() || !form.marka.trim()) return;
+    if (!form.registracija.trim() || !form.marka.trim() || !form.tip.trim()) return;
     if (form.jamstvo_mjeseci && (!Number.isInteger(Number(form.jamstvo_mjeseci)) || Number(form.jamstvo_mjeseci) < 1)) {
       setError('Trajanje jamstva mora biti pozitivan cijeli broj mjeseci.');
       return;
@@ -220,6 +228,7 @@ export function VozilaView() {
         jamstvo_uvjeti: form.jamstvo_uvjeti.trim() || null,
         napomena: form.napomena.trim() || null,
       };
+
       if (editing) {
         const { cijena_km, ...otherUpdates } = payload;
         const updatePayload = Number(cijena_km) === Number(editing.cijena_km ?? 0)
@@ -241,6 +250,25 @@ export function VozilaView() {
     }
   };
 
+  const addVehicleType = async () => {
+    if (!noviTip.trim()) {
+      setTipError('Upišite naziv tipa vozila.');
+      return;
+    }
+    setTipSaving(true);
+    setTipError(null);
+    try {
+      const created = await addVoziloTip(noviTip);
+      setTipovi((current) => [...current, created].sort((a, b) => a.localeCompare(b, 'hr')));
+      setForm((current) => ({ ...current, tip: created }));
+      setNoviTip('');
+    } catch (reason) {
+      setTipError(reason instanceof Error ? reason.message : 'Greška pri dodavanju tipa vozila.');
+    } finally {
+      setTipSaving(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!deleteId) return;
     try {
@@ -257,7 +285,7 @@ export function VozilaView() {
     const value = (vehicle: Vozilo): string | number => {
       switch (sortKey) {
         case 'vozilo': return `${vehicle.marka} ${vehicle.model ?? ''}`.trim();
-        case 'tip': return tipLabel[vehicle.tip];
+        case 'tip': return tipLabel(vehicle.tip);
         case 'status': return statusBadge[displayStatus(vehicle, todaysAssignments)].label;
         case 'kilometraza': return vehicle.kilometraza ?? 0;
         case 'godina': return vehicle.godina_proizvodnje ?? 0;
@@ -326,7 +354,7 @@ export function VozilaView() {
               rows: sortedItems,
               columns: [
                 { header: 'Vozilo', get: (v: Vozilo) => [v.marka, v.model].filter(Boolean).join(' ') },
-                { header: 'Tip', get: (v: Vozilo) => tipLabel[v.tip] },
+                { header: 'Tip', get: (v: Vozilo) => tipLabel(v.tip) },
                 { header: 'Status', get: (v: Vozilo) => statusBadge[displayStatus(v, todaysAssignments)].label },
                 { header: 'Kilometraža', kind: 'num', get: (v: Vozilo) => v.kilometraza },
                 { header: 'Godina', get: (v: Vozilo) => v.godina_proizvodnje?.toString() ?? '' },
@@ -404,7 +432,7 @@ export function VozilaView() {
                 return (
                   <tr key={v.id} role="button" tabIndex={0} onClick={() => openDetails(v)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openDetails(v); } }} className="group cursor-pointer hover:bg-slate-50">
                     <td className="px-4 py-3 font-medium text-slate-900"><span className="mr-2 text-slate-400">{index + 1}.</span>{v.marka} {v.model} <span className="ml-1 text-xs text-slate-500">{v.registracija}</span></td>
-                    <td className="px-4 py-3"><Badge variant="blue">{tipLabel[v.tip]}</Badge></td>
+                    <td className="px-4 py-3"><Badge variant="blue">{tipLabel(v.tip)}</Badge></td>
                     <td className="px-4 py-3"><Badge variant={sb.variant}>{sb.label}</Badge></td>
                     <td className="px-4 py-3"><Badge variant={warranty.tone}>{warranty.label}</Badge>{warranty.detail && <span className="mt-1 block text-xs text-slate-500">{warranty.detail}</span>}</td>
                     <td className="px-4 py-3 text-right text-slate-600">{v.kilometraza.toLocaleString('hr-HR')}</td>
@@ -485,7 +513,7 @@ export function VozilaView() {
                 </div>
 
                 <div className="flex items-center gap-2 mb-3">
-                  <Badge variant="blue">{tipLabel[v.tip]}</Badge>
+                  <Badge variant="blue">{tipLabel(v.tip)}</Badge>
                   <Badge variant={sb.variant}>{sb.label}</Badge>
                   <Badge variant={warranty.tone}>{warranty.label}</Badge>
                 </div>
@@ -592,15 +620,26 @@ export function VozilaView() {
           </Field>
           <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Tip">
-              <Select
-                value={form.tip}
-                onChange={(e) => setForm({ ...form, tip: e.target.value as VoziloTip })}
-              >
-                <option value="teretno">Teretno</option>
-                <option value="dostavno">Dostavno</option>
-                <option value="radno">Radno</option>
-                <option value="putnicko">Putničko</option>
-              </Select>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Select value={form.tip} onChange={(e) => setForm({ ...form, tip: e.target.value as VoziloTip })} className="flex-1">
+                  {!tipovi.some((tip) => tip.trim().toLowerCase() === form.tip.trim().toLowerCase()) && form.tip
+                    && <option value={form.tip}>{tipLabel(form.tip)}</option>}
+                  {tipovi.map((tip) => <option key={tip} value={tip}>{tipLabel(tip)}</option>)}
+                </Select>
+                <div className="flex min-w-0 flex-1 gap-2">
+                  <TextInput value={noviTip} onChange={(e) => { setNoviTip(e.target.value); setTipError(null); }} placeholder="Novi tip vozila" aria-label="Naziv novog tipa vozila" />
+                  <button type="button" onClick={() => void addVehicleType()} disabled={tipSaving} className="shrink-0 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                    {tipSaving ? 'Dodavanje…' : 'Dodaj'}
+                  </button>
+                </div>
+              </div>
+              {tipError && <p role="alert" className="mt-2 text-sm text-red-700">{tipError}</p>}
+              {form.tip.trim().toLowerCase() !== 'teretno' && (
+                <p role="status" className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  Djelatnici kategorije „Radnik” mogu evidentirati gorivo samo za teretna vozila.
+                </p>
+              )}
             </Field>
             <Field label="Status">
               <Select

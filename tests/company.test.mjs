@@ -22,13 +22,24 @@ function loadTypeScript(relativePath, mocks = {}, globals = {}) {
 }
 
 const pagination = loadTypeScript('../src/lib/pagination.ts');
+let queryResult;
+let queriedTable;
 const api = loadTypeScript('../src/lib/api.ts', {
-  './supabase': { supabase: {} },
+  './supabase': { supabase: { from: (table) => {
+    queriedTable = table;
+    const query = {
+      select: () => query,
+      order: async () => queryResult,
+    };
+    return query;
+  } } },
   './postavke': {},
   './obracunSati': {},
   './vehicleKmCosts': {},
   './company': {},
   './pagination': {},
+  './rokovi': {},
+  './imageCompression': {},
 });
 
 test('pagination returns all workers beyond the default 1000-row limit', async () => {
@@ -49,10 +60,61 @@ test('faktura total follows the stored rebate direction and preserves legacy add
   assert.equal(api.iznosFakture({ iznos: 100, rabat: 10, rabat_smjer: 'oduzmi' }), 90);
 });
 
+test('schedule flattens joined workers and vehicles while excluding hidden relations', async () => {
+  const worker = { id: 'worker', ime: 'Ana', prezime: 'Test' };
+  const vehicle = { id: 'vehicle', registracija: 'ZG-TEST' };
+  queryResult = { data: [{
+    id: 'schedule', datum: '2026-11-04', napomena: 'Test',
+    radnici: [{ radnik: worker }, { radnik: null }],
+    vozila: [{ vozilo: null }, { vozilo: vehicle }],
+  }, {
+    id: 'empty', radnici: null, vozila: null,
+  }], error: null };
+  const result = await api.fetchRasporedi();
+  assert.equal(queriedTable, 'raspored');
+  assert.equal(result[0].napomena, 'Test');
+  assert.deepEqual(Array.from(result[0].radnici), [worker]);
+  assert.deepEqual(Array.from(result[0].vozila), [vehicle]);
+  assert.equal(result[1].radnici.length, 0);
+  assert.equal(result[1].vozila.length, 0);
+});
+
+test('work order list preserves order data and flattens visible workers', async () => {
+  const worker = { id: 'worker', ime: 'Ana', prezime: 'Test' };
+  queryResult = { data: [
+    { id: 'order', status: 'otvoren', radnici: [{ radnik_id: worker.id, radnik: worker }] },
+    { id: 'empty', radnici: null },
+  ], error: null };
+  const result = await api.fetchRadniNalozi();
+  assert.equal(queriedTable, 'radni_nalozi');
+  assert.equal(result[0].status, 'otvoren');
+  assert.deepEqual(Array.from(result[0].radnici), [worker]);
+  assert.equal(result[1].radnici.length, 0);
+});
+
+test('schedule and work order reads propagate database errors', async () => {
+  const error = { message: 'database unavailable' };
+  queryResult = { data: null, error };
+  await assert.rejects(api.fetchRasporedi(), (reason) => reason === error);
+  await assert.rejects(api.fetchRadniNalozi(), (reason) => reason === error);
+});
+
 test('pagination propagates database errors instead of returning a partial list', async () => {
   const error = { message: 'database unavailable' };
   await assert.rejects(pagination.fetchAllRows(() => Promise.resolve({ data: null, error })),
     (reason) => reason === error);
+});
+
+test('pagination rejects a later page failure instead of reporting incomplete data as complete', async () => {
+  const error = { message: 'second page unavailable' };
+  const calls = [];
+  await assert.rejects(pagination.fetchAllRows((from, to) => {
+    calls.push([from, to]);
+    return Promise.resolve(from === 0
+      ? { data: Array.from({ length: 500 }, (_, id) => ({ id })), error: null }
+      : { data: null, error });
+  }), (reason) => reason === error);
+  assert.deepEqual(calls, [[0, 499], [500, 999]]);
 });
 
 test('company storage isolates settings and migrates legacy settings only to the initial company', () => {

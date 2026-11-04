@@ -50,6 +50,8 @@ test('portal računa aktualne noćne sate i bez odobrene evidencije, a ručne sa
     './vehicleKmCosts': { calculateVehicleKmCosts: () => [] },
     './company': {},
     './pagination': {},
+    './rokovi': {},
+    './imageCompression': {},
   };
   const apiSource = readFileSync(new URL('../src/lib/api.ts', import.meta.url), 'utf8');
   const compiled = ts.transpileModule(apiSource, {
@@ -225,6 +227,8 @@ test('evidencija obracuna ucitava gradiliste, nalog i smjenu odgovarajuceg radni
     } } },
     './postavke': {}, './obracunSati': obracun,
     './vehicleKmCosts': { calculateVehicleKmCosts: () => [] }, './company': {},
+    './rokovi': {},
+    './imageCompression': {},
     './pagination': { fetchAllRows: async (page) => {
       const result = await page(0, 499);
       if (result.error) throw result.error;

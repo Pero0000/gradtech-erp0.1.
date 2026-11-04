@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, type DragEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, type DragEvent } from 'react';
+import { useRequestScope } from '@/lib/useRequestScope';
 import { Building2, Plus, Pencil, Trash2, Calendar, GripVertical, AlertTriangle } from 'lucide-react';
 import type { Gradiliste, GradilisteRegija, GradilisteStatus, Investitor, Objekt, Rok, ZadatakVrsta } from '@/types';
 import {
@@ -148,6 +149,9 @@ export function GradilistaView({
   const gradilisteColumnLabels = company?.postavke.gradiliste_column_labels ?? [...DEFAULT_GRADILISTE_COLUMN_LABELS];
   const canEditBoard = canAccess('gradilista', 'edit');
   const layoutSaveQueue = useRef<Promise<void>>(Promise.resolve());
+  const layoutVersion = useRef(0);
+  const loadScope = useRequestScope();
+  const rokoviScope = useRequestScope();
   const [items, setItems] = useState<Gradiliste[]>([]);
   const [rokovi, setRokovi] = useState<Rok[]>([]);
   const [columnIds, setColumnIds] = useState<string[][]>(emptyGradilisteColumns);
@@ -177,23 +181,29 @@ export function GradilistaView({
   const [archiveFilter, setArchiveFilter] = useState(emptyArchiveFilter);
   const [archiveSort, setArchiveSort] = useState<{ key: ArchiveSortKey; asc: boolean }>({ key: 'datum_zavrsetka', asc: false });
 
-  const persistBoardLayout = (columns: string[][], sortModes: GradilisteSortMode[]) => {
+  const persistBoardLayout = useCallback((columns: string[][], sortModes: GradilisteSortMode[]) => {
+    layoutVersion.current += 1;
     const save = layoutSaveQueue.current
       .catch(() => undefined)
       .then(() => saveGradilisteBoardLayout({ columns, sortModes }));
     layoutSaveQueue.current = save;
     return save;
-  };
+  }, []);
 
-  const loadRokovi = async () => {
+  const loadRokovi = useCallback(async () => {
+    const isCurrent = rokoviScope.start();
+    if (!isCurrent()) return;
     try {
-      setRokovi(await fetchRokovi());
-    } catch {
-      setRokovi([]);
+      const nextRokovi = await fetchRokovi();
+      if (isCurrent()) setRokovi(nextRokovi);
+    } catch (reason) {
+      if (isCurrent()) setError(getErrorMessage(reason, 'Greška pri učitavanju rokova gradilišta.'));
     }
-  };
+  }, [rokoviScope]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const isCurrent = loadScope.start();
+    if (!isCurrent()) return;
     setLoading(true);
     setError(null);
     void loadRokovi();
@@ -201,8 +211,9 @@ export function GradilistaView({
       const [nextItems, nextInvestitori, savedLayout] = await Promise.all([
         fetchGradilista(),
         fetchInvestitori(),
-        fetchGradilisteBoardLayout(),
+        layoutSaveQueue.current.then(() => fetchGradilisteBoardLayout()),
       ]);
+      if (!isCurrent()) return;
       setItems(nextItems);
       setInvestitori(nextInvestitori);
       const nextColumns = reconcileGradilisteColumns(nextItems, savedLayout?.columns ?? emptyGradilisteColumns());
@@ -213,15 +224,16 @@ export function GradilistaView({
         await persistBoardLayout(nextColumns, nextSortModes);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
+      if (isCurrent()) setError(getErrorMessage(e, 'Greška pri učitavanju'));
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  };
+  }, [canEditBoard, loadRokovi, loadScope, persistBoardLayout]);
 
   useEffect(() => {
-    load();
-  }, []);
+    void load();
+    return () => loadScope.invalidate();
+  }, [load, loadScope]);
 
   useEffect(() => {
     if (focusGradilisteId && items.some((item) => item.id === focusGradilisteId)) {
@@ -230,25 +242,39 @@ export function GradilistaView({
   }, [focusGradilisteId, items]);
 
   useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
     const refreshBoardLayout = async () => {
+      if (inFlight || document.visibilityState !== 'visible') return;
+      inFlight = true;
+      const version = layoutVersion.current;
       try {
+        await layoutSaveQueue.current;
+        if (cancelled || version !== layoutVersion.current) return;
         const layout = await fetchGradilisteBoardLayout();
-        if (!layout) return;
+        if (cancelled || version !== layoutVersion.current || !layout) return;
         const nextColumns = reconcileGradilisteColumns(items, layout.columns);
         setColumnIds((current) => JSON.stringify(current) === JSON.stringify(nextColumns) ? current : nextColumns);
         setColumnSortModes((current) => JSON.stringify(current) === JSON.stringify(layout.sortModes) ? current : layout.sortModes);
-      } catch {
-        // Keep the current board visible if a background refresh fails.
+      } catch (reason) {
+        if (!cancelled && version === layoutVersion.current) {
+          setError(getErrorMessage(reason, 'Osvježavanje rasporeda gradilišta nije uspjelo.'));
+        }
+      } finally {
+        inFlight = false;
       }
     };
     const timer = window.setInterval(() => void refreshBoardLayout(), 30_000);
-    return () => window.clearInterval(timer);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [items]);
 
   useEffect(() => {
     let cancelled = false;
+    setObjekti([]);
     if (!form.investitorId) {
-      setObjekti([]);
       return;
     }
 

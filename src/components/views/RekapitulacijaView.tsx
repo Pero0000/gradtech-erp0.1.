@@ -13,7 +13,7 @@ import {
   Users,
 } from 'lucide-react';
 import type { Gradiliste, Trosak, RadnoVrijeme, TrosakKategorija, Rok, Faktura, UgovoreniRad } from '@/types';
-import { fetchGradilista, fetchFullRekapitulacija, iznosFakture } from '@/lib/api';
+import { fetchGradilista, fetchFullRekapitulacija, iznosFakture, type RekapitulacijaNalog } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Select } from '@/components/ui/Field';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -66,7 +66,7 @@ export function RekapitulacijaView() {
   const [selectedId, setSelectedId] = useState('');
   const [troskovi, setTroskovi] = useState<Trosak[]>([]);
   const [radnoVrijeme, setRadnoVrijeme] = useState<RadnoVrijeme[]>([]);
-  const [nalozi, setNalozi] = useState<any[]>([]);
+  const [nalozi, setNalozi] = useState<RekapitulacijaNalog[]>([]);
   const [rokovi, setRokovi] = useState<Rok[]>([]);
   const [fakture, setFakture] = useState<Faktura[]>([]);
   const [ugovoreniRadovi, setUgovoreniRadovi] = useState<UgovoreniRad[]>([]);
@@ -78,9 +78,7 @@ export function RekapitulacijaView() {
       try {
         const g = await fetchGradilista();
         setGradilista(g);
-        if (g.length > 0 && !selectedId) {
-          setSelectedId('all');
-        }
+        if (g.length > 0) setSelectedId((current) => current || 'all');
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
       } finally {
@@ -346,7 +344,7 @@ export function RekapitulacijaView() {
               </div>
               <p className="break-words text-xl font-bold text-slate-900">{nalozi.length}</p>
               <p className="text-xs text-slate-400 mt-1">
-                {nalozi.filter((n: any) => n.status === 'otvoren' || n.status === 'u_tijeku').length} aktivnih
+                {nalozi.filter((n) => n.status === 'otvoren' || n.status === 'u_tijeku').length} aktivnih
               </p>
             </div>
           </div>
@@ -553,7 +551,7 @@ export function RekapitulacijaView() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {nalozi.map((n: any) => {
+                    {nalozi.map((n) => {
                       const si = nalogStatusBadge[n.status] ?? nalogStatusBadge.otvoren;
                       return (
                         <tr key={n.id} className="hover:bg-slate-50 transition-colors">

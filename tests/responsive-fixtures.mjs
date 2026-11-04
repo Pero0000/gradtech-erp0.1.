@@ -12,6 +12,13 @@ import tailwind from 'tailwindcss';
 const require = createRequire(import.meta.url);
 const root = path.resolve(import.meta.dirname, '..');
 const storage = { getItem: () => null, setItem() {}, removeItem() {} };
+const company = {
+  id: 'company', naziv: 'Tvrtka s dugim nazivom za provjeru', oib: '00000000000',
+  postavke: {
+    disabled_modules: [], invoice_rebate_mode: 'pribroji',
+    gradiliste_column_labels: ['dm gradilišta', 'dm intervencije', 'ostala gradilišta'],
+  },
+};
 const worker = {
   id: 'worker', ime: 'Aleksandar', prezime: 'Dugacko-prezime-za-provjeru',
   uloga: 'radnik', status: 'aktivan', cijena_sata: 12, nocni_dodatak: 30,
@@ -30,7 +37,7 @@ const api = new Proxy({}, { get: (_, name) => name === '__esModule' ? true : asy
 const auth = {
   useAuth: () => ({
     canAccess: () => true, isAdmin: true, isPlatformOwner: true,
-    company: { id: 'company', naziv: 'Tvrtka s dugim nazivom za provjeru' },
+    company,
     profile: { id: 'user', email: 'korisnik.s.dugim.imenom@example.test', approved: true, radnik_id: 'worker' },
     session: {}, loading: false,
   }),
@@ -113,11 +120,16 @@ function loader(overrides = {}) {
     vm.runInNewContext(compiled, {
       module, exports: module.exports, console, localStorage: storage,
       window: { localStorage: storage, location: { origin: 'http://localhost' }, matchMedia: () => ({ matches: false }) },
-      document: { getElementById: () => null }, URL, Blob, Date, setTimeout, clearTimeout,
+      document: { getElementById: () => null, documentElement: { dataset: { theme: 'light', layout: 'standardni' } } },
+      URL, Blob, Date, setTimeout, clearTimeout,
       require: (name) => {
         if (/\/api$/.test(name)) return api;
         if (/\/useAuth$/.test(name)) return auth;
-        if (/\/company$/.test(name)) return { companyStorage: storage, requireCompany: () => ({ id: 'company', naziv: 'Demo tvrtka', oib: '00000000000' }) };
+        if (/\/company$/.test(name)) {
+          const companyModule = load(path.join(root, 'src', 'lib', 'company.ts'));
+          companyModule.setCurrentCompany(company);
+          return companyModule;
+        }
         if (/\/supabase$/.test(name)) return { supabase: {} };
         if (/\/usePushRegistration$/.test(name)) return { usePushRegistration: () => null };
         if (name === '@capacitor/core') return { Capacitor: { isNativePlatform: () => false, getPlatform: () => 'web' } };
@@ -144,7 +156,10 @@ export async function buildResponsiveFixtures() {
     ['RadniNaloziView', {}], ['RekapitulacijaView', {}], ['ObavijestiView', { onNavigate() {} }],
     ['PostavkeView', {}], ['AsistentView', { onNavigate() {} }], ['KorisniciView', {}], ['TvrtkeView', {}],
     ['ObracunSatiPanel', { canEdit: true }],
-    ['GradilisteMaterijalDokumenti', { gradilisteId: site.id }],
+    ['GradilisteMaterijalDokumenti', {
+      gradilisteId: site.id,
+      children: ({ documents, materials }) => React.createElement(React.Fragment, null, documents, materials),
+    }],
     ['GradilisteDetailsPanel', { gradiliste: site, onClose() {}, onEdit() {}, onGradilisteUpdate() {} }],
     ['PonudaEditor', { open: true, ponuda: null, ponudaStavke: [], investitori: [], objekti: [], baza: [], onClose() {}, onSaved() {}, onBazaChanged() {}, onLookupsChanged() {} }],
   ];

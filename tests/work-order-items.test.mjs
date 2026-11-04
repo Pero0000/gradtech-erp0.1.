@@ -44,6 +44,9 @@ function setup(rows) {
     './obracunSati': {},
     './company': {},
     './pagination': {},
+    './vehicleKmCosts': {},
+    './rokovi': {},
+    './imageCompression': {},
   };
   const module = { exports: {} };
   vm.runInNewContext(outputText, {

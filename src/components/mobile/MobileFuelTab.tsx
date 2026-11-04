@@ -98,6 +98,7 @@ export function MobileFuelTab() {
     return vehicle ? `${vehicle.marka} ${vehicle.model ?? ''} · ${vehicle.registracija}`.trim() : 'Vozilo';
   };
   const selectedWorker = options.radnici.find((worker) => worker.id === tocioId);
+  const selectedVehicle = options.vozila.find((vehicle) => vehicle.id === voziloId);
   const availableVehicles = options.vozila.filter((vehicle) =>
     selectedWorker?.uloga.trim().toLowerCase() !== 'radnik' || vehicle.tip.trim().toLowerCase() === 'teretno');
 
@@ -146,10 +147,15 @@ export function MobileFuelTab() {
               </label>
             </div>
             <label className="block text-sm font-medium text-slate-700">Kilometraža auta
-              <input type="number" inputMode="numeric" min={options.vozila.find((vehicle) => vehicle.id === voziloId)?.kilometraza ?? 0} step="1" value={kilometraza} onChange={(event) => setKilometraza(event.target.value)} placeholder="Stanje kilometara" className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base" />
+              <input type="number" inputMode="numeric" min={0} step="1" value={kilometraza} onChange={(event) => setKilometraza(event.target.value)} placeholder="Stanje kilometara" className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base" />
               <span className="mt-1 block text-xs font-normal text-slate-500">
-                Trenutno stanje: {Number(options.vozila.find((vehicle) => vehicle.id === voziloId)?.kilometraza ?? 0).toLocaleString('hr-HR')} km
+                Trenutno stanje: {Number(selectedVehicle?.kilometraza ?? 0).toLocaleString('hr-HR')} km
               </span>
+              {selectedVehicle && kilometraza.trim() && Number(kilometraza) < selectedVehicle.kilometraza && (
+                <span role="status" className="mt-1 block text-xs font-normal text-amber-800">
+                  Provjerite kilometražu i datum točenja. Manji unos može se spremiti; trenutno stanje vozila neće se smanjiti.
+                </span>
+              )}
             </label>
             {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
             {notice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}

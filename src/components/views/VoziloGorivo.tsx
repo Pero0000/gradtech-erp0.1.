@@ -156,10 +156,6 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
       setError('Unesite datum, litre veće od nule, kilometražu i odaberite tko je točio.');
       return;
     }
-    if ((!editing || kmValue !== editing.kilometraza) && kmValue < vozilo.kilometraza) {
-      setError(`Kilometraža ne može biti manja od trenutnog stanja vozila (${vozilo.kilometraza.toLocaleString('hr-HR')} km).`);
-      return;
-    }
     const input: VoziloGorivoInput = {
       vozilo_id: vozilo.id,
       datum,
@@ -282,8 +278,13 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
             <TextInput type="number" min="0.01" step="0.01" value={litara} onChange={(event) => setLitara(event.target.value)} placeholder="npr. 42,5" />
           </label>
           <label className="grid gap-1 text-xs font-medium text-slate-600">Kilometraža auta
-            <TextInput type="number" min={editing ? 0 : vozilo.kilometraza} step="1" value={kilometraza} onChange={(event) => setKilometraza(event.target.value)} />
+            <TextInput type="number" min={0} step="1" value={kilometraza} onChange={(event) => setKilometraza(event.target.value)} />
             <span className="text-xs font-normal text-slate-500">Trenutno stanje: {vozilo.kilometraza.toLocaleString('hr-HR')} km</span>
+            {kilometraza.trim() && Number(kilometraza) < vozilo.kilometraza && (
+              <span role="status" className="text-xs font-normal text-amber-800">
+                Provjerite kilometražu i datum točenja. Manji unos može se spremiti; trenutno stanje vozila neće se smanjiti.
+              </span>
+            )}
           </label>
           <label className="grid gap-1 text-xs font-medium text-slate-600">Tko je točio
             <Select value={tocioId} onChange={(event) => setTocioId(event.target.value)}>

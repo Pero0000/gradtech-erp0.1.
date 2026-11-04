@@ -76,7 +76,7 @@ export async function getPrivateFileUrl(path: string, expiresIn = 3600): Promise
   return data.signedUrl;
 }
 
-function throwActionableDbError(error: any, entityName: string) {
+function throwActionableDbError(error: { message: string; code?: string }, entityName: string) {
   const message = String(error?.message ?? '').toLowerCase();
 
   if (error?.code === '23503' && entityName === 'investitori') {
@@ -386,7 +386,7 @@ export async function deleteRadnik(id: string) {
 export async function fetchRadnikDokumenti(radnikId: string): Promise<RadnikDokument[]> {
   const { data, error } = await supabase.from('radnici_dokumenti').select('*').eq('radnik_id', radnikId).order('datum_do', { ascending: true, nullsFirst: false });
   if (error) throw error;
-  return Promise.all((data ?? []).map(async (d: any) => ({
+  return Promise.all(((data ?? []) as Omit<RadnikDokument, 'url'>[]).map(async (d) => ({
     ...d,
     url: d.putanja ? await getPrivateFileUrl(d.putanja) : null,
   })));
@@ -425,7 +425,7 @@ export async function deleteRadnikDokument(d: RadnikDokument) {
 export async function fetchVoziloDokumenti(voziloId: string): Promise<VoziloDokument[]> {
   const { data, error } = await supabase.from('vozila_dokumenti').select('*').eq('vozilo_id', voziloId).order('datum_od', { ascending: false, nullsFirst: false });
   if (error) throw error;
-  return Promise.all((data ?? []).map(async (d: any) => ({
+  return Promise.all(((data ?? []) as Omit<VoziloDokument, 'url'>[]).map(async (d) => ({
     ...d,
     url: d.putanja ? await getPrivateFileUrl(d.putanja) : null,
   })));
@@ -1212,10 +1212,14 @@ export async function fetchRasporedi(): Promise<Raspored[]> {
     .order('datum', { ascending: true });
   if (error) throw error;
 
-  return (data ?? []).map((r: any) => ({
+  type RasporedRow = Omit<Raspored, 'radnici' | 'vozila'> & {
+    radnici: Array<{ radnik: Radnik | null }> | null;
+    vozila: Array<{ vozilo: Vozilo | null }> | null;
+  };
+  return ((data ?? []) as RasporedRow[]).map((r) => ({
     ...r,
-    radnici: (r.radnici ?? []).map((rr: any) => rr.radnik).filter(Boolean),
-    vozila: (r.vozila ?? []).map((rv: any) => rv.vozilo).filter(Boolean),
+    radnici: (r.radnici ?? []).map((rr) => rr.radnik).filter((radnik): radnik is Radnik => radnik != null),
+    vozila: (r.vozila ?? []).map((rv) => rv.vozilo).filter((vozilo): vozilo is Vozilo => vozilo != null),
   }));
 }
 
@@ -1433,7 +1437,7 @@ export async function copyLatestDnevniRaspored(targetDate: string) {
   return sourceDate;
 }
 
-function dnevniRasporedError(error: any) {
+function dnevniRasporedError(error: { message: string; code?: string }) {
   if (String(error?.message ?? '').toLowerCase().includes('dnevni_raspored')) {
     return new Error('Tablice dnevnog rasporeda ne postoje. Pokreni najnoviju migraciju (dnevni raspored) u Supabase SQL editoru.');
   }
@@ -1894,16 +1898,19 @@ export async function fetchRadniNalozi(): Promise<RadniNalog[]> {
     .order('datum_kreiranja', { ascending: false });
   if (error) throw error;
 
-  const rows = (data ?? []) as any[];
+  type RadniNalogRow = Omit<RadniNalog, 'radnici'> & {
+    radnici: Array<{ radnik_id: string; radnik: Radnik | null }> | null;
+  };
+  const rows = (data ?? []) as RadniNalogRow[];
   const missing = rows
-    .filter((n) => (n.radnici ?? []).some((rr: any) => !rr.radnik))
-    .map((n) => n.id as string);
+    .filter((n) => (n.radnici ?? []).some((rr) => !rr.radnik))
+    .map((n) => n.id);
   const imena = await fetchNalogRadniciImena(missing);
-  return rows.map((n: any) => ({
+  return rows.map((n) => ({
     ...n,
     radnici: (n.radnici ?? [])
-      .map((rr: any) => rr.radnik ?? imena.get(rr.radnik_id) ?? null)
-      .filter(Boolean),
+      .map((rr) => rr.radnik ?? imena.get(rr.radnik_id) ?? null)
+      .filter((radnik): radnik is Radnik => radnik !== null),
   }));
 }
 
@@ -2501,23 +2508,14 @@ async function syncZadnjuKilometrazuVozila(voziloId: string) {
     .not('km_kraj', 'is', null);
   if (ordersError) throw ordersError;
 
-  const byId = new Map((orders ?? []).map((order) => [order.id, order]));
-  const latest = (assignments ?? [])
-    .map((assignment) => {
-      const order = assignment.nalog_id ? byId.get(assignment.nalog_id) : null;
-      return order ? { datum: assignment.datum, ...order } : null;
-    })
-    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-    .sort((first, second) =>
-      second.datum.localeCompare(first.datum)
-      || second.datum_kreiranja.localeCompare(first.datum_kreiranja),
-    )[0];
-  if (!latest) return;
+  if (!orders?.length) return;
+  const highestKm = Math.max(...orders.map((order) => Number(order.km_kraj)));
 
   const { error: updateError } = await supabase
     .from('vozila')
-    .update({ kilometraza: Number(latest.km_kraj), updated_at: new Date().toISOString() })
-    .eq('id', voziloId);
+    .update({ kilometraza: highestKm, updated_at: new Date().toISOString() })
+    .eq('id', voziloId)
+    .lt('kilometraza', highestKm);
   if (updateError) throw updateError;
 }
 
@@ -3094,7 +3092,7 @@ export interface NalogDokument {
 export async function fetchNalogDokumenti(nalogId: string): Promise<NalogDokument[]> {
   const { data, error } = await supabase.from('radni_nalozi_dokumenti').select('*').eq('nalog_id', nalogId).order('created_at');
   if (error) throw error;
-  return Promise.all((data ?? []).map(async (d: any) => ({
+  return Promise.all(((data ?? []) as Omit<NalogDokument, 'url'>[]).map(async (d) => ({
     ...d,
     url: await getPrivateFileUrl(d.putanja),
   })));
@@ -3671,6 +3669,8 @@ export async function fetchFinancijskaRekapitulacija(): Promise<FinancijskaRekap
   return { troskovi, radnoVrijeme, fakture };
 }
 
+export type RekapitulacijaNalog = Pick<RadniNalog, 'id' | 'broj' | 'naslov' | 'status' | 'prioritet' | 'datum_kreiranja' | 'rok'>;
+
 export async function fetchFullRekapitulacija(gradilisteId: string) {
   const [troskovi, radnoVrijeme, nalozi, rokovi, fakture, ugovoreniRadovi] = await Promise.all([
     supabase
@@ -3715,7 +3715,7 @@ export async function fetchFullRekapitulacija(gradilisteId: string) {
   return {
     troskovi: troskovi.data ?? [],
     radnoVrijeme: radnoVrijeme.data ?? [],
-    nalozi: nalozi.data ?? [],
+    nalozi: (nalozi.data ?? []) as RekapitulacijaNalog[],
     rokovi: rokovi.data ?? [],
     fakture: fakture.data ?? [],
     ugovoreniRadovi: ugovoreniRadovi.data ?? [],

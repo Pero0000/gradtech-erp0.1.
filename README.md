@@ -1,5 +1,36 @@
 # Tm-color
 
+## Provjere prije objave
+
+- `npm test` pokreće sve `tests/*.test.mjs` provjere: izolaciju lokalnih postavki tvrtki, autorizaciju pozivnica s testnim klijentima, paginaciju, obračun sati i kilometarskih troškova, očuvanje stavki naloga, preuzimanje datoteka i renderiranje prilagodljivih prikaza.
+- `npm run typecheck` provjerava TypeScript, `npm run lint` provjerava kod, a `npm run build` izrađuje produkcijsku web-aplikaciju.
+- Testovi koriste lokalne podatke i zamjene za mrežne pozive; ne pristupaju produkcijskoj bazi. Renderiranje prikaza nije zamjena za vizualnu provjeru u pregledniku ili provjeru na fizičkom mobitelu.
+- Dohvati rasporeda i naloga dodatno provjeravaju pretvaranje povezanih djelatnika/vozila u popise, prazne veze i prosljeđivanje grešaka baze.
+- SQL migracije i prava baze provjeravaju se zasebno na testnoj bazi. Prije produkcijske primjene osigurati sigurnosnu kopiju i provjeriti ključne tokove s testnim računima.
+
+ESLint preskače generirane mape `build` unutar Android/iOS projekata, ali ne i izvorni kod tih projekata. Postojeće lint greške treba otkloniti, ne isključivati pravila kako bi provjera prividno prolazila.
+
+### Učitavanje gradilišta i radnih naloga
+
+Glavni dohvat i dohvat rokova prihvaćaju samo odgovor najnovijeg zahtjeva dok je prikaz otvoren. Stariji odgovori, greške i završetak učitavanja ne smiju prepisati novije stanje. Promjena filtra sama ne pokreće novi dohvat; filtriranje ostaje lokalno. Pozadinsko osvježavanje rasporeda stupaca gradilišta ostaje svakih 30 sekundi, samo u vidljivoj kartici, bez preklapanja vlastitih zahtjeva i bez prepisivanja lokalnog premještanja/sortiranja odgovorom započetim prije te izmjene. Greške dohvaćanja rokova prikazuju se umjesto da se rokovi zamijene praznim popisom.
+
+Ručna provjera nakon objave web-builda:
+
+1. Na testnom gradilištu promijeniti naziv, spremiti i ponovno otvoriti detalje; naziv mora ostati ažuriran bez osvježavanja stranice.
+2. Na testnom nalogu promijeniti naslov/prioritet, spremiti, odabrati **Svi** ako ga trenutačni datumski filtar skriva i ponovno otvoriti nalog.
+3. Mijenjati kategorije gradilišta i filtre naloga; prikaz mora pratiti zadnji odabir bez petlje učitavanja.
+4. Uz usporenu mrežu u pregledniku napustiti modul tijekom učitavanja pa se vratiti; kasni odgovori ne smiju vratiti stari prikaz.
+5. Ako postoje prava uređivanja, premjestiti testno gradilište u drugi stupac i pričekati dva ciklusa osvježavanja; položaj mora ostati spremljen.
+6. Prekid veze provjeravati samo pri čitanju, bez spremanja ili brisanja: neuspjeh mora prikazati grešku, ne uspješan prazan rezultat. Nakon povratka veze ponovno otvoriti modul.
+
+U razvojnom React StrictModeu početni efekti namjerno se ponavljaju; moguće je vidjeti dva početna mrežna zahtjeva. To nije beskonačna petlja, a rezultat prethodnog pokretanja zanemaruje se. Testovi životnog ciklusa zahtjeva su u `tests/request-scope.test.mjs`; oni nisu zamjena za mrežnu i vizualnu provjeru stvarnog prikaza.
+
+### Zakašnjeli unos goriva i kilometraža vozila
+
+Primijeniti novu migraciju `supabase/migrations/20261109180000_vozila_gorivo_zakasnjeli_unos.sql` nakon prethodnih migracija goriva i objaviti novi web-build. Unos i uređivanje točenja dopuštaju nenegativnu cjelobrojnu kilometražu manju od trenutnog stanja vozila. Web i portal djelatnika prikazuju poruku za provjeru datuma i kilometraže, ali ne blokiraju spremanje. Zapis točenja zadržava uneseno očitanje; postojeći okidač baze povisuje stanje vozila samo kada je unos veći. Zaključivanje naloga uzima najveće završno očitanje povezanih završenih naloga i ažurira vozilo samo ako je ono veće od trenutnog stanja.
+
+Na testnom vozilu sa stanjem 100.000 km spremiti zakašnjelo točenje na 99.500 km: zapis mora ostati na 99.500, a vozilo na 100.000 km. Zatim spremiti 100.200 km: vozilo mora porasti na 100.200 km. Urediti ili obrisati ranije točenje i zaključiti nalog s manjim očitanjem: stanje vozila ne smije pasti. Ponoviti unos kroz portal djelatnika. Unijeti stvarni datum točenja jer se potrošnja i anomalije i dalje računaju kronološki; negativne kilometraže ostaju zabranjene. SQL ponašanje provjeriti na testnoj bazi; Node testovi koriste zamjenu za bazu.
+
 ## Responsive raspored
 
 Tailwind prijelomi su `sm` 640 px, `md` 768 px, `lg` 1024 px, `xl` 1280 px i `2xl` 1720 px. Sadržaj koristi jedan stupac ispod 1280 px, dva od 1280 px, a raniji rasporedi s tri ili više stupaca vraćaju se od 1720 px. Navigacijski gumbi nisu sadržajni gridovi. Filtri i akcije slažu se okomito ispod 1280 px; na širim ekranima zadržavaju vodoravni raspored uz prelamanje. Bočna navigacija vidljiva je od 1280 px, osim na ekranima s postojećim automatskim skrivanjem; ispod toga otvara se gumbom iz zaglavlja.

@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useRequestScope } from '@/lib/useRequestScope';
 import { ClipboardList, Plus, Pencil, Trash2, Users, Calendar, AlertCircle, Printer, Bell, History } from 'lucide-react';
 import type { RadniNalog, Gradiliste, Radnik, NalogStatus, NalogPrioritet, Rok } from '@/types';
 import {
@@ -75,6 +76,8 @@ const addDays = (d: Date, n: number) => {
 const fmtDate = (s: string) => new Date(s + 'T00:00:00').toLocaleDateString('hr-HR');
 
 export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null } = {}) {
+  const loadScope = useRequestScope();
+  const rokoviScope = useRequestScope();
   const [items, setItems] = useState<RadniNalog[]>([]);
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [radnici, setRadnici] = useState<Radnik[]>([]);
@@ -120,13 +123,16 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
     }
   };
 
-  const loadRokovi = async () => {
+  const loadRokovi = useCallback(async () => {
+    const isCurrent = rokoviScope.start();
+    if (!isCurrent()) return;
     try {
-      setRokovi(await fetchRokoviNaloga());
+      const nextRokovi = await fetchRokoviNaloga();
+      if (isCurrent()) setRokovi(nextRokovi);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri učitavanju rokova');
+      if (isCurrent()) setError(e instanceof Error ? e.message : 'Greška pri učitavanju rokova');
     }
-  };
+  }, [rokoviScope]);
 
   const addRok = async (n: RadniNalog) => {
     if (!rokForm.naziv.trim() || !rokForm.datum) return;
@@ -166,25 +172,30 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
     }
   };
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const isCurrent = loadScope.start();
+    if (!isCurrent()) return;
     setLoading(true);
     setError(null);
+    const deadlines = loadRokovi();
     try {
       const [n, g, r] = await Promise.all([fetchRadniNalozi(), fetchGradilista(), fetchRadnici()]);
+      if (!isCurrent()) return;
       setItems(n);
       setGradilista(g);
       setRadnici(r);
-      await loadRokovi();
+      await deadlines;
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
+      if (isCurrent()) setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  };
+  }, [loadRokovi, loadScope]);
 
   useEffect(() => {
-    load();
-  }, []);
+    void load();
+    return () => loadScope.invalidate();
+  }, [load, loadScope]);
 
   const openEdit = (n: RadniNalog) => {
     setEditing(n);

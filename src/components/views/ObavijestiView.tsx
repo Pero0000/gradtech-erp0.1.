@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Bell, BellRing, CheckCircle2, Search } from 'lucide-react';
 import type { View } from '@/components/Sidebar';
 import { loadObavijesti, relativeLabel, sendPushNotifications, type Obavijest, type ObavijestLevel } from '@/lib/obavijesti';
-import { resolveVoziloObavijest } from '@/lib/api';
+import { resolveVoziloGorivoAnomalija, resolveVoziloObavijest } from '@/lib/api';
 import { loadPostavke, obavijestTipovi, savePostavke } from '@/lib/postavke';
 
 const levelStyle: Record<ObavijestLevel, { row: string; badge: string; label: string }> = {
@@ -50,12 +50,16 @@ export function ObavijestiView({ onNavigate, canResolveVozila }: { onNavigate: (
   }, []);
 
   const resolveIssue = async (item: Obavijest) => {
-    if (!item.voziloObavijestId) return;
-    setResolvingId(item.voziloObavijestId);
+    const resolveId = item.voziloObavijestId ?? item.voziloGorivoAnomalijaId;
+    if (!resolveId) return;
+    setResolvingId(resolveId);
     setError(null);
     try {
-      await resolveVoziloObavijest(item.voziloObavijestId);
-      setItems((current) => current.filter((entry) => entry.voziloObavijestId !== item.voziloObavijestId));
+      if (item.voziloObavijestId) await resolveVoziloObavijest(item.voziloObavijestId);
+      else if (item.voziloGorivoAnomalijaId) await resolveVoziloGorivoAnomalija(item.voziloGorivoAnomalijaId);
+      setItems((current) => current.filter((entry) =>
+        entry.voziloObavijestId !== item.voziloObavijestId
+        && entry.voziloGorivoAnomalijaId !== item.voziloGorivoAnomalijaId));
       window.dispatchEvent(new Event('vozila-obavijest-updated'));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Greška pri označavanju prijave riješenom.');
@@ -154,15 +158,15 @@ export function ObavijestiView({ onNavigate, canResolveVozila }: { onNavigate: (
                 </div>
                 {o.datum && <span className="text-xs text-slate-500">{new Date(`${o.datum}T00:00:00`).toLocaleDateString('hr-HR')}</span>}
               </button>
-              {canResolveVozila && o.voziloObavijestId && (
+              {canResolveVozila && (o.voziloObavijestId || o.voziloGorivoAnomalijaId) && (
                 <button
                   type="button"
-                  disabled={resolvingId === o.voziloObavijestId}
+                  disabled={resolvingId === (o.voziloObavijestId ?? o.voziloGorivoAnomalijaId)}
                   onClick={() => void resolveIssue(o)}
                   className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-emerald-50 px-3 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
                 >
                   <CheckCircle2 className="h-4 w-4" />
-                  {resolvingId === o.voziloObavijestId ? 'Spremanje…' : 'Označi riješenim'}
+                  {resolvingId === (o.voziloObavijestId ?? o.voziloGorivoAnomalijaId) ? 'Spremanje…' : 'Označi riješenim'}
                 </button>
               )}
             </div>

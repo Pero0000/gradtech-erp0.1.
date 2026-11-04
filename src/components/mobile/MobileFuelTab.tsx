@@ -39,6 +39,7 @@ export function MobileFuelTab() {
       const firstVehicle = nextOptions.vozila.find((vehicle) =>
         firstWorker?.uloga.trim().toLowerCase() !== 'radnik' || vehicle.tip.trim().toLowerCase() === 'teretno');
       setVoziloId((current) => current || firstVehicle?.id || '');
+      setKilometraza((current) => current || String(firstVehicle?.kilometraza ?? ''));
       setTocioId((current) => current || firstWorker?.id || '');
     } catch (reason) {
       setError(errorText(reason));
@@ -72,7 +73,19 @@ export function MobileFuelTab() {
       });
       setLitara('');
       setNotice('Točenje goriva je spremljeno.');
-      setEntries(await fetchMobileVoziloGorivo());
+      window.dispatchEvent(new Event('vozila-obavijest-updated'));
+      try {
+        const [nextEntries, nextOptions] = await Promise.all([
+          fetchMobileVoziloGorivo(),
+          fetchMobileVoziloGorivoOptions(),
+        ]);
+        setEntries(nextEntries);
+        setOptions(nextOptions);
+        const updatedVehicle = nextOptions.vozila.find((vehicle) => vehicle.id === voziloId);
+        if (updatedVehicle) setKilometraza(String(updatedVehicle.kilometraza));
+      } catch (reason) {
+        setError(`Točenje je spremljeno, ali prikaz nije osvježen: ${errorText(reason)}`);
+      }
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -102,7 +115,9 @@ export function MobileFuelTab() {
                 const nextVehicles = options.vozila.filter((vehicle) =>
                   nextWorker?.uloga.trim().toLowerCase() !== 'radnik' || vehicle.tip.trim().toLowerCase() === 'teretno');
                 setTocioId(nextWorkerId);
-                setVoziloId((current) => nextVehicles.some((vehicle) => vehicle.id === current) ? current : nextVehicles[0]?.id ?? '');
+                const nextVehicle = nextVehicles.find((vehicle) => vehicle.id === voziloId) ?? nextVehicles[0];
+                setVoziloId(nextVehicle?.id ?? '');
+                if (nextVehicle) setKilometraza(String(nextVehicle.kilometraza));
               }} className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base">
                 <option value="">Odaberi djelatnika</option>
                 {options.radnici.map((worker) => <option key={worker.id} value={worker.id}>{worker.ime} {worker.prezime}</option>)}
@@ -112,7 +127,12 @@ export function MobileFuelTab() {
               <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">Kategorija „radnik” može evidentirati gorivo samo za teretna vozila.</p>
             )}
             <label className="block text-sm font-medium text-slate-700">Vozilo
-              <select value={voziloId} onChange={(event) => setVoziloId(event.target.value)} className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base">
+              <select value={voziloId} onChange={(event) => {
+                const nextVehicleId = event.target.value;
+                const nextVehicle = options.vozila.find((vehicle) => vehicle.id === nextVehicleId);
+                setVoziloId(nextVehicleId);
+                setKilometraza(String(nextVehicle?.kilometraza ?? ''));
+              }} className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base">
                 <option value="">Odaberi vozilo</option>
                 {availableVehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.marka} {vehicle.model ?? ''} · {vehicle.registracija}</option>)}
               </select>
@@ -126,7 +146,10 @@ export function MobileFuelTab() {
               </label>
             </div>
             <label className="block text-sm font-medium text-slate-700">Kilometraža auta
-              <input type="number" inputMode="numeric" min="0" step="1" value={kilometraza} onChange={(event) => setKilometraza(event.target.value)} placeholder="Stanje kilometara" className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base" />
+              <input type="number" inputMode="numeric" min={options.vozila.find((vehicle) => vehicle.id === voziloId)?.kilometraza ?? 0} step="1" value={kilometraza} onChange={(event) => setKilometraza(event.target.value)} placeholder="Stanje kilometara" className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base" />
+              <span className="mt-1 block text-xs font-normal text-slate-500">
+                Trenutno stanje: {Number(options.vozila.find((vehicle) => vehicle.id === voziloId)?.kilometraza ?? 0).toLocaleString('hr-HR')} km
+              </span>
             </label>
             {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
             {notice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}

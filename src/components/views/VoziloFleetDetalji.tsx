@@ -195,8 +195,9 @@ export function VoziloFleetDetalji({
                 : vozilo.status === 'zauzeto' ? 'border-sky-200 bg-sky-50 text-sky-700'
                   : 'border-emerald-200 bg-emerald-50 text-emerald-700'
           }`}>{statusLabels[vozilo.status]}</span>
-          <div className="grid grid-cols-2 gap-x-5 gap-y-2 text-sm text-slate-600 sm:grid-cols-3 xl:grid-cols-5">
+          <div className="grid grid-cols-2 gap-x-5 gap-y-2 text-sm text-slate-600 sm:grid-cols-3 xl:grid-cols-6">
             <span>Godina <strong className="text-slate-900">{vozilo.godina_proizvodnje ?? '—'}</strong></span>
+            <span className="min-w-0">Broj šasije <strong className="block break-all text-slate-900">{vozilo.broj_sasije || '—'}</strong></span>
             <span>Kilometraža <strong className="text-slate-900">{vozilo.kilometraza.toLocaleString('hr-HR')} km</strong></span>
             <span>Broj mjesta <strong className="text-slate-900">{vozilo.broj_mjesta}</strong></span>
             <span>Nosivost <strong className="text-slate-900">{vozilo.nosivost_kg ? `${vozilo.nosivost_kg.toLocaleString('hr-HR')} kg` : '—'}</strong></span>

@@ -9,6 +9,7 @@ import { compressPhotoForUpload } from './imageCompression';
 import type {
   VoziloDokument,
   VoziloGorivo,
+  VoziloGorivoAnomalija,
   VoziloObavijest,
   VoziloObavijestVrsta,
   OdsustvoVrsta,
@@ -668,7 +669,7 @@ export interface VoziloGorivoInput {
 }
 
 export interface MobileVoziloGorivoOptions {
-  vozila: Array<{ id: string; marka: string; model: string | null; registracija: string; tip: Vozilo['tip'] }>;
+  vozila: Array<{ id: string; marka: string; model: string | null; registracija: string; tip: Vozilo['tip']; kilometraza: number }>;
   radnici: Array<{ id: string; ime: string; prezime: string; uloga: string }>;
 }
 
@@ -727,6 +728,54 @@ export async function deleteVoziloGorivo(id: string) {
   if (error) throw vozilaGorivoError(error);
 }
 
+export async function fetchVozilaGorivoAnomalyThreshold(): Promise<number> {
+  const { data, error } = await supabase.rpc('get_vozila_gorivo_anomaly_threshold');
+  if (error) {
+    const missingDatabaseObject = ['42883', 'PGRST202'].includes(error.code ?? '');
+    if (missingDatabaseObject && String(error.message ?? '').toLowerCase().includes('get_vozila_gorivo_anomaly_threshold')) {
+      throw new Error('Nedostaje migracija 20261109160000_vozila_gorivo_prag.sql. Primijenite je u Supabase SQL editoru.');
+    }
+    throw error;
+  }
+  if (typeof data !== 'number' || data < 5 || data > 90) {
+    throw new Error('Nije moguće učitati valjani prag upozorenja za potrošnju goriva.');
+  }
+  return data;
+}
+
+export async function updateVozilaGorivoAnomalyThreshold(threshold: number): Promise<void> {
+  if (!Number.isInteger(threshold) || threshold < 5 || threshold > 90) {
+    throw new Error('Prag upozorenja mora biti cijeli broj od 5 do 90%.');
+  }
+  const { error } = await supabase.rpc('set_vozila_gorivo_anomaly_threshold', {
+    p_threshold_percent: threshold,
+  });
+  if (error) {
+    const missingDatabaseObject = ['42883', 'PGRST202'].includes(error.code ?? '');
+    if (missingDatabaseObject && String(error.message ?? '').toLowerCase().includes('set_vozila_gorivo_anomaly_threshold')) {
+      throw new Error('Nedostaje migracija 20261109160000_vozila_gorivo_prag.sql. Primijenite je u Supabase SQL editoru.');
+    }
+    throw error;
+  }
+}
+
+export async function fetchOpenVozilaGorivoAnomalije(): Promise<VoziloGorivoAnomalija[]> {
+  const { data, error } = await supabase.rpc('refresh_vozila_gorivo_anomalije');
+  if (error) {
+    const missingDatabaseObject = ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '');
+    if (missingDatabaseObject && String(error.message ?? '').toLowerCase().includes('vozila_gorivo_anomalije')) {
+      throw new Error('Nedostaje migracija 20261109140000_vozila_gorivo_anomalije.sql. Primijenite je u Supabase SQL editoru.');
+    }
+    throw error;
+  }
+  return (data ?? []) as VoziloGorivoAnomalija[];
+}
+
+export async function resolveVoziloGorivoAnomalija(id: string) {
+  const { error } = await supabase.rpc('resolve_vozila_gorivo_anomalija', { p_id: id });
+  if (error) throw error;
+}
+
 export async function fetchMobileVoziloGorivoOptions(): Promise<MobileVoziloGorivoOptions> {
   const [vehicles, workers] = await Promise.all([
     supabase.rpc('get_mobile_vozila_gorivo_vehicles'),
@@ -734,11 +783,14 @@ export async function fetchMobileVoziloGorivoOptions(): Promise<MobileVoziloGori
   ]);
   if (vehicles.error) throw vozilaGorivoError(vehicles.error);
   if (workers.error) throw vozilaGorivoError(workers.error);
-  const vehicleRows = (vehicles.data ?? []) as Array<{ tip?: unknown }>;
+  const vehicleRows = (vehicles.data ?? []) as Array<{ tip?: unknown; kilometraza?: unknown }>;
   const workerRows = (workers.data ?? []) as Array<{ uloga?: unknown }>;
   if (vehicleRows.some((vehicle) => typeof vehicle.tip !== 'string' || !vehicle.tip.trim())
     || workerRows.some((worker) => typeof worker.uloga !== 'string')) {
     throw new Error('Nedostaje migracija 20261109120000_radnik_kategorije_gorivo.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  if (vehicleRows.some((vehicle) => typeof vehicle.kilometraza !== 'number')) {
+    throw new Error('Nedostaje migracija 20261109150000_vozila_gorivo_kilometraza.sql. Primijenite je u Supabase SQL editoru.');
   }
   return {
     vozila: vehicles.data ?? [],

@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Clock3, FileDown, RefreshCw } from 'lucide-react';
+import { AlertCircle, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Clock3, FileDown, Pencil, Plus, RefreshCw } from 'lucide-react';
 import type { Gradiliste, GradilisteZadatak, Kooperant, KooperantAngazman, Rok } from '@/types';
-import { fetchGradilista, fetchKooperantAngazmani, fetchKooperanti, fetchRokovi, fetchTerminskiPlanZadaci, updateKooperantTimelineColor } from '@/lib/api';
+import { createRok, fetchGradilista, fetchKooperantAngazmani, fetchKooperanti, fetchRokovi, fetchTerminskiPlanZadaci, updateKooperantTimelineColor, updateRok } from '@/lib/api';
 import { exportTerminskiPlanPdf, type TerminskiPlanPdfRow } from '@/lib/terminskiPlanPdf';
+import { hrPraznici } from '@/lib/obracunSati';
+import { useAuth } from '@/auth/useAuth';
+import { Modal } from '@/components/ui/Modal';
+import { Field, Select, Textarea, TextInput } from '@/components/ui/Field';
 
 type RokFilter = 'svi' | 'otvoreni' | 'zavrseni' | 'prekoraceni';
 
@@ -75,6 +79,7 @@ function statusLabel(status: Exclude<RokFilter, 'svi'>) {
 }
 
 export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id: string) => void }) {
+  const { canAccess } = useAuth();
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [rokovi, setRokovi] = useState<Rok[]>([]);
   const [zadaci, setZadaci] = useState<GradilisteZadatak[]>([]);
@@ -91,6 +96,20 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
   const [rangeStart, setRangeStart] = useState(() => dateKey(new Date()));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deadlineModalOpen, setDeadlineModalOpen] = useState(false);
+  const [editingDeadline, setEditingDeadline] = useState<Rok | null>(null);
+  const [savingDeadline, setSavingDeadline] = useState(false);
+  const [deadlineError, setDeadlineError] = useState<string | null>(null);
+  const [deadlineForm, setDeadlineForm] = useState({
+    gradiliste_id: '',
+    naziv: '',
+    datum_pocetka: '',
+    datum_zavrsetka: '',
+    kooperant_id: '',
+    opis: '',
+    status: 'otvoren' as Rok['status'],
+  });
+  const canEditDeadlines = canAccess('gradilista', 'edit');
 
   const load = async () => {
     setLoading(true);
@@ -121,6 +140,11 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
 
   const windowDays = viewWeeks * 7;
   const days = useMemo(() => Array.from({ length: windowDays }, (_, index) => shiftDate(rangeStart, index)), [rangeStart, windowDays]);
+  const holidays = useMemo(() => {
+    const years = new Set(days.map((day) => Number(day.slice(0, 4))));
+    return new Map([...years].flatMap((year) => [...hrPraznici(year)]));
+  }, [days]);
+  const isRoseDay = (day: string) => new Date(`${day}T12:00:00`).getDay() === 0 || holidays.has(day);
   const timelineMinWidth = 180 + windowDays * 42;
   const rangeEnd = shiftDate(rangeStart, windowDays);
   const today = dateKey(new Date());
@@ -277,6 +301,57 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
       setExportingPdf(false);
     }
   };
+  const openDeadlineEditor = (item?: Rok) => {
+    const defaultDate = rangeStart;
+    setEditingDeadline(item ?? null);
+    setDeadlineError(null);
+    setDeadlineForm({
+      gradiliste_id: item?.gradiliste_id ?? (selectedSite || gradilista[0]?.id || ''),
+      naziv: item?.naziv ?? '',
+      datum_pocetka: item ? startDateOf(item) : defaultDate,
+      datum_zavrsetka: item ? endDateOf(item) : defaultDate,
+      kooperant_id: item?.kooperant_id ?? '',
+      opis: item?.opis ?? '',
+      status: item?.status ?? 'otvoren',
+    });
+    setDeadlineModalOpen(true);
+  };
+  const saveDeadline = async () => {
+    if (!canEditDeadlines) {
+      setDeadlineError('Nemate ovlasti za uređivanje termina.');
+      return;
+    }
+    if (!deadlineForm.gradiliste_id || !deadlineForm.naziv.trim() || !deadlineForm.datum_pocetka || !deadlineForm.datum_zavrsetka) {
+      setDeadlineError('Odaberi gradilište, upiši naziv i unesi početni i završni datum.');
+      return;
+    }
+    if (deadlineForm.datum_zavrsetka < deadlineForm.datum_pocetka) {
+      setDeadlineError('Datum završetka ne može biti prije datuma početka.');
+      return;
+    }
+    setSavingDeadline(true);
+    setDeadlineError(null);
+    try {
+      const payload = {
+        gradiliste_id: deadlineForm.gradiliste_id,
+        naziv: deadlineForm.naziv.trim(),
+        datum: deadlineForm.datum_zavrsetka,
+        datum_pocetka: deadlineForm.datum_pocetka,
+        datum_zavrsetka: deadlineForm.datum_zavrsetka,
+        kooperant_id: deadlineForm.kooperant_id || null,
+        opis: deadlineForm.opis.trim() || null,
+        status: deadlineForm.status,
+      };
+      if (editingDeadline) await updateRok(editingDeadline.id, payload);
+      else await createRok({ ...payload, nalog_id: null });
+      setRokovi(await fetchRokovi());
+      setDeadlineModalOpen(false);
+    } catch (reason) {
+      setDeadlineError(reason instanceof Error ? reason.message : 'Termin nije spremljen.');
+    } finally {
+      setSavingDeadline(false);
+    }
+  };
   const renderTimelineRow = ({
     id,
     siteId,
@@ -286,6 +361,7 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
     end,
     color,
     colorHex,
+    onEdit,
   }: {
     id: string;
     siteId: string;
@@ -295,6 +371,7 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
     end: string;
     color: 'blue' | 'red' | 'green' | 'violet' | 'amber';
     colorHex?: string;
+    onEdit?: () => void;
   }) => {
     const startOffset = (dateToUtc(start) - dateToUtc(rangeStart)) / DAY_MS;
     const endOffset = (dateToUtc(end) - dateToUtc(rangeStart)) / DAY_MS;
@@ -311,16 +388,22 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
     }[color];
     return (
       <div key={id} className="terminski-plan-task-row grid min-h-12 border-b border-slate-100 last:border-b-0" style={{ gridTemplateColumns: 'var(--terminski-site-column-width) minmax(0, 1fr)' }}>
-        <button type="button" onClick={() => onOpenGradiliste(siteId)} className="sticky left-0 z-10 border-r border-slate-200 bg-white px-2 py-2 text-left text-xs text-slate-700 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.3)] hover:bg-slate-50 sm:px-3" title={`${title} · ${subtitle}`}>
-          <span className="block break-words font-medium">{title}</span>
-          <span className="block break-words text-[10px] text-slate-500">{subtitle}</span>
-        </button>
+        <div className="sticky left-0 z-10 flex min-w-0 items-center border-r border-slate-200 bg-white shadow-[4px_0_6px_-4px_rgba(15,23,42,0.3)]">
+          <button type="button" onClick={() => onOpenGradiliste(siteId)} className="min-w-0 flex-1 px-2 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 sm:px-3" title={`${title} · ${subtitle}`}>
+            <span className="block break-words font-medium">{title}</span>
+            <span className="block break-words text-[10px] text-slate-500">{subtitle}</span>
+          </button>
+          {onEdit && canEditDeadlines && (
+            <button type="button" onClick={onEdit} aria-label={`Uredi termin ${title}`} title={`Uredi termin ${title}`} className="mr-1 shrink-0 rounded-md p-1.5 text-slate-400 hover:bg-sky-50 hover:text-sky-700">
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
         <div className="relative grid" style={{ gridTemplateColumns: `repeat(${windowDays}, minmax(0, 1fr))` }}>
           {days.map((day) => {
-            const date = new Date(`${day}T12:00:00`);
-            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-            const isSunday = date.getDay() === 0;
-            return <div key={day} className={`border-r ${isSunday ? 'border-r-2 border-rose-200 bg-rose-50' : isWeekend ? 'bg-slate-50 border-slate-100' : 'border-slate-100'}`} />;
+            const roseDay = isRoseDay(day);
+            const isSaturday = new Date(`${day}T12:00:00`).getDay() === 6;
+            return <div key={day} className={`border-r ${roseDay ? 'border-r-2 border-rose-200 bg-rose-50' : isSaturday ? 'bg-slate-50 border-slate-100' : 'border-slate-100'}`} />;
           })}
           {todayOffset >= 0 && todayOffset < windowDays && (
             <div className="pointer-events-none absolute inset-y-0 z-[1] w-px bg-slate-500/70" style={{ left: `${todayPosition}%` }} />
@@ -348,6 +431,11 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
           <p className="mt-1 text-sm text-slate-500">Pregled počinje od danas; strelicom ulijevo možeš se vraćati u povijest.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {canEditDeadlines && (
+            <button type="button" onClick={() => openDeadlineEditor()} disabled={loading || gradilista.length === 0} className="inline-flex items-center justify-center gap-2 rounded-lg bg-sky-700 px-3 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:opacity-50">
+              <Plus className="h-4 w-4" /> Novi termin
+            </button>
+          )}
           <button type="button" onClick={() => void exportCurrentView()} disabled={loading || exportingPdf || groupedTimeline.length === 0} className="inline-flex items-center justify-center gap-2 rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-800 hover:bg-sky-100 disabled:opacity-50">
             <FileDown className="h-4 w-4" /> {exportingPdf ? 'Izvoz…' : 'Izvezi PDF'}
           </button>
@@ -470,10 +558,11 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
                 <div className="grid" style={{ gridTemplateColumns: `repeat(${windowDays}, minmax(0, 1fr))` }}>
                   {days.map((day) => {
                     const date = new Date(`${day}T12:00:00`);
-                    const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-                    const isSunday = date.getDay() === 0;
+                    const roseDay = isRoseDay(day);
+                    const isSaturday = date.getDay() === 6;
+                    const holiday = holidays.get(day);
                     return (
-                      <div key={day} title={date.toLocaleDateString('hr-HR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} className={`terminski-plan-day-header flex min-h-[48px] flex-col items-center justify-center border-r ${isSunday ? 'border-r-2 border-r-rose-300' : 'border-slate-200'} px-0.5 text-center ${day === today ? 'bg-sky-100 text-sky-900' : isSunday ? 'bg-rose-100 text-rose-800' : isWeekend ? 'bg-slate-100 text-slate-500' : 'text-slate-600'}`}>
+                      <div key={day} title={`${date.toLocaleDateString('hr-HR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}${holiday ? ` · ${holiday}` : ''}`} className={`terminski-plan-day-header flex min-h-[48px] flex-col items-center justify-center border-r ${roseDay ? 'border-r-2 border-r-rose-300' : 'border-slate-200'} px-0.5 text-center ${roseDay ? 'bg-rose-100 text-rose-800' : day === today ? 'bg-sky-100 text-sky-900' : isSaturday ? 'bg-slate-100 text-slate-500' : 'text-slate-600'}`}>
                         <span className="terminski-plan-day-name text-[10px] capitalize">{date.toLocaleDateString('hr-HR', { weekday: 'short' }).replace('.', '')}</span>
                         <span className="text-xs font-semibold">{date.getDate()}</span>
                       </div>
@@ -501,10 +590,9 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
                     style={{ gridTemplateColumns: `repeat(${windowDays}, minmax(0, 1fr))`, minHeight: Math.max(40, deadlines.length * 9 + 12) }}
                   >
                     {days.map((day) => {
-                      const date = new Date(`${day}T12:00:00`);
-                      const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-                      const isSunday = date.getDay() === 0;
-                      return <div key={day} className={`border-r ${isSunday ? 'border-r-2 border-rose-200 bg-rose-50' : isWeekend ? 'border-slate-100 bg-slate-50' : 'border-slate-100'}`} />;
+                      const roseDay = isRoseDay(day);
+                      const isSaturday = new Date(`${day}T12:00:00`).getDay() === 6;
+                      return <div key={day} className={`border-r ${roseDay ? 'border-r-2 border-rose-200 bg-rose-50' : isSaturday ? 'border-slate-100 bg-slate-50' : 'border-slate-100'}`} />;
                     })}
                     {todayOffset >= 0 && todayOffset < windowDays && (
                       <div className="pointer-events-none absolute inset-y-0 z-[1] w-px bg-slate-500/70" style={{ left: `${todayPosition}%` }} />
@@ -558,6 +646,7 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
                     end: endDateOf(rok),
                     color: contractor ? 'violet' : status === 'zavrseni' ? 'green' : status === 'prekoraceni' ? 'red' : 'blue',
                     colorHex: contractorColor ? kooperantColor(contractorColor) : undefined,
+                    onEdit: () => openDeadlineEditor(rok),
                   });
                 })}
                 {siteAngazmani.map((angazman) => {
@@ -581,7 +670,57 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
           </div>
         </div>
       )}
-      {!loading && <p className="terminski-plan-hide-print text-xs text-slate-500">Prikazano {visibleDeadlines.length} rokova i {visibleAngazmani.length} angažmana kooperanata s unesenim datumima · svaki dan prikazan je zasebno, vikendi su zasjenčani · razdoblje {displayDate(rangeStart)} – {displayDate(shiftDate(rangeEnd, -1))}. Klikni naziv ili traku za otvaranje gradilišta.</p>}
+      {!loading && <p className="terminski-plan-hide-print text-xs text-slate-500">Prikazano {visibleDeadlines.length} rokova i {visibleAngazmani.length} angažmana kooperanata s unesenim datumima · nedjelje i blagdani označeni su rozo, subote blago sivo · razdoblje {displayDate(rangeStart)} – {displayDate(shiftDate(rangeEnd, -1))}. Klikni naziv ili traku za otvaranje gradilišta.</p>}
+      <Modal
+        open={deadlineModalOpen}
+        onClose={() => setDeadlineModalOpen(false)}
+        title={editingDeadline ? 'Uredi termin' : 'Novi termin'}
+        footer={(
+          <>
+            <button type="button" onClick={() => setDeadlineModalOpen(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Odustani</button>
+            <button type="button" onClick={() => void saveDeadline()} disabled={savingDeadline} className="rounded-lg bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:opacity-50">
+              {savingDeadline ? 'Spremanje…' : 'Spremi termin'}
+            </button>
+          </>
+        )}
+      >
+        <div className="space-y-4">
+          {deadlineError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{deadlineError}</p>}
+          <Field label="Gradilište *">
+            <Select value={deadlineForm.gradiliste_id} onChange={(event) => setDeadlineForm((previous) => ({ ...previous, gradiliste_id: event.target.value }))}>
+              <option value="">Odaberi gradilište</option>
+              {gradilista.slice().sort((first, second) => first.naziv.localeCompare(second.naziv)).map((site) => <option key={site.id} value={site.id}>{site.naziv}</option>)}
+            </Select>
+          </Field>
+          <Field label="Naziv termina *">
+            <TextInput value={deadlineForm.naziv} onChange={(event) => setDeadlineForm((previous) => ({ ...previous, naziv: event.target.value }))} placeholder="npr. Početak fasaderskih radova" />
+          </Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Početak *">
+              <TextInput type="date" value={deadlineForm.datum_pocetka} onChange={(event) => setDeadlineForm((previous) => ({ ...previous, datum_pocetka: event.target.value }))} />
+            </Field>
+            <Field label="Završetak *">
+              <TextInput type="date" min={deadlineForm.datum_pocetka || undefined} value={deadlineForm.datum_zavrsetka} onChange={(event) => setDeadlineForm((previous) => ({ ...previous, datum_zavrsetka: event.target.value }))} />
+            </Field>
+          </div>
+          <Field label="Kooperant">
+            <Select value={deadlineForm.kooperant_id} onChange={(event) => setDeadlineForm((previous) => ({ ...previous, kooperant_id: event.target.value }))}>
+              <option value="">Bez kooperanta</option>
+              {sortedKooperanti.map((kooperant) => <option key={kooperant.id} value={kooperant.id}>{kooperant.naziv}</option>)}
+            </Select>
+          </Field>
+          <Field label="Status">
+            <Select value={deadlineForm.status} onChange={(event) => setDeadlineForm((previous) => ({ ...previous, status: event.target.value as Rok['status'] }))}>
+              <option value="otvoren">Otvoren</option>
+              <option value="prekoracen">Prekoračen</option>
+              <option value="zavrsen">Završen</option>
+            </Select>
+          </Field>
+          <Field label="Napomena">
+            <Textarea rows={3} value={deadlineForm.opis} onChange={(event) => setDeadlineForm((previous) => ({ ...previous, opis: event.target.value }))} />
+          </Field>
+        </div>
+      </Modal>
     </section>
   );
 }

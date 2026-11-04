@@ -1,3 +1,5 @@
+import { hrPraznici } from '@/lib/obracunSati';
+
 export interface TerminskiPlanPdfRow {
   gradiliste: string;
   aktivnost: string;
@@ -38,6 +40,8 @@ function dateLabel(value: string) {
 
 function pageMarkup(spec: TerminskiPlanPdfSpec) {
   const daySlice = spec.dani;
+  const holidays = new Map([...new Set(daySlice.map((day) => Number(day.slice(0, 4))))]
+    .flatMap((year) => [...hrPraznici(year)]));
   const periodStart = daySlice[0];
   const periodEnd = daySlice[daySlice.length - 1];
   const gridTemplate = `repeat(${daySlice.length}, minmax(0, 1fr))`;
@@ -58,8 +62,9 @@ function pageMarkup(spec: TerminskiPlanPdfSpec) {
     const date = new Date(`${day}T12:00:00`);
     const weekday = date.toLocaleDateString('hr-HR', { weekday: 'short' }).replace('.', '').slice(0, 1);
     const sunday = date.getDay() === 0;
-    const weekend = date.getDay() === 6;
-    return `<div class="day ${sunday ? 'sunday' : weekend ? 'weekend' : ''}"><span>${escapeHtml(weekday)}</span><b>${date.getDate()}</b></div>`;
+    const holiday = holidays.get(day);
+    const saturday = date.getDay() === 6;
+    return `<div class="day ${sunday ? 'sunday' : holiday ? 'holiday' : saturday ? 'weekend' : ''}"${holiday ? ` title="${escapeHtml(holiday)}"` : ''}><span>${escapeHtml(weekday)}</span><b>${date.getDate()}</b></div>`;
   }).join('');
   const rowMarkup = spec.redovi.map((row) => {
     const start = (utcDay(row.pocetak) - utcDay(spec.pocetak)) / 86400000;
@@ -71,7 +76,7 @@ function pageMarkup(spec: TerminskiPlanPdfSpec) {
     const width = (Math.max(1, visibleEnd - visibleStart + 1) / daySlice.length) * 100;
     const weekendCells = daySlice.map((day) => {
       const date = new Date(`${day}T12:00:00`);
-      return `<i class="cell ${date.getDay() === 0 ? 'sunday' : date.getDay() === 6 ? 'weekend' : ''}"></i>`;
+      return `<i class="cell ${date.getDay() === 0 ? 'sunday' : holidays.has(day) ? 'holiday' : date.getDay() === 6 ? 'weekend' : ''}"></i>`;
     }).join('');
     const contractor = row.kooperant ? `<span class="contractor">${escapeHtml(row.kooperant)}</span>` : '';
     return `
@@ -107,6 +112,7 @@ function pageMarkup(spec: TerminskiPlanPdfSpec) {
       .day b{font-size:9px;color:#0f172a}
       .weekend{background:#f1f5f9}
       .sunday{background:#ffe4e6;color:#9f1239;border-right:2px solid #fda4af}
+      .holiday{background:#ffe4e6;color:#9f1239;border-right:2px solid #fda4af}
       .grid-row{min-height:30px;border:1px solid #e2e8f0;border-top:0}
       .task-label{min-width:0;display:flex;flex-direction:column;justify-content:center;gap:2px;padding:3px 8px;border-right:1px solid #cbd5e1;overflow:visible}
       .task-label b,.task-label span{white-space:normal;overflow-wrap:anywhere;line-height:1.3}
@@ -117,6 +123,7 @@ function pageMarkup(spec: TerminskiPlanPdfSpec) {
       .cell{border-right:1px solid #e2e8f0}
       .cell.weekend{background:#f8fafc}
       .cell.sunday{background:#fff1f2;border-right:2px solid #fecdd3}
+      .cell.holiday{background:#fff1f2;border-right:2px solid #fecdd3}
       .bar{position:absolute;top:50%;height:9px;min-width:4px;transform:translateY(-50%);border-radius:8px;box-shadow:0 1px 2px #0f172a33}
       .footer{display:flex;justify-content:space-between;margin-top:7px;padding-top:4px;border-top:1px solid #cbd5e1;font-size:9px;color:#64748b}
     </style>

@@ -1,8 +1,9 @@
-import type { Faktura, Gradiliste, Radnik, Rok, Vozilo, VoziloDokument, RadnikDokument, VoziloObavijest } from '@/types';
+import type { Faktura, Gradiliste, Radnik, Rok, Vozilo, VoziloDokument, RadnikDokument, VoziloObavijest, VoziloGorivoAnomalija } from '@/types';
 import { companyStorage } from './company';
 import {
   fetchFakture,
   fetchOpenVoziloObavijesti,
+  fetchOpenVozilaGorivoAnomalije,
   fetchGradilista,
   fetchRadnici,
   fetchRokovi,
@@ -31,6 +32,7 @@ export interface Obavijest {
   level: ObavijestLevel;
   view: 'radnici' | 'vozila' | 'gradilista' | 'fakture';
   voziloObavijestId?: string;
+  voziloGorivoAnomalijaId?: string;
 }
 
 const daysBetween = (from: string, to: string) =>
@@ -81,10 +83,11 @@ interface Source {
   radnikDok: RadnikDokument[];
   voziloDok: VoziloDokument[];
   voziloObavijesti: VoziloObavijest[];
+  gorivoAnomalije: VoziloGorivoAnomalija[];
 }
 
 export async function loadObavijestiSource(): Promise<Source> {
-  const [gradilista, radnici, vozila, rokovi, fakture, radnikDok, voziloDok, voziloObavijesti] = await Promise.all([
+  const [gradilista, radnici, vozila, rokovi, fakture, radnikDok, voziloDok, voziloObavijesti, gorivoAnomalije] = await Promise.all([
     fetchGradilista(),
     fetchRadnici(),
     fetchVozila(),
@@ -93,8 +96,9 @@ export async function loadObavijestiSource(): Promise<Source> {
     fetchSviRadnikDokumenti().catch(() => [] as RadnikDokument[]),
     fetchSviVoziloDokumenti().catch(() => [] as VoziloDokument[]),
     fetchOpenVoziloObavijesti(),
+    fetchOpenVozilaGorivoAnomalije(),
   ]);
-  return { gradilista, radnici, vozila, rokovi, fakture, radnikDok, voziloDok, voziloObavijesti };
+  return { gradilista, radnici, vozila, rokovi, fakture, radnikDok, voziloDok, voziloObavijesti, gorivoAnomalije };
 }
 
 export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
@@ -190,6 +194,26 @@ export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
       title: vehicleName,
       detail: `${issue.prijavio_ime}: ${issue.opis}`,
       datum: issue.datum,
+      days: 0,
+      level: 'today',
+      view: 'vozila',
+    });
+  });
+
+  src.gorivoAnomalije.forEach((anomaly) => {
+    const vehicle = voziloById.get(anomaly.vozilo_id);
+    if (!vehicle) return;
+    const vehicleName = [vehicle.marka, vehicle.model].filter(Boolean).join(' ') || 'Vozilo';
+    out.push({
+      id: `vga-${anomaly.id}`,
+      voziloGorivoAnomalijaId: anomaly.id,
+      subjectId: anomaly.vozilo_id,
+      tip: 'vozilo_ostalo',
+      grupa: meta('vozilo_ostalo').grupa,
+      tipLabel: anomaly.vrsta === 'kilometraza' ? 'Provjera kilometraže goriva' : 'Anomalija potrošnje goriva',
+      title: `${vehicleName}${vehicle.registracija ? ` · ${vehicle.registracija}` : ''}`,
+      detail: anomaly.opis,
+      datum: anomaly.datum,
       days: 0,
       level: 'today',
       view: 'vozila',

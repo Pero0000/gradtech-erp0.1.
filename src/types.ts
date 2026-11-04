@@ -235,6 +235,7 @@ export interface DnevniRasporedRadnik {
                                                                       export interface Vozilo {
                                                                         id: string;
                                                                           registracija: string;
+                                                                          broj_sasije?: string | null;
                                                                             marka: string;
                                                                               model: string | null;
                                                                                 tip: VoziloTip;
@@ -271,6 +272,25 @@ export interface VoziloGorivo {
   tocio_radnik_id: string | null;
   tocio_ime: string;
   created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type VoziloGorivoAnomalijaVrsta = 'potrosnja_visoka' | 'potrosnja_niska' | 'kilometraza';
+
+export interface VoziloGorivoAnomalija {
+  id: string;
+  vozilo_id: string;
+  gorivo_id: string;
+  vrsta: VoziloGorivoAnomalijaVrsta;
+  datum: string;
+  litara: number;
+  kilometraza: number;
+  potrosnja: number | null;
+  usporedna_potrosnja: number | null;
+  opis: string;
+  rijeseno_at: string | null;
+  rijesio: string | null;
   created_at: string;
   updated_at: string;
 }

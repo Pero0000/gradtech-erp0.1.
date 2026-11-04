@@ -49,6 +49,7 @@ type SortKey = 'vozilo' | 'tip' | 'status' | 'kilometraza' | 'godina' | 'mjesta'
 
 const emptyForm = {
   registracija: '',
+  broj_sasije: '',
   marka: '',
   model: '',
   tip: 'Teretno' as VoziloTip,
@@ -138,6 +139,7 @@ export function VozilaView() {
     setKmRecalculationMessage(null);
     setForm({
       registracija: v.registracija,
+      broj_sasije: v.broj_sasije ?? '',
       marka: v.marka,
       model: v.model ?? '',
       tip: tipovi.find((item) => item.trim().toLowerCase() === v.tip.trim().toLowerCase()) ?? v.tip,
@@ -204,6 +206,7 @@ export function VozilaView() {
     try {
       const payload = {
         registracija: form.registracija.trim(),
+        broj_sasije: form.broj_sasije.trim() || null,
         marka: form.marka.trim(),
         model: form.model.trim() || null,
         tip: form.tip,
@@ -603,6 +606,14 @@ export function VozilaView() {
                 placeholder="ZG-123-AB"
               />
             </Field>
+            <Field label="Broj šasije (VIN)">
+              <TextInput
+                value={form.broj_sasije}
+                onChange={(e) => setForm({ ...form, broj_sasije: e.target.value })}
+                placeholder="Unesite broj šasije"
+                autoCapitalize="characters"
+              />
+            </Field>
             <Field label="Marka *">
               <TextInput
                 value={form.marka}
@@ -791,7 +802,16 @@ export function VozilaView() {
           vozilo={{ ...selectedVehicle, status: storedStatus(displayStatus(selectedVehicle, todaysAssignments)) }}
           onClose={() => setSelectedVehicle(null)}
           onEdit={() => { setSelectedVehicle(null); openEdit(selectedVehicle); }}
-          onDataChange={() => { void loadServisi(); }}
+          onDataChange={() => {
+            void loadServisi();
+            void fetchVozila().then((vehicles) => {
+              setItems(vehicles);
+              const updatedVehicle = vehicles.find((vehicle) => vehicle.id === selectedVehicle.id);
+              if (updatedVehicle) setSelectedVehicle(updatedVehicle);
+            }).catch((reason) => {
+              setError(reason instanceof Error ? reason.message : 'Greška pri osvježavanju vozila.');
+            });
+          }}
         />
       )}
 

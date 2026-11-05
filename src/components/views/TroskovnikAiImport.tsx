@@ -67,11 +67,20 @@ export function TroskovnikAiImport({ open, onClose, gradilisteId, naziv, ponude,
     setError(null);
     try {
       const existing = ponude.find((p) => p.ponuda.id === target);
+      const added = rows.map((r) => ({
+        stavka_id: null, redoslijed: 0, opis: r.opis.trim(), vrsta_posla: r.grupa.trim() || null, podgrupa: null,
+        jedinica: r.jedinica.trim() || 'kom', kolicina: r.kolicina, cijena: r.cijena, popust: 0,
+      }));
       let ponudaId: string;
       let prije: PonudaStavka[] = [];
       if (existing) {
         ponudaId = existing.ponuda.id;
         prije = existing.stavke;
+        const old = prije.map((s) => ({
+          stavka_id: s.stavka_id, redoslijed: 0, opis: s.opis, vrsta_posla: s.vrsta_posla, podgrupa: s.podgrupa,
+          jedinica: s.jedinica, kolicina: s.kolicina, cijena: s.cijena, popust: s.popust,
+        }));
+        await replacePonudaStavke(ponudaId, [...old, ...added]);
       } else {
         const created = await createPonuda({
           naslov: naziv ? `Troškovnik – ${naziv}` : 'Uvezeni troškovnik',
@@ -85,19 +94,10 @@ export function TroskovnikAiImport({ open, onClose, gradilisteId, naziv, ponude,
           prikazi_popust: false,
           prijenos_porezne_obveze: false,
           napomene: null,
-        });
+        }, added);
         ponudaId = created.id;
         await updatePonuda(ponudaId, { gradiliste_id: gradilisteId });
       }
-      const old = prije.map((s) => ({
-        stavka_id: s.stavka_id, redoslijed: 0, opis: s.opis, vrsta_posla: s.vrsta_posla, podgrupa: s.podgrupa,
-        jedinica: s.jedinica, kolicina: s.kolicina, cijena: s.cijena, popust: s.popust,
-      }));
-      const added = rows.map((r) => ({
-        stavka_id: null, redoslijed: 0, opis: r.opis.trim(), vrsta_posla: r.grupa.trim() || null, podgrupa: null,
-        jedinica: r.jedinica.trim() || 'kom', kolicina: r.kolicina, cijena: r.cijena, popust: 0,
-      }));
-      await replacePonudaStavke(ponudaId, [...old, ...added]);
       reset();
       onImported();
       onClose();

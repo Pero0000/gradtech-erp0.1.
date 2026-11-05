@@ -1,3 +1,4 @@
+import { formatHrDate, formatHrDateTime } from '@/lib/localization';
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Clock3, FileText, Paperclip, Truck } from 'lucide-react';
 import {
@@ -22,7 +23,7 @@ export type WorkerPortalTab = 'nalozi' | 'raspored' | 'gorivo' | 'obavijesti' | 
 const errText = (reason: unknown, fallback: string) =>
   reason && typeof reason === 'object' && 'message' in reason ? String((reason as { message: unknown }).message) : fallback;
 
-const formatDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('hr-HR');
+const formatDate = (iso: string) => formatHrDate(new Date(`${iso}T00:00:00`));
 const isoDate = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
@@ -85,14 +86,14 @@ export function WorkerScheduleTab({ radnikId }: { radnikId: string | null }) {
         <div className="flex min-w-0 flex-col gap-2 pb-1 xl:flex-row xl:flex-wrap">
           {objave.map((item) => (
             <button key={item.id} type="button" onClick={() => setSelectedDatum(item.datum)} className={`min-h-10 shrink-0 rounded-xl px-3 text-xs font-bold capitalize ${item.datum === objava.datum ? 'bg-sky-700 text-white' : 'bg-white text-slate-600 shadow-sm'}`}>
-              {new Date(`${item.datum}T00:00:00`).toLocaleDateString('hr-HR', { weekday: 'short', day: 'numeric', month: 'numeric' })}
+              {formatHrDate(new Date(`${item.datum}T00:00:00`), { weekday: 'short', day: 'numeric', month: 'numeric' })}
             </button>
           ))}
         </div>
       )}
       <div className="rounded-2xl bg-slate-900 p-4 text-white">
-        <p className="text-lg font-bold capitalize">{new Date(`${objava.datum}T00:00:00`).toLocaleDateString('hr-HR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-        <p className="text-xs text-slate-400">Poslano {new Date(objava.poslano_at).toLocaleString('hr-HR', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+        <p className="text-lg font-bold capitalize">{formatHrDate(new Date(`${objava.datum}T00:00:00`), { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+        <p className="text-xs text-slate-400">Poslano {formatHrDateTime(new Date(objava.poslano_at), { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
       </div>
       <RasporedVozilaPreview vozila={vozila} radnikId={radnikId} />
     </div>
@@ -340,7 +341,7 @@ export function WorkerDocumentsTab({ radnikId, orders }: { radnikId: string; ord
             <article key={document.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-xs font-semibold text-sky-700">{dokumentVrste[document.vrsta] ?? document.vrsta}</p>
+                  <p className="text-xs font-semibold text-sky-700">{dokumentVrste[document.vrsta] ?? document.naziv}</p>
                   <h4 className="font-bold text-slate-900">{document.naziv}</h4>
                   {(document.datum_od || document.datum_do) && (
                     <p className="mt-1 text-xs text-slate-500">

@@ -3,7 +3,7 @@ import { ArrowUpFromLine, FileDown, Search, Trash2, ListPlus, FilePlus2, Buildin
 import type { Investitor, Objekt } from '@/types';
 import { createGradiliste, createInvestitor, createObjekt } from '@/lib/api';
 import {
-  createPonuda, ponudaBroj, ponudaUkupno, replacePonudaStavke, updatePonuda,
+  createPonuda, ponudaBroj, ponudaUkupno, savePonudaWithHistory, updatePonuda,
   type Ponuda, type PonudaStatus, type PonudaStavka,
 } from '@/lib/ponude';
 import { createStavka, updateStavka, type Stavka } from '@/lib/stavke';
@@ -11,6 +11,7 @@ import { loadPonudaPostavke } from '@/lib/ponudePostavke';
 import { exportPonudaPdf } from '@/lib/ponudaPdf';
 import { Field, Select, Textarea, TextInput } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
+import { PonudaChangeHistoryPanel } from '@/components/views/PonudaChangeHistory';
 
 interface Line {
   key: string;
@@ -133,7 +134,7 @@ export function PonudaEditor({ open, onClose, onSaved, ponuda, ponudaStavke, inv
     const s = l.stavka_id ? bazaById.get(l.stavka_id) : undefined;
     if (!s) return;
     try {
-      await updateStavka(s.id, { sifra: s.sifra, naziv: s.naziv, vrsta_posla: s.vrsta_posla, podgrupa: s.podgrupa, jedinica: l.jedinica, cijena: pn(l.cijena), opis: s.opis }, s.cijena);
+      await updateStavka(s.id, { sifra: s.sifra, naziv: s.naziv, vrsta_posla: s.vrsta_posla, podgrupa: s.podgrupa, jedinica: l.jedinica, cijena: pn(l.cijena), opis: s.opis });
       onBazaChanged();
     } catch (e) {
       setError(errText(e));
@@ -207,14 +208,13 @@ export function PonudaEditor({ open, onClose, onSaved, ponuda, ponudaStavke, inv
         popust: pn(form.popust), pdv: form.prijenos ? 0 : pn(form.pdv), napomene: form.napomene.trim() || null,
         prikazi_popust: form.prikazi_popust, prijenos_porezne_obveze: form.prijenos,
       };
-      let id = ponuda?.id;
-      if (id) await updatePonuda(id, base);
-      else id = (await createPonuda(base)).id;
-      await replacePonudaStavke(id, resolved.map((l, i) => ({
+      const savedLines = resolved.map((l, i) => ({
         stavka_id: l.stavka_id, redoslijed: i, opis: l.opis.trim(), jedinica: l.jedinica,
         vrsta_posla: l.vrsta.trim() || null, podgrupa: l.podgrupa.trim() || null,
         kolicina: pn(l.kolicina), cijena: pn(l.cijena), popust: pn(l.popust),
-      })));
+      }));
+      if (ponuda) await savePonudaWithHistory(ponuda.id, base, savedLines);
+      else await createPonuda(base, savedLines);
       if (resolved.some((l, i) => l.stavka_id !== lines[i].stavka_id)) onBazaChanged();
       onSaved();
       onClose();
@@ -425,6 +425,14 @@ export function PonudaEditor({ open, onClose, onSaved, ponuda, ponudaStavke, inv
         <Field label="Napomene na ponudi (svaki red je zaseban odlomak)">
           <Textarea rows={5} value={form.napomene} onChange={(e) => setForm({ ...form, napomene: e.target.value })} />
         </Field>
+        {ponuda && <PonudaChangeHistoryPanel
+          offerId={ponuda.id}
+          disabled={saving}
+          onRestore={async () => {
+            await onSaved();
+            onClose();
+          }}
+        />}
         {ponuda?.gradiliste_id && <p className="flex items-center gap-1.5 text-xs text-emerald-700"><Building2 className="h-4 w-4" /> Ponuda je pretvorena u gradilište.</p>}
       </div>
     </Modal>

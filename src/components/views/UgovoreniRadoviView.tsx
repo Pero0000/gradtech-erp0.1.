@@ -13,6 +13,8 @@ import { Modal } from '@/components/ui/Modal';
 import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ResourceDeletionHistory } from '@/components/views/ResourceDeletionHistory';
+import { ContractedWorkChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
 
 const statusInfo: Record<UgovoreniRadStatus, { variant: 'blue' | 'yellow' | 'green'; label: string }> = {
   planirano: { variant: 'blue', label: 'Planirano' },
@@ -38,21 +40,34 @@ export function UgovoreniRadoviView() {
   const [editing, setEditing] = useState<UgovoreniRad | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [historyRestoring, setHistoryRestoring] = useState(false);
+  const [deletionVersion, setDeletionVersion] = useState(0);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [filterGradiliste, setFilterGradiliste] = useState('');
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (rethrow = false) => {
+    if (!rethrow) setLoading(true);
     setError(null);
     try {
       const [u, g] = await Promise.all([fetchUgovoreniRadovi(), fetchGradilista()]);
       setItems(u);
       setGradilista(g);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
+      setError(e && typeof e === 'object' && 'message' in e ? String(e.message) : 'Greška pri učitavanju');
+      if (rethrow) throw e;
     } finally {
       setLoading(false);
     }
+  };
+
+  const refreshAfterRestore = async () => {
+    setModalOpen(false);
+    setEditing(null);
+    setDeleteId(null);
+    setForm(emptyForm);
+    setFilterGradiliste('');
+    setDeletionVersion((value) => value + 1);
+    await load(true);
   };
 
   useEffect(() => {
@@ -60,12 +75,14 @@ export function UgovoreniRadoviView() {
   }, []);
 
   const openCreate = () => {
+    if (saving || historyRestoring) return;
     setEditing(null);
     setForm({ ...emptyForm, gradiliste_id: filterGradiliste });
     setModalOpen(true);
   };
 
   const openEdit = (u: UgovoreniRad) => {
+    if (saving || historyRestoring) return;
     setEditing(u);
     setForm({
       gradiliste_id: u.gradiliste_id ?? '',
@@ -79,6 +96,7 @@ export function UgovoreniRadoviView() {
   };
 
   const save = async () => {
+    if (saving || historyRestoring) return;
     if (!form.naziv.trim()) return;
     setSaving(true);
     try {
@@ -105,12 +123,20 @@ export function UgovoreniRadoviView() {
   };
 
   const handleDelete = async () => {
-    if (!deleteId) return;
+    if (!deleteId || saving || historyRestoring) return;
+    setSaving(true);
     try {
       await deleteUgovoreniRad(deleteId);
+      setDeleteId(null);
+      setEditing(null);
+      setForm(emptyForm);
+      setModalOpen(false);
+      setDeletionVersion((value) => value + 1);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri brisanju');
+      setError(e && typeof e === 'object' && 'message' in e ? String(e.message) : 'Greška pri brisanju');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -126,6 +152,9 @@ export function UgovoreniRadoviView() {
 
   return (
     <div className="min-w-0 max-w-full break-words">
+      <ResourceDeletionHistory module="gradilista" table="ugovoreni_radovi" refreshVersion={deletionVersion}
+        disabled={saving || historyRestoring} onRestoringChange={setHistoryRestoring} onRestore={refreshAfterRestore} />
+      <fieldset disabled={saving || historyRestoring} className="min-w-0">
       <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Ugovoreni radovi</h1>
@@ -268,11 +297,12 @@ export function UgovoreniRadoviView() {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { if (!saving && !historyRestoring) setModalOpen(false); }}
         title={editing ? 'Uredi ugovoreni rad' : 'Novi ugovoreni rad'}
         footer={
           <>
             <button
+              disabled={saving || historyRestoring}
               onClick={() => setModalOpen(false)}
               className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
             >
@@ -280,7 +310,7 @@ export function UgovoreniRadoviView() {
             </button>
             <button
               onClick={save}
-              disabled={saving || !form.naziv.trim()}
+              disabled={saving || historyRestoring || !form.naziv.trim()}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50 transition-colors"
             >
               {saving ? 'Spremanje…' : 'Spremi'}
@@ -288,7 +318,9 @@ export function UgovoreniRadoviView() {
           </>
         }
       >
-        <div className="space-y-4">
+        {modalOpen && editing && <ContractedWorkChangeHistoryPanel recordId={editing.id}
+          disabled={saving || historyRestoring} onRestoringChange={setHistoryRestoring} onRestore={refreshAfterRestore} />}
+        <fieldset disabled={saving || historyRestoring} className="space-y-4">
           <Field label="Naziv *">
             <TextInput
               value={form.naziv}
@@ -345,16 +377,17 @@ export function UgovoreniRadoviView() {
               <option value="zavrseno">Završeno</option>
             </Select>
           </Field>
-        </div>
+        </fieldset>
       </Modal>
 
       <ConfirmDialog
         open={deleteId !== null}
-        onClose={() => setDeleteId(null)}
+        onClose={() => { if (!saving && !historyRestoring) setDeleteId(null); }}
         onConfirm={handleDelete}
         title="Izbrisati ugovoreni rad?"
-        message="Ova radnja je nepovratna."
+        message="Rad i sačuvani prilog možete vratiti iz povijesti pojedinačnih brisanja 30 dana, ako postoje izvorne veze i nema naknadnog konflikta. Povezana ponuda se ne mijenja."
       />
+      </fieldset>
     </div>
   );
 }

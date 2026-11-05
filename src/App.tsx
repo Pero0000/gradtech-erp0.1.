@@ -35,6 +35,7 @@ import {
 import { useAuth } from '@/auth/useAuth';
 import { MODULES, moduleForView } from '@/auth/permissions';
 import { MobileWorkOrdersView } from '@/components/mobile/MobileWorkOrdersView';
+import { HistoryToolbarAction, HistoryToolbarProvider } from '@/components/views/HistoryDialog';
 
 function App() {
   const { canAccess, isAdmin, isPlatformOwner, isWorker, hasWorkerPortal, company, profile, signOut } = useAuth();
@@ -199,6 +200,7 @@ function App() {
           className="fixed inset-y-0 left-0 z-[60] w-3 cursor-pointer"
         />
       )}
+      <HistoryToolbarProvider>
       <main className={`app-main min-h-0 min-w-0 max-w-full flex-1 ${view === 'dashboard' ? 'overflow-y-auto xl:overflow-hidden' : 'overflow-y-auto'}`}>
         <header className="app-topbar sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4">
           <div className="min-w-0 break-words">
@@ -206,6 +208,7 @@ function App() {
             <p className="text-xs text-slate-500">{view === 'terminski_plan' ? 'Terminski plan' : MODULES.find((module) => module.id === view)?.label ?? 'Aplikacija'}</p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <HistoryToolbarAction />
             {hasWorkerPortal && (
               <button
                 type="button"
@@ -263,6 +266,7 @@ function App() {
           {viewAuthorized && view === 'korisnici' && <KorisniciView />}
         </div>
       </main>
+      </HistoryToolbarProvider>
     </div>
   );
 }

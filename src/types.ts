@@ -21,7 +21,7 @@ export interface RadnikOdsustvo {
   datum_do: string;
   napomena: string | null;
 }
-export type RadnikDokumentVrsta = 'lijecnicki' | 'atest' | 'zastita_na_radu' | 'osposobljavanje' | 'ostalo';
+export type RadnikDokumentVrsta = 'lijecnicki' | 'atest' | 'zastita_na_radu' | 'osposobljavanje' | 'ostalo' | `custom:${string}`;
 export interface RadnikDokument {
   id: string;
   radnik_id: string;
@@ -396,6 +396,7 @@ export interface VoziloObavijest {
                                                                                                                                     placen?: boolean;
                                                                                                                                     placeno_at?: string | null;
                                                                                                                                     kooperant_racun_id?: string | null;
+                                                                                                                                    nalog_id?: string | null;
                                                                                                                                       broj_racuna?: string | null;
                                                                                                                                       kolicina?: number | null;
                                                                                                                                       jedinica?: string | null;

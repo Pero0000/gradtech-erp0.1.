@@ -70,10 +70,51 @@ function apiErrorMessage(reason: unknown): string {
   return String(reason);
 }
 
+interface SignedStorageUrlCacheEntry {
+  url: string;
+  expiresAt: number;
+}
+
+const SIGNED_STORAGE_URL_CACHE_LIMIT = 500;
+const SIGNED_STORAGE_URL_REFRESH_MARGIN_MS = 60_000;
+const signedStorageUrlCache = new Map<string, SignedStorageUrlCacheEntry>();
+const pendingSignedStorageUrls = new Map<string, Promise<string>>();
+
+async function getSignedStorageUrl(bucketName: string, path: string, expiresIn = 3600): Promise<string> {
+  const key = JSON.stringify([bucketName, path, expiresIn]);
+  const now = Date.now();
+  const cached = signedStorageUrlCache.get(key);
+  if (cached && cached.expiresAt > now + SIGNED_STORAGE_URL_REFRESH_MARGIN_MS) return cached.url;
+  if (cached) signedStorageUrlCache.delete(key);
+
+  const pending = pendingSignedStorageUrls.get(key);
+  if (pending) return pending;
+
+  const request = (async () => {
+    const { data, error } = await supabase.storage.from(bucketName).createSignedUrl(path, expiresIn);
+    if (error) throw error;
+
+    while (signedStorageUrlCache.size >= SIGNED_STORAGE_URL_CACHE_LIMIT) {
+      const oldestKey = signedStorageUrlCache.keys().next().value;
+      if (oldestKey === undefined) break;
+      signedStorageUrlCache.delete(oldestKey);
+    }
+    signedStorageUrlCache.set(key, {
+      url: data.signedUrl,
+      expiresAt: Date.now() + expiresIn * 1000,
+    });
+    return data.signedUrl;
+  })();
+  pendingSignedStorageUrls.set(key, request);
+  try {
+    return await request;
+  } finally {
+    if (pendingSignedStorageUrls.get(key) === request) pendingSignedStorageUrls.delete(key);
+  }
+}
+
 export async function getPrivateFileUrl(path: string, expiresIn = 3600): Promise<string> {
-  const { data, error } = await supabase.storage.from('nalozi-foto').createSignedUrl(path, expiresIn);
-  if (error) throw error;
-  return data.signedUrl;
+  return getSignedStorageUrl('nalozi-foto', path, expiresIn);
 }
 
 function throwActionableDbError(error: { message: string; code?: string }, entityName: string) {
@@ -316,8 +357,7 @@ export async function updateGradiliste(id: string, g: Partial<Gradiliste>) {
 }
 
 export async function deleteGradiliste(id: string) {
-  const { error } = await supabase.from('gradilista').delete().eq('id', id);
-  if (error) throw error;
+  await deleteResourceWithHistory('gradilista', id);
 }
 
 export async function fetchRadnici(): Promise<Radnik[]> {
@@ -379,8 +419,39 @@ export async function updateRadnik(id: string, r: Partial<Radnik>) {
 }
 
 export async function deleteRadnik(id: string) {
-  const { error } = await supabase.from('radnici').delete().eq('id', id);
-  if (error) throw error;
+  await deleteResourceWithHistory('radnici', id);
+}
+
+export async function fetchRadnikDokumentKategorije(): Promise<Array<{ vrsta: RadnikDokumentVrsta; naziv: string }>> {
+  const { data, error } = await supabase
+    .from('radnik_dokument_kategorije')
+    .select('id, naziv')
+    .order('naziv');
+  if (error) {
+    if (['42P01', 'PGRST205'].includes(error.code ?? '')) {
+      throw new Error('Nedostaje migracija 20261109190000_radnik_dokument_kategorije.sql. Primijenite je u Supabase SQL editoru.');
+    }
+    throw error;
+  }
+  return (data ?? []).map((row) => ({ vrsta: `custom:${row.id}`, naziv: row.naziv }));
+}
+
+export async function addRadnikDokumentKategorija(naziv: string): Promise<{ vrsta: RadnikDokumentVrsta; naziv: string }> {
+  const value = naziv.trim();
+  if (!value) throw new Error('Upišite naziv kategorije dokumenta.');
+  const { data, error } = await supabase
+    .from('radnik_dokument_kategorije')
+    .insert({ naziv: value })
+    .select('id, naziv')
+    .single();
+  if (error) {
+    if (error.code === '23505') throw new Error('Kategorija dokumenta s tim nazivom već postoji.');
+    if (['42P01', 'PGRST205'].includes(error.code ?? '')) {
+      throw new Error('Nedostaje migracija 20261109190000_radnik_dokument_kategorije.sql. Primijenite je u Supabase SQL editoru.');
+    }
+    throw error;
+  }
+  return { vrsta: `custom:${data.id}`, naziv: data.naziv };
 }
 
 export async function fetchRadnikDokumenti(radnikId: string): Promise<RadnikDokument[]> {
@@ -417,9 +488,8 @@ export async function updateRadnikDokumentRok(id: string, u: { datum_od: string 
 }
 
 export async function deleteRadnikDokument(d: RadnikDokument) {
-  const { error } = await supabase.from('radnici_dokumenti').delete().eq('id', d.id);
+  const { error } = await supabase.from('radnici_dokumenti').delete().eq('id', d.id).select('id').single();
   if (error) throw error;
-  if (d.putanja) await supabase.storage.from('nalozi-foto').remove([d.putanja]);
 }
 
 export async function fetchVoziloDokumenti(voziloId: string): Promise<VoziloDokument[]> {
@@ -578,8 +648,23 @@ export async function addOdsustvo(o: { radnik_id: string; vrsta: OdsustvoVrsta; 
 }
 
 export async function deleteOdsustvo(id: string) {
-  const { error } = await supabase.from('radnici_odsustva').delete().eq('id', id);
-  if (error) throw error;
+  const { error } = await supabase.rpc('delete_absence_with_history', { p_record_id: id });
+  if (error) throw absenceDeletionError(error);
+}
+
+function absenceDeletionError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110060000_odsustva_povrat_brisanja.sql. Primijenite je prije brisanja i vraćanja odsustava.');
+  }
+  return error;
+}
+
+export async function fetchAbsenceDeletions(before?: Pick<ResourceDeletion, 'id' | 'created_at'>): Promise<ResourceDeletion[]> {
+  const { data, error } = await supabase.rpc('get_absence_deletions', {
+    p_before_time: before?.created_at ?? null, p_before_id: before?.id ?? null,
+  });
+  if (error) throw absenceDeletionError(error);
+  return (data ?? []) as ResourceDeletion[];
 }
 
 export async function fetchSviRadnikDokumenti(): Promise<RadnikDokument[]> {
@@ -638,7 +723,9 @@ export async function updateVoziloDokument(
     .from('vozila_dokumenti')
     .update({ ...input, ...(newPath ? { putanja: newPath } : {}) })
     .eq('id', dokument.id)
-    .eq('vozilo_id', dokument.vozilo_id);
+    .eq('vozilo_id', dokument.vozilo_id)
+    .select('id')
+    .single();
   if (error) {
     if (newPath) {
       const { error: cleanupError } = await supabase.storage.from('nalozi-foto').remove([newPath]);
@@ -647,16 +734,37 @@ export async function updateVoziloDokument(
     throw error;
   }
 
-  if (newPath && dokument.putanja) {
-    const { error: removeError } = await supabase.storage.from('nalozi-foto').remove([dokument.putanja]);
-    if (removeError) throw new Error(`Zapis je ažuriran, ali stari prilog nije uklonjen: ${removeError.message}`);
-  }
 }
 
 export async function deleteVoziloDokument(d: VoziloDokument) {
-  const { error } = await supabase.from('vozila_dokumenti').delete().eq('id', d.id);
+  const { error } = await supabase.from('vozila_dokumenti').delete().eq('id', d.id).select('id').single();
   if (error) throw error;
-  if (d.putanja) await supabase.storage.from('nalozi-foto').remove([d.putanja]);
+}
+
+export type DocumentHistoryTable = 'radnici_dokumenti' | 'vozila_dokumenti' | 'oprema_dokumenti';
+export interface DocumentChangeHistory extends Omit<ResourceChangeHistory, 'before_data' | 'after_data'> {
+  before_data: Record<string, HistoryValue> | null;
+  after_data: Record<string, HistoryValue> | null;
+}
+
+function documentHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261109220000_dokumenti_povijest_vracanje.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+export async function fetchDocumentChangeHistory(table: DocumentHistoryTable, parentId: string, beforeSequence?: string): Promise<DocumentChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_document_change_history', {
+    p_table: table, p_parent_id: parentId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw documentHistoryError(error);
+  return (data ?? []) as DocumentChangeHistory[];
+}
+
+export async function restoreDocumentChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_document_change', { p_history_id: historyId });
+  if (error) throw documentHistoryError(error);
 }
 
 export interface VoziloGorivoInput {
@@ -666,6 +774,393 @@ export interface VoziloGorivoInput {
   kilometraza: number;
   tocio_radnik_id: string;
   tocio_ime: string;
+}
+
+export interface FuelChangeHistory {
+  id: string;
+  sequence: string;
+  operation: 'INSERT' | 'UPDATE' | 'DELETE';
+  before_data: VoziloGorivo | null;
+  after_data: VoziloGorivo | null;
+  actor_name: string;
+  created_at: string;
+  expires_at: string;
+  reversed_at: string | null;
+  reverses_id: string | null;
+  can_restore: boolean;
+}
+
+export type ResourceHistoryTable = 'radnici' | 'vozila' | 'oprema' | 'gradilista';
+export type HistoryValue = string | number | boolean | null | HistoryValue[] | { [key: string]: HistoryValue };
+export interface ResourceChangeHistory extends Omit<FuelChangeHistory, 'before_data' | 'after_data'> {
+  before_data: Record<string, HistoryValue>;
+  after_data: Record<string, HistoryValue>;
+  blocked_reason: string | null;
+}
+
+function resourceHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261109210000_resursi_povijest_izmjena.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+export async function fetchResourceChangeHistory(table: ResourceHistoryTable, recordId: string, beforeSequence?: string): Promise<ResourceChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_resource_change_history', {
+    p_table: table, p_record_id: recordId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) {
+    if (table === 'gradilista' && ['22023', '42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+      throw new Error('Nedostaje migracija 20261109233000_gradilista_povijest_izmjena.sql. Primijenite je u Supabase SQL editoru.');
+    }
+    throw resourceHistoryError(error);
+  }
+  return (data ?? []) as ResourceChangeHistory[];
+}
+
+export async function restoreResourceChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_resource_change', { p_history_id: historyId });
+  if (error) throw resourceHistoryError(error);
+}
+
+function deadlineHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110030000_rokovi_povijest_izmjena.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+export async function fetchDeadlineChangeHistory(recordId: string, beforeSequence?: string): Promise<ResourceChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_deadline_change_history', {
+    p_record_id: recordId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw deadlineHistoryError(error);
+  return (data ?? []) as ResourceChangeHistory[];
+}
+
+export async function restoreDeadlineChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_deadline_change', { p_history_id: historyId });
+  if (error) throw deadlineHistoryError(error);
+}
+
+function fuelHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261109200000_gorivo_povijest_vracanje.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+function workTimeHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110050000_radno_vrijeme_povijest_izmjena.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+export async function fetchWorkTimeChangeHistory(recordId: string, beforeSequence?: string): Promise<ResourceChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_work_time_change_history', {
+    p_record_id: recordId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw workTimeHistoryError(error);
+  return (data ?? []) as ResourceChangeHistory[];
+}
+
+export async function restoreWorkTimeChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_work_time_change', { p_history_id: historyId });
+  if (error) throw workTimeHistoryError(error);
+}
+
+function costHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110080000_troskovi_povijest_izmjena.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+export async function fetchCostChangeHistory(recordId: string, beforeSequence?: string): Promise<ResourceChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_cost_change_history', {
+    p_record_id: recordId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw costHistoryError(error);
+  return (data ?? []) as ResourceChangeHistory[];
+}
+
+export async function restoreCostChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_cost_change', { p_history_id: historyId });
+  if (error) throw costHistoryError(error);
+}
+
+function invoiceHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110100000_fakture_povijest_izmjena.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+export async function fetchInvoiceChangeHistory(recordId: string, beforeSequence?: string): Promise<ResourceChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_invoice_change_history', {
+    p_record_id: recordId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw invoiceHistoryError(error);
+  return (data ?? []) as ResourceChangeHistory[];
+}
+
+export async function restoreInvoiceChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_invoice_change', { p_history_id: historyId });
+  if (error) throw invoiceHistoryError(error);
+}
+
+function contractedWorkHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110120000_ugovoreni_radovi_povijest_izmjena.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+export async function fetchContractedWorkChangeHistory(recordId: string, beforeSequence?: string): Promise<ResourceChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_contracted_work_change_history', {
+    p_record_id: recordId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw contractedWorkHistoryError(error);
+  return (data ?? []) as ResourceChangeHistory[];
+}
+
+export async function restoreContractedWorkChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_contracted_work_change', { p_history_id: historyId });
+  if (error) throw contractedWorkHistoryError(error);
+}
+
+export interface TaskChangeHistory extends ResourceChangeHistory {
+  before_deadlines: Array<Record<string, HistoryValue>>;
+  after_deadlines: Array<Record<string, HistoryValue>>;
+}
+
+function orderHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110150000_nalozi_osnovni_podaci_povijest.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+function catalogHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110200000_stavke_povijest_izmjena.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+export async function fetchCatalogChangeHistory(recordId: string, beforeSequence?: string): Promise<ResourceChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_catalog_change_history', {
+    p_record_id: recordId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw catalogHistoryError(error);
+  return (data ?? []) as ResourceChangeHistory[];
+}
+
+export async function restoreCatalogChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_catalog_change', { p_history_id: historyId });
+  if (error) throw catalogHistoryError(error);
+}
+
+function engagementHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110190000_angazmani_povijest_izmjena.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+export async function fetchEngagementChangeHistory(recordId: string, beforeSequence?: string): Promise<ResourceChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_engagement_change_history', {
+    p_record_id: recordId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw engagementHistoryError(error);
+  return (data ?? []) as ResourceChangeHistory[];
+}
+
+export async function restoreEngagementChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_engagement_change', { p_history_id: historyId });
+  if (error) throw engagementHistoryError(error);
+}
+
+function cooperatorHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110180000_kooperanti_povijest_izmjena.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+export async function fetchCooperatorChangeHistory(recordId: string, beforeSequence?: string): Promise<ResourceChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_cooperator_change_history', {
+    p_record_id: recordId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw cooperatorHistoryError(error);
+  return (data ?? []) as ResourceChangeHistory[];
+}
+
+export async function restoreCooperatorChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_cooperator_change', { p_history_id: historyId });
+  if (error) throw cooperatorHistoryError(error);
+}
+
+function objectHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110170000_objekti_povijest_izmjena.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+export async function fetchObjectChangeHistory(recordId: string, beforeSequence?: string): Promise<ResourceChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_object_change_history', {
+    p_record_id: recordId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw objectHistoryError(error);
+  return (data ?? []) as ResourceChangeHistory[];
+}
+
+export async function restoreObjectChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_object_change', { p_history_id: historyId });
+  if (error) throw objectHistoryError(error);
+}
+
+function investorHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110160000_investitori_povijest_izmjena.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+export async function fetchInvestorChangeHistory(recordId: string, beforeSequence?: string): Promise<ResourceChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_investor_change_history', {
+    p_record_id: recordId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw investorHistoryError(error);
+  return (data ?? []) as ResourceChangeHistory[];
+}
+
+export async function restoreInvestorChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_investor_change', { p_history_id: historyId });
+  if (error) throw investorHistoryError(error);
+}
+
+export async function fetchOrderChangeHistory(recordId: string, beforeSequence?: string): Promise<ResourceChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_order_change_history', {
+    p_record_id: recordId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw orderHistoryError(error);
+  return (data ?? []) as ResourceChangeHistory[];
+}
+
+function workOrderTeamHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110290000_nalozi_ekipa_povijest_vracanje.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+export async function fetchWorkOrderTeamChangeHistory(recordId: string, beforeSequence?: string): Promise<ResourceChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_work_order_team_change_history', {
+    p_nalog_id: recordId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw workOrderTeamHistoryError(error);
+  return (data ?? []) as ResourceChangeHistory[];
+}
+
+export async function restoreWorkOrderTeamChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_work_order_team_change', { p_history_id: historyId });
+  if (error) throw workOrderTeamHistoryError(error);
+}
+
+export async function restoreOrderChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_order_change', { p_history_id: historyId });
+  if (error) throw orderHistoryError(error);
+}
+
+export async function fetchOrderHistoryRecords(): Promise<Array<{
+  id: string; naziv: string; gradilista: { naziv: string } | null;
+}>> {
+  const rows = await fetchAllRows((from, to) => supabase.from('radni_nalozi')
+    .select('id,naziv:naslov,gradilista:gradiliste_id(naziv)').order('id').range(from, to));
+  return rows.map((row) => ({ ...row, gradilista: Array.isArray(row.gradilista) ? row.gradilista[0] ?? null : row.gradilista }));
+}
+
+export interface WorkOrderItemChangeHistory {
+  id: string;
+  sequence: string;
+  item_id: string;
+  before_data: Record<string, unknown>;
+  after_data: Record<string, unknown>;
+  actor_name: string;
+  created_at: string;
+  expires_at: string;
+  reversed_at: string | null;
+  reverses_id: string | null;
+  can_restore: boolean;
+  blocked_reason: string | null;
+}
+
+function workOrderItemHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110260000_nalog_stavke_povijest_izmjena.sql. Primijenite je prije korištenja povijesti stavki naloga.');
+  }
+  return error;
+}
+
+export async function fetchWorkOrderItemChangeHistory(
+  nalogId: string,
+  beforeSequence?: string,
+): Promise<WorkOrderItemChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_work_order_item_change_history', {
+    p_nalog_id: nalogId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw workOrderItemHistoryError(error);
+  return (data ?? []) as WorkOrderItemChangeHistory[];
+}
+
+export async function restoreWorkOrderItemChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_work_order_item_change', { p_history_id: historyId });
+  if (error) throw workOrderItemHistoryError(error);
+}
+
+function taskHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110140000_zadaci_povijest_izmjena.sql. Primijenite je u Supabase SQL editoru.');
+  }
+  return error;
+}
+
+export async function fetchTaskChangeHistory(recordId: string, beforeSequence?: string): Promise<TaskChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_task_change_history', {
+    p_record_id: recordId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw taskHistoryError(error);
+  return (data ?? []) as TaskChangeHistory[];
+}
+
+export async function restoreTaskChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_task_change', { p_history_id: historyId });
+  if (error) throw taskHistoryError(error);
+}
+
+export async function fetchTaskHistoryRecords(): Promise<Array<{
+  id: string; naziv: string; vrsta: string; gradilista: { naziv: string } | null;
+}>> {
+  const rows = await fetchAllRows((from, to) => supabase.from('gradiliste_zadaci')
+    .select('id,naziv,vrsta,gradilista:gradiliste_id(naziv)').order('id').range(from, to));
+  return rows.map((row) => ({ ...row, gradilista: Array.isArray(row.gradilista) ? row.gradilista[0] ?? null : row.gradilista }));
+}
+
+export async function fetchFuelChangeHistory(vehicleId: string, beforeSequence?: string): Promise<FuelChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_fuel_change_history', {
+    p_vehicle_id: vehicleId,
+    p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw fuelHistoryError(error);
+  return (data ?? []) as FuelChangeHistory[];
+}
+
+export async function restoreFuelChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_fuel_change', { p_history_id: historyId });
+  if (error) throw fuelHistoryError(error);
 }
 
 export interface MobileVoziloGorivoOptions {
@@ -996,8 +1491,7 @@ export async function recalculateVehicleKmCosts(voziloId: string): Promise<{
 }
 
 export async function deleteVozilo(id: string) {
-  const { error } = await supabase.from('vozila').delete().eq('id', id);
-  if (error) throw error;
+  await deleteResourceWithHistory('vozila', id);
 }
 
 export async function fetchOprema(kategorija: OpremaKategorija): Promise<Oprema[]> {
@@ -1144,8 +1638,113 @@ export async function updateOprema(id: string, item: Partial<Omit<Oprema, 'id' |
 }
 
 export async function deleteOprema(id: string) {
-  const { error } = await supabase.from('oprema').delete().eq('id', id);
-  if (error) throw error;
+  await deleteResourceWithHistory('oprema', id);
+}
+
+export type ResourceDeletionModule = 'radnici' | 'vozila' | 'alat' | 'strojevi' | 'gradilista' | 'radni_nalozi' | 'radno_vrijeme' | 'troskovi' | 'fakture' | 'kooperanti' | 'ponude';
+export type ResourceDeletionTable = ResourceHistoryTable | 'radni_nalozi' | 'gradiliste_zadaci' | 'rokovi';
+export interface ResourceDeletion {
+  id: string;
+  snapshot: Record<string, HistoryValue>;
+  actor_name: string;
+  created_at: string;
+  expires_at: string;
+  reversed_at: string | null;
+  can_restore: boolean;
+  affected_rows: Record<string, number>;
+}
+
+function resourceDeletionError(error: { code?: string; message?: string }, module?: 'gradilista' | 'radni_nalozi' | 'gradiliste_zadaci' | 'rokovi') {
+  if (module && ['22023', '42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    const migration = module === 'gradilista' ? '20261109235000_gradilista_povrat_brisanja.sql'
+      : module === 'radni_nalozi' ? '20261110000000_nalozi_povrat_brisanja.sql'
+        : module === 'gradiliste_zadaci' ? '20261110010000_zadaci_povrat_brisanja.sql'
+          : '20261110020000_rokovi_povrat_brisanja.sql';
+    return new Error(`Nedostaje migracija ${migration}. Primijenite je prije zaštićenog brisanja i vraćanja.`);
+  }
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261109230000_resursi_povrat_brisanja.sql. Primijenite je prije zaštićenog brisanja i vraćanja.');
+  }
+  return error;
+}
+
+function cooperatorInvoiceRecoveryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110210000_kooperant_racuni_povrat.sql. Primijenite je prije knjiženja, brisanja i vraćanja kooperantskih računa.');
+  }
+  return error;
+}
+
+export async function fetchKooperantInvoiceDeletions(before?: Pick<ResourceDeletion, 'id' | 'created_at'>): Promise<ResourceDeletion[]> {
+  const { data, error } = await supabase.rpc('get_kooperant_invoice_deletions', {
+    p_before_time: before?.created_at ?? null,
+    p_before_id: before?.id ?? null,
+  });
+  if (error) throw cooperatorInvoiceRecoveryError(error);
+  return (data ?? []) as ResourceDeletion[];
+}
+
+export async function fetchPonudaDeletions(before?: Pick<ResourceDeletion, 'id' | 'created_at'>): Promise<ResourceDeletion[]> {
+  const { data, error } = await supabase.rpc('get_ponuda_deletions', {
+    p_before_time: before?.created_at ?? null,
+    p_before_id: before?.id ?? null,
+  });
+  if (error) {
+    if (['42883', 'PGRST202'].includes(error.code ?? '')) {
+      throw new Error('Nedostaje migracija 20261110220000_ponude_povrat_brisanja.sql. Primijenite je prije povijesti brisanja ponuda.');
+    }
+    throw error;
+  }
+  return (data ?? []) as ResourceDeletion[];
+}
+
+export async function restoreKooperantInvoiceDeletion(deletionId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_resource_deletion', { p_deletion_id: deletionId });
+  if (error) throw cooperatorInvoiceRecoveryError(error);
+}
+
+export async function deleteResourceWithHistory(table: ResourceDeletionTable, recordId: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_resource_with_history', { p_table: table, p_record_id: recordId });
+  if (error) throw resourceDeletionError(error, table === 'gradilista' || table === 'radni_nalozi' || table === 'gradiliste_zadaci' || table === 'rokovi' ? table : undefined);
+}
+
+export async function fetchDeadlineDeletions(before?: Pick<ResourceDeletion, 'id' | 'created_at'>): Promise<ResourceDeletion[]> {
+  const { data, error } = await supabase.rpc('get_deadline_deletions', {
+    p_before_time: before?.created_at ?? null, p_before_id: before?.id ?? null,
+  });
+  if (error) throw resourceDeletionError(error, 'rokovi');
+  return (data ?? []) as ResourceDeletion[];
+}
+
+export async function fetchTaskDeletions(before?: Pick<ResourceDeletion, 'id' | 'created_at'>): Promise<ResourceDeletion[]> {
+  const { data, error } = await supabase.rpc('get_task_deletions', {
+    p_before_time: before?.created_at ?? null, p_before_id: before?.id ?? null,
+  });
+  if (error) throw resourceDeletionError(error, 'gradiliste_zadaci');
+  return (data ?? []) as ResourceDeletion[];
+}
+
+export async function fetchResourceDeletions(module: ResourceDeletionModule, before?: Pick<ResourceDeletion, 'id' | 'created_at'>): Promise<ResourceDeletion[]> {
+  if (module === 'ponude') return fetchPonudaDeletions(before);
+  if (module === 'fakture') return fetchInvoiceDeletions(before);
+  if (module === 'troskovi') return fetchCostDeletions(before);
+  if (module === 'radno_vrijeme') {
+    const { data, error } = await supabase.rpc('get_work_time_deletions', {
+      p_before_time: before?.created_at ?? null, p_before_id: before?.id ?? null,
+    });
+    if (error) throw workTimeDeletionError(error);
+    return (data ?? []) as ResourceDeletion[];
+  }
+  const { data, error } = await supabase.rpc('get_resource_deletions', {
+    p_module: module, p_before_time: before?.created_at ?? null, p_before_id: before?.id ?? null,
+  });
+  if (error) throw resourceDeletionError(error, module === 'gradilista' || module === 'radni_nalozi' ? module : undefined);
+  return (data ?? []) as ResourceDeletion[];
+}
+
+export async function restoreResourceDeletion(deletionId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_resource_deletion', { p_deletion_id: deletionId });
+  if (error) throw resourceDeletionError(error);
 }
 
 export async function fetchOpremaDokumenti(opremaId: string): Promise<OpremaDokument[]> {
@@ -1190,12 +1789,8 @@ export async function addOpremaDokument(
 }
 
 export async function deleteOpremaDokument(item: OpremaDokument) {
-  const { error } = await supabase.from('oprema_dokumenti').delete().eq('id', item.id);
+  const { error } = await supabase.from('oprema_dokumenti').delete().eq('id', item.id).select('id').single();
   if (error) throw error;
-  if (item.putanja) {
-    const { error: storageError } = await supabase.storage.from('nalozi-foto').remove([item.putanja]);
-    if (storageError) throw storageError;
-  }
 }
 
 export async function fetchRasporedi(): Promise<Raspored[]> {
@@ -1588,14 +2183,15 @@ export async function fetchTroskovi(): Promise<Trosak[]> {
 }
 
 export async function fetchKooperantAngazmani(kooperantId?: string): Promise<KooperantAngazman[]> {
-  let query = supabase
-    .from('kooperant_angazmani')
-    .select('*, gradilista:gradiliste_id ( id, naziv, status, datum_pocetka, datum_zavrsetka, ugovorena_vrijednost ), kooperanti:kooperant_id ( id, naziv )')
-    .order('datum_pocetka', { ascending: false });
-  if (kooperantId) query = query.eq('kooperant_id', kooperantId);
-  const { data, error } = await query;
-  if (error) throw error;
-  return (data ?? []) as KooperantAngazman[];
+  return fetchAllRows<KooperantAngazman>((from, to) => {
+    let query = supabase
+      .from('kooperant_angazmani')
+      .select('*, gradilista:gradiliste_id ( id, naziv, status, datum_pocetka, datum_zavrsetka, ugovorena_vrijednost ), kooperanti:kooperant_id ( id, naziv )')
+      .order('datum_pocetka', { ascending: false })
+      .order('id', { ascending: true });
+    if (kooperantId) query = query.eq('kooperant_id', kooperantId);
+    return query.range(from, to);
+  });
 }
 
 export async function saveKooperantAngazman(
@@ -1624,9 +2220,7 @@ export async function fetchKooperantDokumenti(kooperantId: string): Promise<Koop
 }
 
 export async function getKooperantDokumentUrl(path: string, expiresIn = 3600): Promise<string> {
-  const { data, error } = await supabase.storage.from('kooperant-dokumenti').createSignedUrl(path, expiresIn);
-  if (error) throw error;
-  return data.signedUrl;
+  return getSignedStorageUrl('kooperant-dokumenti', path, expiresIn);
 }
 
 export async function uploadKooperantDokument(
@@ -1658,6 +2252,61 @@ export async function uploadKooperantDokument(
   return data as KooperantDokument;
 }
 
+export async function saveKooperantRacun(input: {
+  kooperantId: string;
+  gradilisteId: string;
+  file: File;
+  brojRacuna: string | null;
+  datum: string;
+  placen: boolean;
+  placenoAt: string | null;
+  stavke: Array<{
+    opis: string;
+    iznos: number;
+    kolicina: number | null;
+    jedinica: string | null;
+    jedinicna_cijena: number;
+  }>;
+}): Promise<KooperantDokument> {
+  if (input.file.size > 20 * 1024 * 1024) throw new Error('Dokument ne smije biti veći od 20 MB.');
+  const companyId = requireCompany().id;
+  const safeName = input.file.name.replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(-120) || 'racun';
+  const path = `${companyId}/${input.kooperantId}/${crypto.randomUUID()}-${safeName}`;
+  const { error: uploadError } = await supabase.storage
+    .from('kooperant-dokumenti')
+    .upload(path, input.file, { contentType: input.file.type || undefined, upsert: false });
+  if (uploadError) throw uploadError;
+
+  const { data, error } = await supabase.rpc('create_kooperant_invoice', {
+    p_kooperant_id: input.kooperantId,
+    p_gradiliste_id: input.gradilisteId,
+    p_putanja: path,
+    p_naziv: input.file.name,
+    p_broj_racuna: input.brojRacuna,
+    p_datum: input.datum,
+    p_placen: input.placen,
+    p_placeno_at: input.placenoAt,
+    p_stavke: input.stavke,
+  });
+  if (error) {
+    const { data: existing, error: lookupError } = await supabase
+      .from('kooperant_dokumenti')
+      .select('*')
+      .eq('putanja', path)
+      .maybeSingle();
+    if (existing) return existing as KooperantDokument;
+    if (lookupError) {
+      throw new Error(`Status spremanja računa nije moguće potvrditi: ${error.message}. Datoteka je zadržana za sigurnu provjeru (${path}): ${lookupError.message}`);
+    }
+    const { error: cleanupError } = await supabase.storage.from('kooperant-dokumenti').remove([path]);
+    if (cleanupError) {
+      throw new Error(`Račun nije knjižen: ${error.message} Učitana datoteka ${path} nije mogla biti očišćena: ${cleanupError.message}`);
+    }
+    throw error;
+  }
+  return data as KooperantDokument;
+}
+
 export async function updateKooperantDokumentGradiliste(documentId: string, gradilisteId: string | null): Promise<KooperantDokument> {
   const { data, error } = await supabase
     .from('kooperant_dokumenti')
@@ -1670,6 +2319,10 @@ export async function updateKooperantDokumentGradiliste(documentId: string, grad
 }
 
 export async function deleteKooperantDokument(document: KooperantDokument): Promise<void> {
+  if (document.vrsta === 'racun') {
+    await deleteKooperantRacun(document.kooperant_id, document.id);
+    return;
+  }
   const { error: removeError } = await supabase.storage.from('kooperant-dokumenti').remove([document.putanja]);
   if (removeError) throw removeError;
   const { error } = await supabase.from('kooperant_dokumenti').delete().eq('id', document.id);
@@ -1730,12 +2383,11 @@ export async function updateKooperantRacunPaid(
 }
 
 export async function deleteKooperantRacun(kooperantId: string, invoiceId: string): Promise<void> {
-  const { error } = await supabase
-    .from('troskovi')
-    .delete()
-    .eq('kooperant_id', kooperantId)
-    .eq('kooperant_racun_id', invoiceId);
-  if (error) throw error;
+  const { error } = await supabase.rpc('delete_kooperant_racun_with_history', {
+    p_kooperant_id: kooperantId,
+    p_invoice_id: invoiceId,
+  });
+  if (error) throw cooperatorInvoiceRecoveryError(error);
 }
 
 export async function updateTrosak(id: string, t: Partial<Trosak>) {
@@ -1774,8 +2426,23 @@ export async function updateTrosak(id: string, t: Partial<Trosak>) {
 }
 
 export async function deleteTrosak(id: string) {
-  const { error } = await supabase.from('troskovi').delete().eq('id', id);
-  if (error) throw error;
+  const { error } = await supabase.rpc('delete_cost_with_history', { p_record_id: id });
+  if (error) throw costDeletionError(error);
+}
+
+function costDeletionError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110070000_troskovi_povrat_brisanja.sql. Primijenite je prije brisanja i vraćanja troškova.');
+  }
+  return error;
+}
+
+export async function fetchCostDeletions(before?: Pick<ResourceDeletion, 'id' | 'created_at'>): Promise<ResourceDeletion[]> {
+  const { data, error } = await supabase.rpc('get_cost_deletions', {
+    p_before_time: before?.created_at ?? null, p_before_id: before?.id ?? null,
+  });
+  if (error) throw costDeletionError(error);
+  return (data ?? []) as ResourceDeletion[];
 }
 
 // ===== RADNO VRIJEME =====
@@ -1879,7 +2546,97 @@ export async function updateRadnoVrijeme(id: string, rv: Partial<RadnoVrijeme>) 
 }
 
 export async function deleteRadnoVrijeme(id: string) {
-  const { error } = await supabase.from('radno_vrijeme').delete().eq('id', id);
+  const { error } = await supabase.rpc('delete_work_time_with_history', { p_record_id: id });
+  if (error) throw workTimeDeletionError(error);
+}
+
+function workTimeDeletionError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110040000_radno_vrijeme_povrat_brisanja.sql. Primijenite je prije obračuna, brisanja i vraćanja radnog vremena.');
+  }
+  return error;
+}
+
+export async function replaceWorkOrderSettlement(nalogId: string, entries: {
+  radnik_id: string; gradiliste_id: string | null; datum: string; sati: number;
+  napomena: string | null; nalog_id: string; nocni_sati?: number;
+}[], costs: {
+  gradiliste_id: string | null; kategorija: 'place' | 'oprema'; opis: string;
+  iznos: number; datum: string; nalog_id: string;
+}[]): Promise<void> {
+  const { error } = await supabase.rpc('replace_work_order_settlement', {
+    p_nalog_id: nalogId, p_entries: entries, p_costs: costs,
+  });
+  if (error && ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    throw new Error('Nedostaje migracija 20261110230000_nalozi_obracun_povijest_vracanje.sql. Primijenite je prije obračuna naloga.');
+  }
+  if (error) throw error;
+}
+
+export async function fetchWorkOrderSettlementDeletions(before?: Pick<ResourceDeletion, 'id' | 'created_at'>): Promise<ResourceDeletion[]> {
+  const { data, error } = await supabase.rpc('get_work_order_settlement_deletions', {
+    p_before_time: before?.created_at ?? null, p_before_id: before?.id ?? null,
+  });
+  if (error && ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    throw new Error('Nedostaje migracija 20261110230000_nalozi_obracun_povijest_vracanje.sql. Primijenite je prije pregleda povijesti obračuna naloga.');
+  }
+  if (error) throw error;
+  return (data ?? []) as ResourceDeletion[];
+}
+
+export async function restoreWorkOrderSettlement(deletionId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_work_order_settlement', { p_deletion_id: deletionId });
+  if (error && ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    throw new Error('Nedostaje migracija 20261110230000_nalozi_obracun_povijest_vracanje.sql. Primijenite je prije vraćanja obračuna naloga.');
+  }
+  if (error) throw error;
+}
+
+export async function restoreWorkOrderStatusChange(statusChangeId: string, nalogId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_work_order_status_change', {
+    p_status_change_id: statusChangeId,
+  });
+  if (error && ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    throw new Error('Nedostaje migracija 20261110360000_nalog_status_izvrsenje_povrat.sql. Primijenite je prije povrata statusa naloga.');
+  }
+  if (error) throw error;
+
+  try {
+    await retryNalogKilometrazaSync(nalogId);
+  } catch (reason) {
+    const message = reason instanceof Error ? ` ${reason.message}` : '';
+    throw new Error(`Status naloga je vraćen, ali dnevni kilometarski troškovi nisu sinkronizirani.${message}`);
+  }
+}
+
+export async function replaceDailyVehicleKmSettlement(date: string, costs: {
+  nalog_id: string; gradiliste_id: string | null; kategorija: 'put'; opis: string; iznos: number; datum: string;
+}[]): Promise<void> {
+  const { error } = await supabase.rpc('replace_daily_vehicle_km_settlement', {
+    p_datum: date, p_costs: costs,
+  });
+  if (error && ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    throw new Error('Nedostaje migracija 20261110240000_dnevni_kilometarski_troskovi_povrat.sql. Primijenite je prije dnevnog obračuna kilometara.');
+  }
+  if (error) throw error;
+}
+
+export async function fetchDailyVehicleKmSettlements(before?: Pick<ResourceDeletion, 'id' | 'created_at'>): Promise<ResourceDeletion[]> {
+  const { data, error } = await supabase.rpc('get_daily_vehicle_km_settlements', {
+    p_before_time: before?.created_at ?? null, p_before_id: before?.id ?? null,
+  });
+  if (error && ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    throw new Error('Nedostaje migracija 20261110240000_dnevni_kilometarski_troskovi_povrat.sql. Primijenite je prije pregleda povijesti kilometarskih obračuna.');
+  }
+  if (error) throw error;
+  return (data ?? []) as ResourceDeletion[];
+}
+
+export async function restoreDailyVehicleKmSettlement(deletionId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_daily_vehicle_km_settlement', { p_deletion_id: deletionId });
+  if (error && ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    throw new Error('Nedostaje migracija 20261110240000_dnevni_kilometarski_troskovi_povrat.sql. Primijenite je prije vraćanja kilometarskog obračuna.');
+  }
   if (error) throw error;
 }
 
@@ -2041,14 +2798,30 @@ export async function updateRadniNalog(
 
   const { data: existing, error: selError } = await supabase
     .from('radni_nalozi_radnici')
-    .select('radnik_id')
+    .select('radnik_id, mobile_started_at, mobile_finished_at')
     .eq('nalog_id', id);
   if (selError) throw selError;
   const existingIds = (existing ?? []).map((r: { radnik_id: string }) => r.radnik_id);
   const workersChanged = existingIds.length !== input.radnik_ids.length
     || existingIds.some((radnikId) => !input.radnik_ids.includes(radnikId));
-  if (currentOrder.status === 'zavrsen' && workersChanged) {
-    throw new Error('Djelatnike nije moguće mijenjati jer je ured već završno zaključio radni nalog.');
+  if (workersChanged && (
+    currentOrder.status === 'u_tijeku' || currentOrder.status === 'zavrsen' || currentOrder.status === 'otkazan'
+    || currentOrder.mobile_status === 'u_tijeku' || currentOrder.mobile_status === 'predan' || currentOrder.mobile_status === 'odobren'
+    || existing?.some((assignment: { mobile_started_at: string | null; mobile_finished_at: string | null }) =>
+      assignment.mobile_started_at !== null || assignment.mobile_finished_at !== null)
+  )) {
+    throw new Error('Ekipa se ne može mijenjati nakon početka rada ili završnog zaključavanja naloga.');
+  }
+  if (workersChanged) {
+    const { data: recordedHours, error: hoursError } = await supabase
+      .from('radno_vrijeme')
+      .select('id')
+      .eq('nalog_id', id)
+      .limit(1);
+    if (hoursError) throw hoursError;
+    if (recordedHours?.length) {
+      throw new Error('Ekipa se ne može mijenjati nakon evidentiranja sati na nalogu.');
+    }
   }
 
   if (input.zakljucen === true) {
@@ -2143,7 +2916,42 @@ export async function notifyLockedNalogWorkers(nalogId: string) {
 }
 
 // Završen nalog upisuje sate radnika i kilometre vozila u troškove gradilišta; inače se upisi uklanjaju.
-export async function syncNalogTroskovi(nalogId: string) {
+type WorkOrderStatusTransition = {
+  zavrsen: boolean;
+  bezPotvrdeDjelatnika: boolean;
+  bezIzvrsenja: boolean;
+  izvrsenje?: { km_pocetak: number | null; km_kraj: number | null; napomena: string | null };
+};
+
+async function saveNalogSettlement(
+  nalogId: string,
+  entries: Parameters<typeof replaceWorkOrderSettlement>[1],
+  costs: Parameters<typeof replaceWorkOrderSettlement>[2],
+  transition?: WorkOrderStatusTransition,
+) {
+  if (!transition) {
+    await replaceWorkOrderSettlement(nalogId, entries, costs);
+    return;
+  }
+  const { error } = await supabase.rpc('set_work_order_status_with_settlement', {
+    p_nalog_id: nalogId,
+    p_zavrsen: transition.zavrsen,
+    p_bez_potvrde_djelatnika: transition.bezPotvrdeDjelatnika,
+    p_bez_izvrsenja: transition.bezIzvrsenja,
+    p_spremi_izvrsenje: Boolean(transition.izvrsenje),
+    p_km_pocetak: transition.izvrsenje?.km_pocetak ?? null,
+    p_km_kraj: transition.izvrsenje?.km_kraj ?? null,
+    p_napomena: transition.izvrsenje?.napomena ?? null,
+    p_entries: entries,
+    p_costs: costs,
+  });
+  if (error?.code === 'PGRST202') {
+    throw new Error('Pokreni migraciju 20261110340000_nalog_rokovi_atomarna_sinkronizacija.sql u Supabase SQL editoru.');
+  }
+  if (error) throw error;
+}
+
+export async function syncNalogTroskovi(nalogId: string, transition?: WorkOrderStatusTransition): Promise<string> {
   const { data: nalog, error } = await supabase
     .from('radni_nalozi')
     .select('*')
@@ -2160,47 +2968,45 @@ export async function syncNalogTroskovi(nalogId: string) {
   const datum = dan?.[0]?.datum ?? nalog.rok ?? String(nalog.datum_kreiranja).slice(0, 10);
 
   const clean = async () => {
-    const { error: vrijemeError } = await supabase.from('radno_vrijeme').delete().eq('nalog_id', nalogId);
-    if (vrijemeError) throw vrijemeError;
-    const { error: troskoviError } = await supabase.from('troskovi').delete().eq('nalog_id', nalogId);
-    if (troskoviError) throw troskoviError;
+    await saveNalogSettlement(nalogId, [], [], transition);
   };
 
   // Nalozi s popisa "Ostalo" bilježe samo sate radnika, bez gradilišta i bez ikakvog troška.
   const bezTroska = Boolean(nalog.bez_troska);
-  const bezIzvrsenja = Boolean(nalog.bez_izvrsenja);
   const gradilisteId: string | null = bezTroska ? null : nalog.gradiliste_id;
 
-  if (nalog.status !== 'zavrsen') {
+  const status = transition ? (transition.zavrsen ? 'zavrsen' : 'u_tijeku') : nalog.status;
+  const bezIzvrsenja = transition ? transition.zavrsen && transition.bezIzvrsenja : Boolean(nalog.bez_izvrsenja);
+
+  if (status !== 'zavrsen') {
     await clean();
-    await syncKmGrupe(datum);
-    return;
+    if (!transition) await syncKmGrupe(datum);
+    return datum;
   }
 
-  // Zadaci označeni kao riješeni na nalogu ostaju riješeni i u pregledu gradilišta (uključujući rokove).
-  try {
-    const { data: gotovi } = await supabase.from('gradiliste_zadaci').select('*').eq('nalog_id', nalogId).eq('gotovo', true);
-    for (const z of (gotovi ?? []) as GradilisteZadatak[]) {
-      if (!z.gotovo_at) await supabase.from('gradiliste_zadaci').update({ gotovo_at: new Date().toISOString() }).eq('id', z.id);
-      await syncZadatakRok(z);
+  const syncCompletedTasks = async () => {
+    // Zadaci označeni kao riješeni ostaju riješeni i u pregledu gradilišta.
+    try {
+      const { data: gotovi } = await supabase.from('gradiliste_zadaci').select('*').eq('nalog_id', nalogId).eq('gotovo', true);
+      for (const z of (gotovi ?? []) as GradilisteZadatak[]) {
+        if (!z.gotovo_at) await supabase.from('gradiliste_zadaci').update({ gotovo_at: new Date().toISOString() }).eq('id', z.id);
+        await syncZadatakRok(z);
+      }
+    } catch {
+      // greška u rokovima ne smije spriječiti obračun troška
     }
-  } catch {
-    // greška u rokovima ne smije spriječiti obračun troška
+
+  };
+
+  if (!transition) await syncCompletedTasks();
+  if (transition && bezIzvrsenja) {
+    await clean();
+    return datum;
   }
-
-  // Nezavršeni zadaci vraćaju se gradilištu pa se pojavljuju na idućem nalogu.
-  const { error: taskTransferError } = await supabase
-    .from('gradiliste_zadaci')
-    .update({ nalog_id: null })
-    .eq('nalog_id', nalogId)
-    .eq('gotovo', false)
-    .not('gradiliste_id', 'is', null);
-  if (taskTransferError) throw taskTransferError;
-
-  await clean();
+  if (!transition) await clean();
   if (bezIzvrsenja) {
     await syncKmGrupe(datum);
-    return;
+    return datum;
   }
 
   const radniciSelect = (prava: boolean) =>
@@ -2279,13 +3085,10 @@ export async function syncNalogTroskovi(nalogId: string) {
       });
     }
   }
-  if (sati.length > 0) {
-    const { error: e } = await supabase.from('radno_vrijeme').insert(sati);
-    if (e) throw e;
-  }
   if (bezTroska) {
-    await syncKmGrupe(datum);
-    return;
+    await saveNalogSettlement(nalogId, sati, [], transition);
+    if (!transition) await syncKmGrupe(datum);
+    return datum;
   }
   const { data: strojevi, error: machineError } = await supabase
     .from('radni_nalozi_stavke')
@@ -2306,12 +3109,9 @@ export async function syncNalogTroskovi(nalogId: string) {
       nalog_id: nalogId,
     });
   }
-  if (dodatni.length > 0) {
-    const { error: e } = await supabase.from('troskovi').insert(dodatni);
-    if (e) throw e;
-  }
-
-  await syncKmGrupe(datum);
+  await saveNalogSettlement(nalogId, sati, dodatni, transition);
+  if (!transition) await syncKmGrupe(datum);
+  return datum;
 }
 
 // Ponovno obračunava sve završene naloge i sva vozila raspoređena na taj dan.
@@ -2334,35 +3134,28 @@ async function syncKmGrupe(datum: string) {
   for (const [voziloId, orders] of vezaPoVozilu) {
     summary.set(voziloId, { linkedOrders: orders.size, eligibleOrders: 0, createdCosts: 0 });
   }
-  if (nalogIds.length === 0) return summary;
-
-  const { data: nalozi, error: naloziError } = await supabase
-    .from('radni_nalozi')
-    .select('id, broj, gradiliste_id, km_pocetak, km_kraj, bez_troska, bez_izvrsenja')
-    .in('id', nalogIds)
-    .eq('status', 'zavrsen')
-    .not('km_pocetak', 'is', null)
-    .not('km_kraj', 'is', null);
-  if (naloziError) throw naloziError;
-
-  const { error: deleteError } = await supabase
-    .from('troskovi')
-    .delete()
-    .in('nalog_id', nalogIds)
-    .eq('datum', datum)
-    .eq('kategorija', 'put')
-    .like('opis', 'Kilometri:%');
-  if (deleteError) throw deleteError;
-
-  const lista = (nalozi ?? []).filter((nalog) => !nalog.bez_troska && !nalog.bez_izvrsenja);
-  if (lista.length === 0) return summary;
+  const nalozi = nalogIds.length === 0 ? [] : await (async () => {
+    const { data, error } = await supabase
+      .from('radni_nalozi')
+      .select('id, broj, gradiliste_id, km_pocetak, km_kraj, bez_troska, bez_izvrsenja')
+      .in('id', nalogIds)
+      .eq('status', 'zavrsen')
+      .not('km_pocetak', 'is', null)
+      .not('km_kraj', 'is', null);
+    if (error) throw error;
+    return data ?? [];
+  })();
+  const lista = nalozi.filter((nalog) => !nalog.bez_troska && !nalog.bez_izvrsenja);
 
   const voziloIds = [...vezaPoVozilu.keys()];
-  const { data: vozila, error: vozilaError } = await supabase
-    .from('vozila')
-    .select('id, marka, model, cijena_km')
-    .in('id', voziloIds);
-  if (vozilaError) throw vozilaError;
+  const vozila = voziloIds.length === 0 ? [] : await (async () => {
+    const { data, error } = await supabase
+      .from('vozila')
+      .select('id, marka, model, cijena_km')
+      .in('id', voziloIds);
+    if (error) throw error;
+    return data ?? [];
+  })();
   const nalogPoId = new Map(lista.map((nalog) => [nalog.id, nalog]));
   for (const [voziloId, ids] of vezaPoVozilu) {
     const vehicleSummary = summary.get(voziloId);
@@ -2378,7 +3171,7 @@ async function syncKmGrupe(datum: string) {
       km_pocetak: Number(nalog.km_pocetak),
       km_kraj: Number(nalog.km_kraj),
     })),
-    vozila ?? [],
+    vozila,
   ).map((row) => ({
     nalog_id: row.nalog_id,
     gradiliste_id: row.gradiliste_id,
@@ -2391,10 +3184,7 @@ async function syncKmGrupe(datum: string) {
     const vehicleSummary = summary.get(voziloId);
     if (vehicleSummary) vehicleSummary.createdCosts = rows.filter((row) => ids.has(row.nalog_id)).length;
   }
-  if (rows.length > 0) {
-    const { error } = await supabase.from('troskovi').insert(rows);
-    if (error) throw error;
-  }
+  await replaceDailyVehicleKmSettlement(datum, rows);
   return summary;
 }
 
@@ -2427,20 +3217,6 @@ export async function prenesiOtvoreneStavke(nalogId: string, gradilisteId: strin
     .update({ preneseno: true })
     .in('id', stavke.map((s: { id: string }) => s.id));
   if (markTransferredError) throw markTransferredError;
-}
-
-async function vratiPrenesenoStavke(nalogId: string) {
-  // Neriješene stavke koje nisu preneseno s drugog naloga vraćaju se gradilištu umjesto da se brišu s nalogom.
-  await supabase
-    .from('radni_nalozi_stavke')
-    .update({ nalog_id: null })
-    .eq('nalog_id', nalogId)
-    .eq('gotovo', false)
-    .is('izvor_id', null)
-    .not('gradiliste_id', 'is', null);
-  const { data } = await supabase.from('radni_nalozi_stavke').select('izvor_id').eq('nalog_id', nalogId).not('izvor_id', 'is', null);
-  const izvori = (data ?? []).map((s: { izvor_id: string }) => s.izvor_id);
-  if (izvori.length > 0) await supabase.from('radni_nalozi_stavke').update({ preneseno: false }).in('id', izvori);
 }
 
 export async function fetchNalogIzvrsenje(nalogId: string) {
@@ -2524,7 +3300,15 @@ export async function setNalogZavrsen(
   zavrsen: boolean,
   bezPotvrdeDjelatnika = false,
   bezIzvrsenja = false,
+  izvrsenje?: { km_pocetak: number | null; km_kraj: number | null; napomena: string | null },
 ) {
+  if (izvrsenje && (
+    (izvrsenje.km_pocetak !== null && (!Number.isFinite(izvrsenje.km_pocetak) || izvrsenje.km_pocetak < 0))
+    || (izvrsenje.km_kraj !== null && (!Number.isFinite(izvrsenje.km_kraj) || izvrsenje.km_kraj < 0))
+    || (izvrsenje.km_pocetak !== null && izvrsenje.km_kraj !== null && izvrsenje.km_kraj < izvrsenje.km_pocetak)
+  )) {
+    throw new Error('Kilometraža naloga nije ispravna.');
+  }
   const { data: nalog, error: fetchError } = await supabase
     .from('radni_nalozi')
     .select('status, mobile_status, km_kraj')
@@ -2541,35 +3325,60 @@ export async function setNalogZavrsen(
   if (zavrsen && !bezPotvrdeDjelatnika && !bezIzvrsenja && (nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku')) {
     throw new Error('Djelatnici još rade na nalogu. Zaključivanje je moguće tek nakon što poslovođa preda završni izvještaj.');
   }
-  const mobileStatus = nalog.mobile_status === 'predan' || nalog.mobile_status === 'odobren'
-    ? (zavrsen ? 'odobren' : 'predan')
-    : bezPotvrdeDjelatnika && zavrsen
-      ? 'zakljucen_bez_potvrde'
-      : !zavrsen && nalog.mobile_status === 'zakljucen_bez_potvrde'
-        ? 'u_tijeku'
-        : nalog.mobile_status;
-  const { error } = await supabase
-    .from('radni_nalozi')
-    .update({
-      status: zavrsen ? 'zavrsen' : 'u_tijeku',
-      mobile_status: zavrsen && bezIzvrsenja ? 'nije_poslan' : mobileStatus,
-      ...(zavrsen && bezIzvrsenja ? { zakljucen_at: null } : {}),
-      bez_izvrsenja: zavrsen && bezIzvrsenja,
-    })
-    .eq('id', nalogId);
-  if (error) throw error;
-  if (zavrsen && !bezIzvrsenja && nalog.km_kraj !== null) {
-    const { data: assignments, error: assignmentsError } = await supabase
-      .from('dnevni_raspored_gradilista')
-      .select('vozilo_id')
-      .eq('nalog_id', nalogId)
-      .not('vozilo_id', 'is', null)
-      .limit(1);
-    if (assignmentsError) throw assignmentsError;
-    const voziloId = assignments?.[0]?.vozilo_id;
-    if (voziloId) await syncZadnjuKilometrazuVozila(voziloId);
+  const datum = await syncNalogTroskovi(nalogId, {
+    zavrsen,
+    bezPotvrdeDjelatnika,
+    bezIzvrsenja,
+    izvrsenje,
+  });
+  try {
+    await syncKmGrupe(datum);
+  } catch (reason) {
+    const message = reason instanceof Error ? ` ${reason.message}` : '';
+    throw new Error(
+      `Nalog je ${zavrsen ? 'zaključen' : 'ponovno otvoren'}, ali dnevni kilometarski troškovi nisu sinkronizirani.${message}`,
+    );
   }
-  await syncNalogTroskovi(nalogId);
+  if (zavrsen && !bezIzvrsenja && nalog.km_kraj !== null) {
+    try {
+      const { data: assignments, error: assignmentsError } = await supabase
+        .from('dnevni_raspored_gradilista')
+        .select('vozilo_id')
+        .eq('nalog_id', nalogId)
+        .not('vozilo_id', 'is', null)
+        .limit(1);
+      if (assignmentsError) throw assignmentsError;
+      const voziloId = assignments?.[0]?.vozilo_id;
+      if (voziloId) {
+        await syncZadnjuKilometrazuVozila(voziloId);
+      }
+    } catch (reason) {
+      const message = reason instanceof Error ? ` ${reason.message}` : '';
+      throw new Error(`Nalog je zaključen, ali kilometraža vozila nije sinkronizirana.${message}`);
+    }
+  }
+}
+
+export async function retryNalogKilometrazaSync(nalogId: string): Promise<void> {
+  const { data: nalog, error: nalogError } = await supabase
+    .from('radni_nalozi')
+    .select('status, km_kraj, bez_izvrsenja, rok, datum_kreiranja')
+    .eq('id', nalogId)
+    .single();
+  if (nalogError) throw nalogError;
+
+  const { data: assignments, error: assignmentsError } = await supabase
+    .from('dnevni_raspored_gradilista')
+    .select('datum, vozilo_id')
+    .eq('nalog_id', nalogId)
+    .order('datum', { ascending: true });
+  if (assignmentsError) throw assignmentsError;
+  const datum = assignments?.[0]?.datum ?? nalog.rok ?? String(nalog.datum_kreiranja).slice(0, 10);
+
+  await syncKmGrupe(datum);
+  if (nalog.status !== 'zavrsen' || nalog.bez_izvrsenja || nalog.km_kraj === null) return;
+  const voziloId = assignments?.find((assignment) => assignment.vozilo_id)?.vozilo_id;
+  if (voziloId) await syncZadnjuKilometrazuVozila(voziloId);
 }
 
 export interface MobileRadniNalog {
@@ -2794,15 +3603,22 @@ export async function submitMobileNalog(nalogId: string) {
 }
 
 export interface MobileWorkOrderAuditEntry {
-  id: number;
+  id: string;
   actor_name: string;
   action: string;
   details: Record<string, unknown>;
   created_at: string;
 }
 
-export async function fetchMobileWorkOrderAudit(nalogId: string): Promise<MobileWorkOrderAuditEntry[]> {
-  const { data, error } = await supabase.rpc('get_mobile_work_order_audit', { p_nalog_id: nalogId });
+export async function fetchMobileWorkOrderAudit(nalogId: string, before?: Pick<MobileWorkOrderAuditEntry, 'id' | 'created_at'>): Promise<MobileWorkOrderAuditEntry[]> {
+  const { data, error } = await supabase.rpc('get_mobile_work_order_audit', {
+    p_nalog_id: nalogId,
+    p_before_created_at: before?.created_at ?? null,
+    p_before_id: before?.id ?? null,
+  });
+  if (error && ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    throw new Error('Nedostaje migracija 20261110300000_nalog_povijest_aktivnosti_paginacija.sql. Primijenite je za potpunu povijest aktivnosti naloga.');
+  }
   if (error) throw error;
   return (data ?? []) as MobileWorkOrderAuditEntry[];
 }
@@ -2944,26 +3760,6 @@ async function spremiNaGradiliste(nalogId: string, putanja: string, naziv: strin
   }
 }
 
-async function datotekaJosKoristena(putanja: string) {
-  const [g, d, f] = await Promise.all([
-    supabase.from('gradiliste_dokumenti').select('id', { count: 'exact', head: true }).or(`putanja.eq.${putanja},thumbnail_path.eq.${putanja}`),
-    supabase.from('radni_nalozi_dokumenti').select('id', { count: 'exact', head: true }).eq('putanja', putanja),
-    supabase.from('radni_nalozi_foto').select('id', { count: 'exact', head: true }).or(`putanja.eq.${putanja},thumbnail_path.eq.${putanja}`),
-  ]);
-  if (g.error) throw g.error;
-  if (d.error) throw d.error;
-  if (f.error) throw f.error;
-  return (g.count ?? 0) + (d.count ?? 0) + (f.count ?? 0) > 0;
-}
-
-async function removeUnusedPhotoFiles(paths: (string | null | undefined)[]) {
-  for (const path of new Set(paths.filter((item): item is string => Boolean(item)))) {
-    if (await datotekaJosKoristena(path)) continue;
-    const { error } = await supabase.storage.from('nalozi-foto').remove([path]);
-    if (error) throw error;
-  }
-}
-
 async function removeUploadedPhotoFiles(paths: (string | null | undefined)[]) {
   const files = [...new Set(paths.filter((item): item is string => Boolean(item)))];
   if (files.length === 0) return;
@@ -3018,7 +3814,6 @@ export async function uploadNalogFoto(nalogId: string, file: File, copyToGradili
 export async function deleteNalogFoto(foto: NalogFoto) {
   const { error } = await supabase.from('radni_nalozi_foto').delete().eq('id', foto.id);
   if (error) throw error;
-  await removeUnusedPhotoFiles([foto.putanja, foto.thumbnail_path]);
 }
 
 export type StavkaTip = 'materijal' | 'alat' | 'stroj';
@@ -3114,7 +3909,6 @@ export async function uploadNalogDokument(nalogId: string, file: File): Promise<
 export async function deleteNalogDokument(d: NalogDokument) {
   const { error } = await supabase.from('radni_nalozi_dokumenti').delete().eq('id', d.id);
   if (error) throw error;
-  if (!(await datotekaJosKoristena(d.putanja))) await supabase.storage.from('nalozi-foto').remove([d.putanja]);
 }
 
 export async function fetchNalogGradilisteDokumentIds(nalogId: string): Promise<string[]> {
@@ -3275,7 +4069,6 @@ export async function uploadGradilisteDokument(gradilisteId: string, file: File,
 export async function deleteGradilisteDokument(d: GradilisteDokument) {
   const { error } = await supabase.from('gradiliste_dokumenti').delete().eq('id', d.id);
   if (error) throw error;
-  await removeUnusedPhotoFiles([d.putanja, d.thumbnail_path]);
 }
 
 export async function fetchZakljuceniNalozi(ids: string[]): Promise<string[]> {
@@ -3286,13 +4079,7 @@ export async function fetchZakljuceniNalozi(ids: string[]): Promise<string[]> {
 }
 
 export async function discardRasporedNalog(nalogId: string) {
-  await vratiPrenesenoStavke(nalogId);
-  const { error } = await supabase.from('dnevni_raspored_gradilista').update({ nalog_id: null }).eq('nalog_id', nalogId);
-  if (error) throw new Error(`Brisanje veze: ${error.message}`);
-  const { error: linkError } = await supabase.from('radni_nalozi_radnici').delete().eq('nalog_id', nalogId);
-  if (linkError) throw new Error(`Brisanje radnika naloga: ${linkError.message}`);
-  const { error: delError } = await supabase.from('radni_nalozi').delete().eq('id', nalogId);
-  if (delError) throw new Error(`Brisanje naloga: ${delError.message}`);
+  await deleteResourceWithHistory('radni_nalozi', nalogId);
 }
 
 export async function createNalogFromRaspored(
@@ -3313,7 +4100,11 @@ export async function createNalogFromRaspored(
   const nalog = await createRadniNalog(input);
   const { error } = await supabase.from('dnevni_raspored_gradilista').update({ nalog_id: nalog.id }).eq('id', assignmentId);
   if (error) {
-    await supabase.from('radni_nalozi').delete().eq('id', nalog.id);
+    try {
+      await deleteResourceWithHistory('radni_nalozi', nalog.id);
+    } catch (cleanupReason) {
+      throw new Error(`Povezivanje naloga nije uspjelo: ${apiErrorMessage(error)}. Nalog ${nalog.broj} (${nalog.id}) ostaje u Radnim nalozima jer brisanje nije uspjelo: ${apiErrorMessage(cleanupReason)}`);
+    }
     if (String(error.message ?? '').includes('nalog_id')) {
       throw new Error('Pokreni migraciju 20261015160000_raspored_nalog_veza.sql u Supabase SQL editoru.');
     }
@@ -3323,10 +4114,7 @@ export async function createNalogFromRaspored(
 }
 
 export async function deleteRadniNalog(id: string) {
-  await vratiPrenesenoStavke(id);
-  await supabase.from('radni_nalozi_radnici').delete().eq('nalog_id', id);
-  const { error } = await supabase.from('radni_nalozi').delete().eq('id', id);
-  if (error) throw error;
+  await deleteResourceWithHistory('radni_nalozi', id);
 }
 
 // ===== REKAPITULACIJA =====
@@ -3424,27 +4212,8 @@ const dodatniMigracijaError = (error: { message?: string }) =>
     : error;
 
 async function syncZadatakRok(z: GradilisteZadatak) {
-  if (!z.rok || !z.gradiliste_id) {
-    const { error } = await supabase.from('rokovi').delete().eq('zadatak_id', z.id);
-    if (error) throw error;
-    return;
-  }
-  const payload = {
-    naziv: z.naziv,
-    datum: z.rok,
-    datum_pocetka: z.rok,
-    datum_zavrsetka: z.rok,
-    kooperant_id: z.kooperant_id ?? null,
-    status: z.gotovo ? 'zavrsen' : 'otvoren',
-  };
-  const { data, error } = await supabase.from('rokovi').update(payload).eq('zadatak_id', z.id).select('id');
-  if (error) throw error;
-  if ((data ?? []).length === 0) {
-    const { error: insertError } = await supabase
-      .from('rokovi')
-      .insert({ ...payload, gradiliste_id: z.gradiliste_id, zadatak_id: z.id, opis: z.vrsta === 'dodatni' ? 'Dodatni rad' : 'Radni zadatak' });
-    if (insertError) throw insertError;
-  }
+  const { error } = await supabase.rpc('sync_task_deadline', { p_task_id: z.id });
+  if (error) throw resourceDeletionError(error, 'rokovi');
 }
 
 export async function createGradilisteZadatak(
@@ -3460,20 +4229,17 @@ export async function createGradilisteZadatak(
     .select()
     .single();
   if (error) throw dodatniMigracijaError(error);
-  await syncZadatakRok(data as GradilisteZadatak);
   return data as GradilisteZadatak;
 }
 
 export async function updateGradilisteZadatak(id: string, u: { naziv?: string; gotovo?: boolean; rok?: string | null; kooperant_id?: string | null }) {
   const payload = u.gotovo === undefined ? u : { ...u, gotovo_at: u.gotovo ? new Date().toISOString() : null };
-  const { data, error } = await supabase.from('gradiliste_zadaci').update(payload).eq('id', id).select().single();
+  const { error } = await supabase.from('gradiliste_zadaci').update(payload).eq('id', id).select().single();
   if (error) throw error;
-  await syncZadatakRok(data as GradilisteZadatak);
 }
 
 export async function deleteGradilisteZadatak(id: string) {
-  const { error } = await supabase.from('gradiliste_zadaci').delete().eq('id', id);
-  if (error) throw error;
+  await deleteResourceWithHistory('gradiliste_zadaci', id);
 }
 
 // ===== ROKOVI =====
@@ -3524,8 +4290,7 @@ export async function updateRok(id: string, r: Partial<Rok>) {
 }
 
 export async function deleteRok(id: string) {
-  const { error } = await supabase.from('rokovi').delete().eq('id', id);
-  if (error) throw error;
+  await deleteResourceWithHistory('rokovi', id);
 }
 
 // ===== FAKTURE =====
@@ -3576,8 +4341,23 @@ export async function updateFaktura(id: string, f: Partial<Faktura>) {
 }
 
 export async function deleteFaktura(id: string) {
-  const { error } = await supabase.from('fakture').delete().eq('id', id);
-  if (error) throw error;
+  const { error } = await supabase.rpc('delete_invoice_with_history', { p_record_id: id });
+  if (error) throw invoiceDeletionError(error);
+}
+
+function invoiceDeletionError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110090000_fakture_povrat_brisanja.sql. Primijenite je prije brisanja i vraćanja faktura.');
+  }
+  return error;
+}
+
+export async function fetchInvoiceDeletions(before?: Pick<ResourceDeletion, 'id' | 'created_at'>): Promise<ResourceDeletion[]> {
+  const { data, error } = await supabase.rpc('get_invoice_deletions', {
+    p_before_time: before?.created_at ?? null, p_before_id: before?.id ?? null,
+  });
+  if (error) throw invoiceDeletionError(error);
+  return (data ?? []) as ResourceDeletion[];
 }
 
 // ===== UGOVORENI RADOVI =====
@@ -3617,8 +4397,23 @@ export async function updateUgovoreniRad(id: string, u: Partial<UgovoreniRad>) {
 }
 
 export async function deleteUgovoreniRad(id: string) {
-  const { error } = await supabase.from('ugovoreni_radovi').delete().eq('id', id);
-  if (error) throw error;
+  const { error } = await supabase.rpc('delete_contracted_work_with_history', { p_record_id: id });
+  if (error) throw contractedWorkDeletionError(error);
+}
+
+function contractedWorkDeletionError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110110000_ugovoreni_radovi_povrat_brisanja.sql. Primijenite je prije brisanja i vraćanja ugovorenih/VTR radova.');
+  }
+  return error;
+}
+
+export async function fetchContractedWorkDeletions(before?: Pick<ResourceDeletion, 'id' | 'created_at'>): Promise<ResourceDeletion[]> {
+  const { data, error } = await supabase.rpc('get_contracted_work_deletions', {
+    p_before_time: before?.created_at ?? null, p_before_id: before?.id ?? null,
+  });
+  if (error) throw contractedWorkDeletionError(error);
+  return (data ?? []) as ResourceDeletion[];
 }
 
 export async function uploadUgovoreniRadDokument(gradilisteId: string, file: File) {

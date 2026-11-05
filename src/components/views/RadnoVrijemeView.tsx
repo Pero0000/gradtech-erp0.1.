@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useState, useEffect } from 'react';
 import { Clock, Plus, Pencil, Trash2, Calendar } from 'lucide-react';
 import type { RadnoVrijeme, Gradiliste, Radnik } from '@/types';
@@ -16,6 +17,8 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useAuth } from '@/auth/useAuth';
 import { ObracunSatiPanel } from './ObracunSatiPanel';
+import { ResourceDeletionHistory } from '@/components/views/ResourceDeletionHistory';
+import { WorkTimeChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
 
 const emptyForm = {
   radnik_id: '',
@@ -41,9 +44,11 @@ export function RadnoVrijemeView() {
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [filterDatum, setFilterDatum] = useState('');
+  const [deletionVersion, setDeletionVersion] = useState(0);
+  const [historyRestoring, setHistoryRestoring] = useState(false);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (rethrow = false) => {
+    if (!rethrow) setLoading(true);
     setError(null);
     try {
       const [rv, g, r] = await Promise.all([fetchRadnoVrijeme(), fetchGradilista(), fetchRadnici()]);
@@ -52,6 +57,7 @@ export function RadnoVrijemeView() {
       setRadnici(r);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
+      if (rethrow) throw e;
     } finally {
       setLoading(false);
     }
@@ -62,12 +68,14 @@ export function RadnoVrijemeView() {
   }, []);
 
   const openCreate = () => {
+    if (saving || historyRestoring) return;
     setEditing(null);
     setForm(emptyForm);
     setModalOpen(true);
   };
 
   const openEdit = (rv: RadnoVrijeme) => {
+    if (saving || historyRestoring) return;
     setEditing(rv);
     setForm({
       radnik_id: rv.radnik_id,
@@ -81,6 +89,7 @@ export function RadnoVrijemeView() {
   };
 
   const save = async () => {
+    if (saving || historyRestoring) return;
     if (!form.radnik_id || !form.sati) return;
     setSaving(true);
     try {
@@ -107,13 +116,33 @@ export function RadnoVrijemeView() {
   };
 
   const handleDelete = async () => {
-    if (!deleteId) return;
+    if (!deleteId || saving || historyRestoring) return;
+    setSaving(true);
     try {
       await deleteRadnoVrijeme(deleteId);
+      setDeleteId(null);
+      setDeletionVersion((value) => value + 1);
+      if (editing?.id === deleteId) {
+        setModalOpen(false);
+        setEditing(null);
+        setForm(emptyForm);
+      }
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri brisanju');
+      setError(e && typeof e === 'object' && 'message' in e ? String(e.message) : 'Greška pri brisanju');
+    } finally {
+      setSaving(false);
     }
+  };
+
+  const refreshAfterRestore = async () => {
+    setModalOpen(false);
+    setEditing(null);
+    setForm(emptyForm);
+    setDeleteId(null);
+    setFilterDatum('');
+    setDeletionVersion((value) => value + 1);
+    await load(true);
   };
 
   const filtered = filterDatum ? items.filter((rv) => rv.datum === filterDatum) : items;
@@ -157,6 +186,9 @@ export function RadnoVrijemeView() {
 
   return (
     <div>
+      <ResourceDeletionHistory module="radno_vrijeme" refreshVersion={deletionVersion} disabled={saving} onRestoringChange={setHistoryRestoring}
+        workerNames={Object.fromEntries(radnici.map((r) => [r.id, `${r.ime} ${r.prezime}`]))} onRestore={refreshAfterRestore} />
+      <fieldset disabled={historyRestoring || saving} className="min-w-0">
       <div className="flex min-w-0 flex-col items-stretch justify-between gap-3 mb-6 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Radno vrijeme</h1>
@@ -183,7 +215,7 @@ export function RadnoVrijemeView() {
       <div className="mb-6 flex min-w-0 flex-col items-stretch gap-4 xl:flex-row xl:flex-wrap xl:items-center">
         <div className="flex items-center gap-2">
           <Calendar className="h-5 w-5 text-slate-400" />
-          <input
+          <input lang="hr-HR"
             type="date"
             value={filterDatum}
             onChange={(e) => setFilterDatum(e.target.value)}
@@ -237,7 +269,7 @@ export function RadnoVrijemeView() {
               {filtered.map((rv) => (
                 <tr key={rv.id} className="group hover:bg-slate-50 transition-colors">
                   <td className="px-5 py-3.5 text-sm text-slate-600">
-                    {new Date(rv.datum + 'T00:00:00').toLocaleDateString('hr-HR')}
+                    {formatHrDate(new Date(rv.datum + 'T00:00:00'))}
                   </td>
                   <td className="px-5 py-3.5 text-sm font-medium text-slate-900">
                     {rv.radnici ? `${rv.radnici.ime} ${rv.radnici.prezime}` : '—'}
@@ -280,11 +312,12 @@ export function RadnoVrijemeView() {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { if (!saving && !historyRestoring) setModalOpen(false); }}
         title={editing ? 'Uredi radno vrijeme' : 'Zabilježi radno vrijeme'}
         footer={
           <>
             <button
+              disabled={saving || historyRestoring}
               onClick={() => setModalOpen(false)}
               className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
             >
@@ -292,7 +325,7 @@ export function RadnoVrijemeView() {
             </button>
             <button
               onClick={save}
-              disabled={saving || !form.radnik_id || !form.sati}
+              disabled={saving || historyRestoring || !form.radnik_id || !form.sati}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50 transition-colors"
             >
               {saving ? 'Spremanje…' : 'Spremi'}
@@ -300,7 +333,7 @@ export function RadnoVrijemeView() {
           </>
         }
       >
-        <div className="space-y-4">
+        <fieldset disabled={saving || historyRestoring} className="space-y-4">
           <Field label="Radnik *">
             <Select
               value={form.radnik_id}
@@ -364,16 +397,21 @@ export function RadnoVrijemeView() {
               placeholder="Prekovremeno, posebni zadaci…"
             />
           </Field>
-        </div>
+        </fieldset>
+        {editing && <div className="mt-4">
+          <WorkTimeChangeHistoryPanel recordId={editing.id} refreshVersion={deletionVersion}
+            disabled={saving} onRestoringChange={setHistoryRestoring} onRestore={refreshAfterRestore} />
+        </div>}
       </Modal>
 
       <ConfirmDialog
         open={deleteId !== null}
-        onClose={() => setDeleteId(null)}
+        onClose={() => { if (!saving && !historyRestoring) setDeleteId(null); }}
         onConfirm={handleDelete}
         title="Izbrisati zapis?"
-        message="Ova radnja je nepovratna."
+        message="Zapis se može vratiti iz povijesti pojedinačnih brisanja 30 dana. Ako je vezan uz nalog, naknadna promjena naloga, ekipe ili sati blokirat će povrat kako se ne bi udvostručili obračunati sati."
       />
+      </fieldset>
     </div>
   );
 }

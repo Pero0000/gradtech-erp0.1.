@@ -47,13 +47,15 @@ export function relativeLabel(days: number | null) {
   return `za ${days} d`;
 }
 
-const radnikTip = (vrsta: RadnikDokument['vrsta']): ObavijestTip => ({
-  lijecnicki: 'radnik_lijecnicki',
-  zastita_na_radu: 'radnik_zastita',
-  osposobljavanje: 'radnik_osposobljavanje',
-  atest: 'radnik_atest',
-  ostalo: 'radnik_ostalo',
-} as const)[vrsta];
+const radnikTip = (vrsta: RadnikDokument['vrsta']): ObavijestTip => {
+  switch (vrsta) {
+    case 'lijecnicki': return 'radnik_lijecnicki';
+    case 'zastita_na_radu': return 'radnik_zastita';
+    case 'osposobljavanje': return 'radnik_osposobljavanje';
+    case 'atest': return 'radnik_atest';
+    default: return 'radnik_ostalo';
+  }
+};
 
 const voziloTip = (vrsta: VoziloDokument['vrsta']): ObavijestTip | null => {
   switch (vrsta) {
@@ -128,7 +130,7 @@ export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
   };
 
   const radnikById = new Map(src.radnici.map((r) => [r.id, r]));
-  latest(src.radnikDok, (d) => `${d.radnik_id}|${radnikTip(d.vrsta)}`).forEach((d) => {
+  latest(src.radnikDok, (d) => `${d.radnik_id}|${d.vrsta}`).forEach((d) => {
     const r = radnikById.get(d.radnik_id);
     if (!r || r.status === 'neaktivan') return;
     push(radnikTip(d.vrsta), `rd-${d.id}`, `${r.ime} ${r.prezime}`, d.naziv, d.datum_do as string, 'radnici', undefined, d.radnik_id);

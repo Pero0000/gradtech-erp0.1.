@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { formatHrDate } from '@/lib/localization';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Wrench, Plus, Trash2, Paperclip, Pencil, X } from 'lucide-react';
 import type { VoziloDokument, VoziloDokumentVrsta } from '@/types';
 import { addVoziloDokument, deleteVoziloDokument, fetchVoziloDokumenti, updateVoziloDokument } from '@/lib/api';
 import { todayISO } from '@/lib/rokovi';
 import { TextInput, Select, Textarea } from '@/components/ui/Field';
+import { DocumentChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
+import { useAuth } from '@/auth/useAuth';
+import { useRequestScope } from '@/lib/useRequestScope';
 
 const vrste: Record<VoziloDokumentVrsta, string> = {
   registracija: 'Registracija',
@@ -17,7 +21,7 @@ const vrste: Record<VoziloDokumentVrsta, string> = {
 };
 
 const errText = (e: unknown) => (e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : 'Greška');
-const date = (v: string | null) => (v ? new Date(`${v}T00:00:00`).toLocaleDateString('hr-HR') : '—');
+const date = (v: string | null) => (v ? formatHrDate(new Date(`${v}T00:00:00`)) : '—');
 
 function status(d: VoziloDokument) {
   if (!d.datum_do || d.vrsta === 'servis') return null;
@@ -28,13 +32,18 @@ function status(d: VoziloDokument) {
 }
 
 export function VoziloDokumenti({ voziloId, onChange }: { voziloId: string; onChange?: () => void }) {
+  const { canAccess } = useAuth();
+  const canEdit = canAccess('vozila', 'edit');
   const [items, setItems] = useState<VoziloDokument[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [historyRestoring, setHistoryRestoring] = useState(false);
+  const [historyVersion, setHistoryVersion] = useState(0);
   const [editing, setEditing] = useState<VoziloDokument | null>(null);
   const [form, setForm] = useState({ vrsta: 'servis' as VoziloDokumentVrsta, naziv: '', datum_od: '', datum_do: '', iznos: '', km: '', serviser: '', dijelovi: '', napomena: '' });
   const [file, setFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const requestScope = useRequestScope();
   const isServis = form.vrsta === 'servis';
 
   const resetForm = () => {
@@ -61,20 +70,25 @@ export function VoziloDokumenti({ voziloId, onChange }: { voziloId: string; onCh
     if (fileRef.current) fileRef.current.value = '';
   };
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const isCurrent = requestScope.start();
+    if (!isCurrent()) return;
+    setError(null);
     try {
-      setItems(await fetchVoziloDokumenti(voziloId));
+      const documents = await fetchVoziloDokumenti(voziloId);
+      if (isCurrent()) setItems(documents);
     } catch (e) {
-      setError(`${errText(e)} — pokreni migraciju 20261015320000_vozila_dokumenti_servis.sql.`);
+      if (isCurrent()) setError(errText(e));
     }
-  };
+  }, [voziloId, requestScope]);
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voziloId]);
+    return () => requestScope.invalidate();
+  }, [load, requestScope]);
 
   const add = async () => {
+    if (!canEdit || saving || historyRestoring) return;
     setSaving(true);
     setError(null);
     try {
@@ -94,6 +108,7 @@ export function VoziloDokumenti({ voziloId, onChange }: { voziloId: string; onCh
       resetForm();
       await load();
       onChange?.();
+      setHistoryVersion((value) => value + 1);
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -102,19 +117,29 @@ export function VoziloDokumenti({ voziloId, onChange }: { voziloId: string; onCh
   };
 
   const remove = async (d: VoziloDokument) => {
+    if (!canEdit || saving || historyRestoring) return;
     if (!window.confirm(`Obrisati "${d.naziv}"?`)) return;
+    setSaving(true);
     try {
       await deleteVoziloDokument(d);
       if (editing?.id === d.id) resetForm();
       await load();
       onChange?.();
+      setHistoryVersion((value) => value + 1);
     } catch (e) {
       setError(errText(e));
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
     <div>
+      <DocumentChangeHistoryPanel table="vozila_dokumenti" parentId={voziloId} module="vozila" refreshVersion={historyVersion} disabled={saving} onRestoringChange={setHistoryRestoring} onRestore={async () => {
+        resetForm();
+        await load();
+        onChange?.();
+      }} />
       <p className="mb-1 flex items-center gap-1.5 text-base font-semibold text-slate-800">
         <Wrench className="h-4 w-4 text-slate-500" /> Servisi i održavanje
       </p>
@@ -145,17 +170,17 @@ export function VoziloDokumenti({ voziloId, onChange }: { voziloId: string; onCh
                 {d.url && <a href={d.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-sky-700 hover:underline"><Paperclip className="h-3 w-3" />Račun / dokument</a>}
               </div>
               {st && <span className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${st.cls}`}>{st.label}</span>}
-              <button type="button" onClick={() => edit(d)} className="flex-shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-700" aria-label={`Uredi ${d.naziv}`}>
+              {canEdit && <button type="button" disabled={saving || historyRestoring} onClick={() => edit(d)} className="flex-shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-sky-700" aria-label={`Uredi ${d.naziv}`}>
                 <Pencil className="h-4 w-4" />
-              </button>
-              <button type="button" onClick={() => void remove(d)} className="flex-shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600" aria-label="Obriši">
+              </button>}
+              {canEdit && <button type="button" disabled={saving || historyRestoring} onClick={() => void remove(d)} className="flex-shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600" aria-label="Obriši">
                 <Trash2 className="h-4 w-4" />
-              </button>
+              </button>}
             </div>
           );
         })}
       </div>
-      <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+      {canEdit && <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
         <div className="flex items-center justify-between gap-2">
           <h4 className="text-sm font-semibold text-slate-800">{editing ? `Uredi: ${editing.naziv}` : 'Dodaj servis ili dokument'}</h4>
           {editing && <button type="button" onClick={resetForm} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-100"><X className="h-3.5 w-3.5" /> Odustani</button>}
@@ -207,12 +232,12 @@ export function VoziloDokumenti({ voziloId, onChange }: { voziloId: string; onCh
           <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex min-w-0 max-w-full items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
             <Paperclip className="h-3.5 w-3.5 flex-shrink-0" /> <span className="min-w-0 truncate">{file ? file.name : editing?.putanja ? 'Zamijeni postojeći prilog' : 'Priloži datoteku'}</span>
           </button>
-          <button type="button" onClick={() => void add()} disabled={saving} className="inline-flex items-center justify-center gap-1 rounded-lg bg-sky-600 xl:ml-auto px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50">
+          <button type="button" onClick={() => void add()} disabled={saving || historyRestoring} className="inline-flex items-center justify-center gap-1 rounded-lg bg-sky-600 xl:ml-auto px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50">
             {editing ? <Pencil className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />} {saving ? 'Spremanje…' : editing ? 'Spremi promjene' : 'Dodaj'}
           </button>
         </div>
         {editing?.putanja && !file && <p className="text-xs text-slate-500">Postojeći prilog ostaje spremljen ako ne odaberete novu datoteku.</p>}
-      </div>
+      </div>}
     </div>
   );
 }

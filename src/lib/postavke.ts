@@ -46,6 +46,11 @@ export type RasporedSučelja = 'standardni' | 'pregledni';
 const KEY = 'tm_postavke';
 const RASPORED_KEY_PREFIX = 'tm_raspored_sucelja_';
 const TEMA_KEY_PREFIX = 'tm_tema_';
+const NAVIGACIJA_KEY_PREFIX = 'tm_navigacija_';
+
+export interface KorisnickaNavigacija {
+  prikaz: 'ikone' | 'ikone_tekst';
+}
 
 export function defaultPostavke(): Postavke {
   return {
@@ -121,6 +126,25 @@ export function saveUserLayout(userId: string, layout: RasporedSučelja) {
 export function applyUserLayout(layout: RasporedSučelja) {
   document.documentElement.dataset.layout = layout;
   window.dispatchEvent(new Event('tm-layout-change'));
+}
+
+export function loadUserNavigation(userId: string | null | undefined): KorisnickaNavigacija {
+  const defaults: KorisnickaNavigacija = { prikaz: 'ikone_tekst' };
+  if (!userId) return defaults;
+
+  const saved = window.localStorage.getItem(`${NAVIGACIJA_KEY_PREFIX}${userId}`);
+  if (!saved) return defaults;
+
+  try {
+    const parsed = JSON.parse(saved) as Partial<KorisnickaNavigacija>;
+    return { prikaz: parsed.prikaz === 'ikone' ? 'ikone' : 'ikone_tekst' };
+  } catch {
+    return defaults;
+  }
+}
+
+export function saveUserNavigation(userId: string, navigation: KorisnickaNavigacija) {
+  window.localStorage.setItem(`${NAVIGACIJA_KEY_PREFIX}${userId}`, JSON.stringify(navigation));
 }
 
 // Početak noćnog rada i dnevnog rada u minutama od ponoći (koristi se u obračunu noćnih sati)

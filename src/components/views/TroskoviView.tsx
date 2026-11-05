@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useState, useEffect, useMemo } from 'react';
 import { Receipt, Plus, Pencil, Trash2, Euro, Search, ArrowUp, ArrowDown, ArrowUpDown, X, Building2, Trophy } from 'lucide-react';
 import type { Trosak, TrosakKategorija, Gradiliste, Kooperant, RadnoVrijeme } from '@/types';
@@ -17,6 +18,8 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ExportMenu } from '@/components/ui/ExportMenu';
 import { companyStorage, getUniversalHourlyRate } from '@/lib/company';
+import { ResourceDeletionHistory } from '@/components/views/ResourceDeletionHistory';
+import { CostChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
 
 const kategorijaInfo: Record<TrosakKategorija, { variant: 'blue' | 'orange' | 'green' | 'gray' | 'red'; label: string }> = {
   materijal: { variant: 'blue', label: 'Materijal' },
@@ -73,6 +76,8 @@ export function TroskoviView({ onOpenGradiliste }: { onOpenGradiliste?: (id: str
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deletionVersion, setDeletionVersion] = useState(0);
+  const [historyRestoring, setHistoryRestoring] = useState(false);
   const [filterGradiliste, setFilterGradiliste] = useState('');
   const [query, setQuery] = useState('');
   const [filterKat, setFilterKat] = useState<'' | TrosakKategorija>('');
@@ -90,20 +95,36 @@ export function TroskoviView({ onOpenGradiliste }: { onOpenGradiliste?: (id: str
     companyStorage.setItem('tm_troskovi_top_gradilista', String(limit));
   };
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (rethrow = false) => {
+    if (!rethrow) setLoading(true);
     setError(null);
     try {
-      const [t, rv, g, k] = await Promise.all([fetchTroskovi(), fetchRadnoVrijeme(), fetchGradilista(), fetchKooperanti().catch(() => [])]);
+      const [t, rv, g, k] = await Promise.all([fetchTroskovi(), fetchRadnoVrijeme(), fetchGradilista(),
+        rethrow ? fetchKooperanti() : fetchKooperanti().catch(() => [])]);
       setItems(t);
       setRadnoVrijeme(rv);
       setGradilista(g);
       setKooperanti(k);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
+      setError(e && typeof e === 'object' && 'message' in e ? String(e.message) : 'Greška pri učitavanju');
+      if (rethrow) throw e;
     } finally {
       setLoading(false);
     }
+  };
+
+  const refreshAfterRestore = async () => {
+    setModalOpen(false);
+    setEditing(null);
+    setForm(emptyForm);
+    setDeleteId(null);
+    setFilterGradiliste('');
+    setFilterKat('');
+    setQuery('');
+    setOd('');
+    setDoDatuma('');
+    setDeletionVersion((value) => value + 1);
+    await load(true);
   };
 
   useEffect(() => {
@@ -111,12 +132,14 @@ export function TroskoviView({ onOpenGradiliste }: { onOpenGradiliste?: (id: str
   }, []);
 
   const openCreate = () => {
+    if (saving || historyRestoring) return;
     setEditing(null);
     setForm({ ...emptyForm, gradiliste_id: filterGradiliste });
     setModalOpen(true);
   };
 
   const openEdit = (t: Trosak) => {
+    if (saving || historyRestoring) return;
     setEditing(t);
     setForm({
       gradiliste_id: t.gradiliste_id ?? '',
@@ -131,6 +154,7 @@ export function TroskoviView({ onOpenGradiliste }: { onOpenGradiliste?: (id: str
   };
 
   const save = async () => {
+    if (saving || historyRestoring) return;
     if (!form.opis.trim() || !form.iznos) return;
     setSaving(true);
     try {
@@ -159,12 +183,20 @@ export function TroskoviView({ onOpenGradiliste }: { onOpenGradiliste?: (id: str
   };
 
   const handleDelete = async () => {
-    if (!deleteId) return;
+    if (!deleteId || saving || historyRestoring) return;
+    setSaving(true);
     try {
       await deleteTrosak(deleteId);
+      setDeleteId(null);
+      setDeletionVersion((value) => value + 1);
+      setEditing(null);
+      setForm(emptyForm);
+      setModalOpen(false);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri brisanju');
+      setError(e && typeof e === 'object' && 'message' in e ? String(e.message) : 'Greška pri brisanju');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -293,6 +325,9 @@ export function TroskoviView({ onOpenGradiliste }: { onOpenGradiliste?: (id: str
 
   return (
     <div className="min-w-0 max-w-full">
+      <ResourceDeletionHistory module="troskovi" refreshVersion={deletionVersion} disabled={saving}
+        onRestoringChange={setHistoryRestoring} onRestore={refreshAfterRestore} />
+      <fieldset disabled={saving || historyRestoring} className="min-w-0">
       <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Troškovi</h1>
@@ -304,7 +339,7 @@ export function TroskoviView({ onOpenGradiliste }: { onOpenGradiliste?: (id: str
           build={() => ({
             file: 'Troskovi',
             title: 'Troškovi',
-            subtitle: `${filtered.length} stavki · izvezeno ${new Date().toLocaleDateString('hr-HR')}`,
+            subtitle: `${filtered.length} stavki · izvezeno ${formatHrDate(new Date())}`,
             rows: filtered,
             columns: [
               { header: 'Datum', kind: 'date', get: (t: Trosak) => t.datum },
@@ -435,8 +470,8 @@ export function TroskoviView({ onOpenGradiliste }: { onOpenGradiliste?: (id: str
           <option value="">Sve kategorije</option>
           {(Object.keys(kategorijaInfo) as TrosakKategorija[]).map((k) => <option key={k} value={k}>{kategorijaInfo[k].label}</option>)}
         </select>
-        <input type="date" value={od} onChange={(e) => setOd(e.target.value)} title="Od datuma" className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm" />
-        <input type="date" value={doDatuma} onChange={(e) => setDoDatuma(e.target.value)} title="Do datuma" className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm" />
+        <input lang="hr-HR" type="date" value={od} onChange={(e) => setOd(e.target.value)} title="Od datuma" className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm" />
+        <input lang="hr-HR" type="date" value={doDatuma} onChange={(e) => setDoDatuma(e.target.value)} title="Do datuma" className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm" />
         <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)} className="min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
           <option value="none">Bez grupiranja</option>
           <option value="gradiliste">Grupiraj po gradilištu</option>
@@ -495,7 +530,7 @@ export function TroskoviView({ onOpenGradiliste }: { onOpenGradiliste?: (id: str
                 return (
                   <tr key={t.id} className="group hover:bg-slate-50 transition-colors">
                     <td className="px-5 py-3.5 text-sm text-slate-600">
-                      {new Date(t.datum + 'T00:00:00').toLocaleDateString('hr-HR')}
+                      {formatHrDate(new Date(t.datum + 'T00:00:00'))}
                     </td>
                     <td className="px-5 py-3.5 text-sm text-slate-600">
                       {t.gradilista?.naziv ?? '—'}
@@ -541,11 +576,12 @@ export function TroskoviView({ onOpenGradiliste }: { onOpenGradiliste?: (id: str
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { if (!saving && !historyRestoring) setModalOpen(false); }}
         title={editing ? 'Uredi trošak' : 'Novi trošak'}
         footer={
           <>
             <button
+              disabled={saving || historyRestoring}
               onClick={() => setModalOpen(false)}
               className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
             >
@@ -553,7 +589,7 @@ export function TroskoviView({ onOpenGradiliste }: { onOpenGradiliste?: (id: str
             </button>
             <button
               onClick={save}
-              disabled={saving || !form.opis.trim() || !form.iznos}
+              disabled={saving || historyRestoring || !form.opis.trim() || !form.iznos}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50 transition-colors"
             >
               {saving ? 'Spremanje…' : 'Spremi'}
@@ -561,7 +597,9 @@ export function TroskoviView({ onOpenGradiliste }: { onOpenGradiliste?: (id: str
           </>
         }
       >
-        <div className="space-y-4">
+        {modalOpen && editing && <CostChangeHistoryPanel recordId={editing.id}
+          disabled={saving} onRestoringChange={setHistoryRestoring} onRestore={refreshAfterRestore} />}
+        <fieldset disabled={saving || historyRestoring} className="space-y-4">
           <Field label="Gradilište">
             <Select
               value={form.gradiliste_id}
@@ -632,16 +670,19 @@ export function TroskoviView({ onOpenGradiliste }: { onOpenGradiliste?: (id: str
             />
             Trošak je plaćen
           </label>
-        </div>
+        </fieldset>
       </Modal>
 
       <ConfirmDialog
         open={deleteId !== null}
-        onClose={() => setDeleteId(null)}
+        onClose={() => { if (!saving && !historyRestoring) setDeleteId(null); }}
         onConfirm={handleDelete}
         title="Izbrisati trošak?"
-        message="Ova radnja je nepovratna."
+        message={items.find((item) => item.id === deleteId)?.nalog_id || items.find((item) => item.id === deleteId)?.kooperant_racun_id
+          ? 'Trošak pripada nalogu ili grupnom računu. Samostalni povrat ove stavke još nije podržan.'
+          : 'Ručni trošak može se vratiti iz povijesti pojedinačnih brisanja 30 dana, ako postoje izvorne veze i nema naknadnog konflikta.'}
       />
+      </fieldset>
     </div>
   );
 }

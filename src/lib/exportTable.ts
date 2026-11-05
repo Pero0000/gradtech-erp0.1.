@@ -1,3 +1,4 @@
+import { formatHrDate } from './localization';
 export type ColKind = 'text' | 'eur' | 'num' | 'date';
 
 export interface ExportColumn<T> {
@@ -23,7 +24,7 @@ const eurFmt = (v: number) => v.toLocaleString('hr-HR', { style: 'currency', cur
 const numFmt = (v: number) => v.toLocaleString('hr-HR', { maximumFractionDigits: 2 });
 const dateFmt = (v: string) => {
   const d = new Date(v.length <= 10 ? `${v}T00:00:00` : v);
-  return Number.isNaN(d.getTime()) ? v : d.toLocaleDateString('hr-HR');
+  return Number.isNaN(d.getTime()) ? v : formatHrDate(d);
 };
 
 function display(v: string | number | null | undefined, kind: ColKind = 'text'): string {
@@ -53,7 +54,7 @@ export async function exportExcel<T>(spec: ExportSpec<T>) {
   const n = spec.columns.length;
 
   ws.addRow([spec.title]).font = { bold: true, size: 14 };
-  ws.addRow([spec.subtitle ?? `Izvezeno ${new Date().toLocaleDateString('hr-HR')}`]).font = { color: { argb: 'FF64748B' } };
+  ws.addRow([spec.subtitle ?? `Izvezeno ${formatHrDate(new Date())}`]).font = { color: { argb: 'FF64748B' } };
   ws.addRow([]);
   const head = ws.addRow(spec.columns.map((c) => c.header));
   head.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -144,7 +145,7 @@ export async function exportPdf<T>(spec: ExportSpec<T>) {
   host.style.cssText = 'position:fixed;left:-10000px;top:0;background:#fff;';
   document.body.appendChild(host);
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
-  const subtitle = spec.subtitle ?? `Izvezeno ${new Date().toLocaleDateString('hr-HR')}`;
+  const subtitle = spec.subtitle ?? `Izvezeno ${formatHrDate(new Date())}`;
 
   try {
     await document.fonts?.ready;

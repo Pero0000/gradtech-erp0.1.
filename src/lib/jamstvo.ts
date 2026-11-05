@@ -1,3 +1,4 @@
+import { formatHrDate } from './localization';
 export interface JamstvoPodaci {
   aktivno: boolean;
   od: string | null | undefined;
@@ -27,11 +28,11 @@ export function jamstvoInfo(jamstvo: JamstvoPodaci) {
       const targetMonth = start.getMonth() + jamstvo.mjeseci;
       const lastDay = new Date(start.getFullYear(), targetMonth + 1, 0).getDate();
       const expiry = new Date(start.getFullYear(), targetMonth, Math.min(start.getDate(), lastDay));
-      details.push(`do ${expiry.toLocaleDateString('hr-HR')}`);
+      details.push(`do ${formatHrDate(expiry)}`);
       expiredByTime = danas > expiry;
     }
   } else if (jamstvo.od) {
-    details.push(`od ${new Date(`${jamstvo.od.slice(0, 10)}T00:00:00`).toLocaleDateString('hr-HR')}`);
+    details.push(`od ${formatHrDate(new Date(`${jamstvo.od.slice(0, 10)}T00:00:00`))}`);
   }
 
   if (jamstvo.doVrijednosti != null) {

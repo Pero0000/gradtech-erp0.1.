@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useState, useEffect } from 'react';
 import { companyStorage, getUniversalHourlyRate } from '@/lib/company';
 import {
@@ -368,7 +369,7 @@ export function RekapitulacijaView() {
                       </div>
                       <div className="flex flex-shrink-0 flex-wrap items-center gap-3">
                         <span className="text-sm text-slate-500">
-                          {new Date(r.datum + 'T00:00:00').toLocaleDateString('hr-HR')}
+                          {formatHrDate(new Date(r.datum + 'T00:00:00'))}
                         </span>
                         {r.status === 'otvoren' && (
                           <span
@@ -483,7 +484,7 @@ export function RekapitulacijaView() {
                         <div className="min-w-0">
                           <p className="break-words font-mono text-sm font-medium text-slate-700">{f.broj}</p>
                           <p className="break-words text-xs text-slate-400">
-                            {f.kupac ?? '—'} · {new Date(f.datum_izdavanja + 'T00:00:00').toLocaleDateString('hr-HR')}
+                            {f.kupac ?? '—'} · {formatHrDate(new Date(f.datum_izdavanja + 'T00:00:00'))}
                           </p>
                         </div>
                         <div className="flex flex-shrink-0 flex-wrap items-center gap-3">
@@ -559,10 +560,10 @@ export function RekapitulacijaView() {
                           <td className="px-3 py-2.5 text-sm font-medium text-slate-900">{n.naslov}</td>
                           <td className="px-3 py-2.5"><Badge variant={si.variant}>{si.label}</Badge></td>
                           <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-500">
-                            {new Date(n.datum_kreiranja + 'T00:00:00').toLocaleDateString('hr-HR')}
+                            {formatHrDate(new Date(n.datum_kreiranja + 'T00:00:00'))}
                           </td>
                           <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-500">
-                            {n.rok ? new Date(n.rok + 'T00:00:00').toLocaleDateString('hr-HR') : '—'}
+                            {n.rok ? formatHrDate(new Date(n.rok + 'T00:00:00')) : '—'}
                           </td>
                         </tr>
                       );
@@ -594,7 +595,7 @@ export function RekapitulacijaView() {
                     {troskovi.map((t) => (
                       <tr key={t.id} className="hover:bg-slate-50 transition-colors">
                         <td className="whitespace-nowrap px-3 py-2.5 text-sm text-slate-500">
-                          {new Date(t.datum + 'T00:00:00').toLocaleDateString('hr-HR')}
+                          {formatHrDate(new Date(t.datum + 'T00:00:00'))}
                         </td>
                         <td className="px-3 py-2.5 text-sm text-slate-600">
                           {kategorijaLabel[t.kategorija] ?? t.kategorija}

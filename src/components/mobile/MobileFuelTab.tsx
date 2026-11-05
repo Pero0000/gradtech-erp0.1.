@@ -8,6 +8,7 @@ import {
 } from '@/lib/api';
 import type { VoziloGorivo } from '@/types';
 import { todayISO } from '@/lib/rokovi';
+import { parseDecimalInput, formatHrDate } from '@/lib/localization';
 
 const errorText = (reason: unknown) =>
   reason instanceof Error ? reason.message : 'Greška pri spremanju točenja goriva.';
@@ -53,7 +54,7 @@ export function MobileFuelTab() {
   }, []);
 
   const save = async () => {
-    const litersValue = Number(litara);
+    const litersValue = parseDecimalInput(litara);
     const kmValue = Number(kilometraza);
     if (!voziloId || !datum || !Number.isFinite(litersValue) || litersValue <= 0 || !kilometraza.trim()
       || !Number.isInteger(kmValue) || kmValue < 0 || !tocioId) {
@@ -140,10 +141,10 @@ export function MobileFuelTab() {
             </label>
             <div className="grid grid-cols-2 gap-2">
               <label className="block text-sm font-medium text-slate-700">Datum
-                <input type="date" value={datum} onChange={(event) => setDatum(event.target.value)} className="mt-1 min-h-12 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-2 text-sm" />
+                <input lang="hr-HR" type="date" value={datum} onChange={(event) => setDatum(event.target.value)} className="mt-1 min-h-12 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-2 text-sm" />
               </label>
               <label className="block text-sm font-medium text-slate-700">Litre goriva
-                <input type="number" inputMode="decimal" min="0.01" step="0.01" value={litara} onChange={(event) => setLitara(event.target.value)} placeholder="npr. 42,5" className="mt-1 min-h-12 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-base" />
+                <input type="text" inputMode="decimal" value={litara} onChange={(event) => setLitara(event.target.value)} placeholder="npr. 42,5" className="mt-1 min-h-12 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-base" />
               </label>
             </div>
             <label className="block text-sm font-medium text-slate-700">Kilometraža auta
@@ -176,7 +177,7 @@ export function MobileFuelTab() {
             {entries.map((entry) => (
               <article key={entry.id} className="rounded-xl border border-slate-100 p-3">
                 <p className="font-semibold text-slate-900">{Number(entry.litara).toLocaleString('hr-HR')} l · {Number(entry.kilometraza).toLocaleString('hr-HR')} km</p>
-                <p className="mt-0.5 text-xs text-slate-500">{vehicleName(entry.vozilo_id)} · {new Date(`${entry.datum}T00:00:00`).toLocaleDateString('hr-HR')}</p>
+                <p className="mt-0.5 text-xs text-slate-500">{vehicleName(entry.vozilo_id)} · {formatHrDate(new Date(`${entry.datum}T00:00:00`))}</p>
                 <p className="text-xs text-slate-500">Točio/la: {entry.tocio_ime}</p>
               </article>
             ))}

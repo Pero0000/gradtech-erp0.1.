@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Building2,
   Users,
@@ -19,9 +19,13 @@ import {
   Wrench,
   Cog,
   UserCog,
+  PanelLeftClose,
+  PanelLeftOpen,
+  LogOut,
 } from 'lucide-react';
 import { useAuth } from '@/auth/useAuth';
 import { moduleForView } from '@/auth/permissions';
+import { loadUserNavigation, saveUserNavigation, type KorisnickaNavigacija } from '@/lib/postavke';
 
 export type View =
   | 'dashboard'
@@ -136,15 +140,44 @@ const countMap: Partial<Record<View, keyof SidebarProps['counts']>> = {
 export function Sidebar({ current, onNavigate, mobileOpen, desktopHidden = false, desktopOverlay = false, onDesktopEnter, onDesktopLeave, onMobileClose, counts }: SidebarProps) {
   const { canAccess, isAdmin, isPlatformOwner, company, profile, signOut } = useAuth();
   const [signOutError, setSignOutError] = useState<string | null>(null);
+  const [navigation, setNavigation] = useState<KorisnickaNavigacija>(() => loadUserNavigation(profile?.id));
+  const [navigationError, setNavigationError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setNavigation(loadUserNavigation(profile?.id));
+  }, [profile?.id]);
+
+  const saveNavigation = (next: KorisnickaNavigacija) => {
+    if (!profile?.id) return;
+    try {
+      saveUserNavigation(profile.id, next);
+      setNavigation(next);
+      setNavigationError(null);
+    } catch (reason) {
+      setNavigationError(reason instanceof Error ? reason.message : 'Postavke izbornika nisu spremljene.');
+    }
+  };
+
   const sidebarClassName = mobileOpen
-    ? 'fixed inset-y-0 left-0 z-50 flex w-72 max-w-[calc(100vw-2rem)] shadow-xl'
+    ? `fixed inset-y-0 left-0 z-50 flex ${navigation.prikaz === 'ikone' ? 'w-20' : 'w-72 max-w-[calc(100vw-2rem)]'} shadow-xl`
     : desktopOverlay
       ? desktopHidden
         ? 'hidden'
-        : 'fixed inset-y-0 left-0 z-50 flex w-64 shadow-xl'
+        : `fixed inset-y-0 left-0 z-50 flex ${navigation.prikaz === 'ikone' ? 'w-20' : 'w-64'} shadow-xl`
       : desktopHidden
-        ? 'hidden xl:hidden 2xl:relative 2xl:flex 2xl:w-64 2xl:shadow-none'
-        : 'hidden xl:sticky xl:top-0 xl:flex xl:w-64 xl:shadow-none';
+        ? `hidden xl:hidden 2xl:relative 2xl:flex ${navigation.prikaz === 'ikone' ? '2xl:w-20' : '2xl:w-64'} 2xl:shadow-none`
+        : `hidden xl:sticky xl:top-0 xl:flex ${navigation.prikaz === 'ikone' ? 'xl:w-20' : 'xl:w-64'} xl:shadow-none`;
+
+  const visibleItems = navSections.flatMap((section) => section.items.map((item) => ({ ...item, section: section.title })))
+    .filter((item) => item.view === 'tvrtke'
+      ? isPlatformOwner
+      : item.view === 'korisnici'
+        ? isAdmin
+        : (() => {
+          const module = moduleForView(item.view);
+          return module !== null && canAccess(module);
+        })());
+
   return (
     <>
     {mobileOpen && <button type="button" aria-label="Zatvori navigaciju" onClick={onMobileClose} className="fixed inset-0 z-40 bg-slate-950/40 xl:hidden" />}
@@ -153,80 +186,86 @@ export function Sidebar({ current, onNavigate, mobileOpen, desktopHidden = false
       onMouseLeave={desktopOverlay ? onDesktopLeave : undefined}
       className={`h-dvh flex-shrink-0 flex-col border-r border-slate-200 bg-white ${sidebarClassName}`}
     >
-      <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-200">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-600 text-white">
+      <div className={`flex items-center border-b border-slate-200 ${navigation.prikaz === 'ikone' ? 'flex-col gap-2 px-2 py-3' : 'gap-3 px-6 py-5'}`}>
+        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-sky-600 text-white">
           <Building2 className="h-6 w-6" />
         </div>
-        <div className="min-w-0 break-words">
-          <p className="text-sm font-bold text-slate-900 leading-tight">GradTech</p>
+        {navigation.prikaz === 'ikone_tekst' && <div className="min-w-0 flex-1 break-words">
+          <p className="text-sm font-bold leading-tight text-slate-900">GradTech</p>
           <p className="text-xs text-slate-500">{company?.naziv}</p>
-        </div>
+        </div>}
+        <button
+          type="button"
+          onClick={() => saveNavigation({ ...navigation, prikaz: navigation.prikaz === 'ikone' ? 'ikone_tekst' : 'ikone' })}
+          aria-label={navigation.prikaz === 'ikone' ? 'Prikaži nazive modula' : 'Prikaži samo ikone modula'}
+          title={navigation.prikaz === 'ikone' ? 'Prikaži nazive modula' : 'Prikaži samo ikone modula'}
+          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+        >
+          {navigation.prikaz === 'ikone' ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+        </button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-4">
-        {navSections.map((section) => {
-          const items = section.items.filter((item) => item.view === 'tvrtke'
-            ? isPlatformOwner
-            : item.view === 'korisnici'
-            ? isAdmin
-            : (() => {
-              const module = moduleForView(item.view);
-              return module !== null && canAccess(module);
-            })());
-          if (!items.length) return null;
-          return (
-          <div key={section.title} className="mb-5">
-            <p className="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
-              {section.title}
-            </p>
-            <div className="space-y-1">
-              {items.map((item) => {
+      <nav className={`flex-1 overflow-y-auto py-4 ${navigation.prikaz === 'ikone' ? 'px-2' : 'px-3'}`}>
+        <div className="space-y-1">
+          {visibleItems.map((item, index) => {
+                const previousItem = visibleItems[index - 1];
                 const Icon = item.icon;
                 const active = current === item.view;
                 const countKey = countMap[item.view];
                 const count = countKey ? counts[countKey] : undefined;
 
                 return (
+                  <div key={item.view}>
+                  {(index === 0 || previousItem.section !== item.section) && navigation.prikaz === 'ikone_tekst' && (
+                    <p className={`${index ? 'mt-5' : ''} mb-1.5 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400`}>
+                      {item.section}
+                    </p>
+                  )}
                   <button
-                    key={item.view}
+                    type="button"
+                    title={item.label}
+                    aria-label={item.label}
                     onClick={() => onNavigate(item.view)}
-                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    className={`flex w-full items-center rounded-lg py-2 text-sm font-medium transition-colors ${
+                      navigation.prikaz === 'ikone' ? 'relative justify-center px-2' : 'gap-3 px-3'
+                    } ${
                       active
                         ? 'bg-sky-50 text-sky-700'
                         : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                     }`}
                   >
                     <Icon className={`h-[18px] w-[18px] ${active ? 'text-sky-600' : 'text-slate-400'}`} />
-                    <span className="flex-1 text-left">{item.label}</span>
+                    {navigation.prikaz === 'ikone_tekst' && <span className="flex-1 text-left">{item.label}</span>}
                     {count !== undefined && count > 0 && (
                       <span
                         className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
                           active ? 'bg-sky-100 text-sky-700' : item.view === 'obavijesti' ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-500'
-                        }`}
+                        } ${navigation.prikaz === 'ikone' ? 'absolute right-0 top-0 translate-x-1/3 -translate-y-1/3' : ''}`}
                       >
                         {count}
                       </span>
                     )}
                   </button>
+                  </div>
                 );
-              })}
-            </div>
-          </div>
-          );
-        })}
+          })}
+        </div>
       </nav>
 
-      <div className="border-t border-slate-200 px-6 py-3">
-        <p className="truncate text-xs font-medium text-slate-600" title={profile?.email}>{profile?.email}</p>
+      <div className={`border-t border-slate-200 py-3 ${navigation.prikaz === 'ikone' ? 'px-2 text-center' : 'px-6'}`}>
+        {navigation.prikaz === 'ikone_tekst' && <p className="truncate text-xs font-medium text-slate-600" title={profile?.email}>{profile?.email}</p>}
         <button
           type="button"
           onClick={() => void signOut().catch((reason: unknown) => setSignOutError(reason instanceof Error ? reason.message : 'Odjava nije uspjela.'))}
-          className="mt-1 text-xs font-medium text-sky-700 hover:underline"
+          aria-label="Odjavi se"
+          title="Odjavi se"
+          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-sky-700 hover:underline"
         >
-          Odjavi se
+          {navigation.prikaz === 'ikone' ? <LogOut className="h-4 w-4" /> : 'Odjavi se'}
         </button>
         {signOutError && <p role="alert" className="mt-1 text-xs text-red-700">{signOutError}</p>}
-        <p className="text-xs text-slate-400">© 2026 GradTech</p>
+        {navigationError && <p role="alert" className="mt-1 text-xs text-red-700">{navigationError}</p>}
+        {navigation.prikaz === 'ikone_tekst' && <p className="text-xs text-slate-400">© 2026 GradTech</p>}
       </div>
     </aside>
     </>

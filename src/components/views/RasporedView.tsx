@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useRef, useState } from 'react';
+import { formatHrDate, formatHrDateTime } from '@/lib/localization';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, GripVertical, Hammer, Package, Plus, Send, Trash2, Truck, X } from 'lucide-react';
 import type { DnevniRasporedGradiliste, DnevniRasporedOstalo, DnevniRasporedRadnik, Gradiliste, GradilisteRegija, GradilisteStatus, GradilisteZadatak, Investitor, NalogPrioritet, NalogStatus, Objekt, Radnik, RadnikOdsustvo, Rok, Vozilo, ZadatakVrsta } from '@/types';
 import { zadatakVrsta } from '@/types';
@@ -60,6 +61,7 @@ import {
 } from '@/lib/api';
 import { useAuth } from '@/auth/useAuth';
 import { DEFAULT_GRADILISTE_COLUMN_LABELS } from '@/lib/company';
+import { countOstaloAssignments, hasOstaloEntry } from '@/lib/rasporedOstalo';
 
 type DragPayload =
   | { type: 'gradiliste'; id: string; assignmentId?: string }
@@ -159,7 +161,7 @@ const minSiteSlots = 5;
 const defaultWorkerSlots = 5;
 
 function formatShortDate(value: string) {
-  return new Date(value).toLocaleDateString('hr-HR');
+  return formatHrDate(new Date(value));
 }
 
 function localDateString(date = new Date()) {
@@ -168,7 +170,7 @@ function localDateString(date = new Date()) {
 }
 
 function formatDate(d: string) {
-  return new Date(d + 'T00:00:00').toLocaleDateString('hr-HR', {
+  return formatHrDate(new Date(d + 'T00:00:00'), {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -198,11 +200,13 @@ function reconcileColumns(items: Gradiliste[], saved: string[][]): string[][] {
   return columns;
 }
 
-function WorkerCount({ count, kind = 'radnik' }: { count: number; kind?: 'radnik' | 'gradiliste' }) {
+function WorkerCount({ count, kind = 'radnik' }: { count: number; kind?: 'radnik' | 'gradiliste' | 'ostalo' }) {
   if (count === 0) return null;
   const title = kind === 'gradiliste'
     ? (count > 1 ? `Gradilište je na rasporedu ${count} puta (više vozila/naloga)` : 'Gradilište je na rasporedu 1 put')
-    : (count > 1 ? `Radnik je raspoređen na ${count} gradilišta/auta` : 'Raspoređen na 1 gradilište/auto');
+    : kind === 'ostalo'
+      ? (count > 1 ? `Stavka Ostalo je na ${count} vozila/naloga` : 'Stavka Ostalo je na 1 vozilu/nalogu')
+      : (count > 1 ? `Radnik je raspoređen na ${count} gradilišta/auta` : 'Raspoređen na 1 gradilište/auto');
   return (
     <span
       title={title}
@@ -714,7 +718,7 @@ export function RasporedView() {
       const created = await createNalogFromRaspored(assignmentId, {
         broj,
         gradiliste_id: target.gradiliste_id,
-        naslov: `${target.naziv} – ${new Date(selectedDate + 'T00:00:00').toLocaleDateString('hr-HR')}`,
+        naslov: `${target.naziv} – ${formatHrDate(new Date(selectedDate + 'T00:00:00'))}`,
         opis: opis || null,
         status: 'otvoren',
         prioritet: 'srednji',
@@ -893,14 +897,14 @@ export function RasporedView() {
 
   const removeSiteAssignment = async (assignmentId: string) => {
     const assignment = siteAssignments.find((item) => item.id === assignmentId);
-    if (assignment?.iz_ostalo && assignment.tekst) {
+    if (assignment?.iz_ostalo && assignment.tekst && !hasOstaloEntry(ostalo, assignment, selectedDate)) {
       await addRasporedOstalo(selectedDate, { tekst: assignment.tekst });
     }
     await removeRasporedGradiliste(assignmentId);
   };
 
   const removeWorkerAssignment = async (assignmentId: string, workerId: string) => {
-    if (!ostalo.some((entry) => entry.datum === selectedDate && entry.radnik_id === workerId)) {
+    if (!hasOstaloEntry(ostalo, { tekst: null, radnik_id: workerId }, selectedDate)) {
       await addRasporedOstalo(selectedDate, { radnikId: workerId });
     }
     await removeRasporedRadnik(assignmentId);
@@ -934,7 +938,6 @@ export function RasporedView() {
         if (!entry) return;
         if (entry.radnik_id) await assignRasporedRadnik(selectedDate, voziloId, entry.radnik_id);
         else if (entry.tekst) await addRasporedTekst(selectedDate, voziloId, entry.tekst, true);
-        await removeRasporedOstalo(entry.id);
       } else if (payload.type === 'gradiliste') {
         if (payload.assignmentId) await moveRasporedGradiliste(payload.assignmentId, voziloId);
         else await assignRasporedGradiliste(selectedDate, voziloId, payload.id);
@@ -1004,7 +1007,9 @@ export function RasporedView() {
       } else if (assignmentId) {
         const assignment = siteAssignments.find((a) => a.id === assignmentId);
         if (assignment && !assignment.gradiliste_id && assignment.tekst) {
-          await addRasporedOstalo(selectedDate, { tekst: assignment.tekst });
+          if (!hasOstaloEntry(ostalo, assignment, selectedDate)) {
+            await addRasporedOstalo(selectedDate, { tekst: assignment.tekst });
+          }
           await removeRasporedGradiliste(assignmentId);
         }
       }
@@ -1053,6 +1058,7 @@ export function RasporedView() {
   const vehicleOf = (voziloId: string) => vozila.find((v) => v.id === voziloId);
   const workerCount = (radnikId: string) => workerAssignments.filter((a) => a.radnik_id === radnikId).length;
   const siteCount = (gradilisteId: string) => siteAssignments.filter((a) => a.gradiliste_id === gradilisteId).length;
+  const otherCount = (entry: DnevniRasporedOstalo) => countOstaloAssignments(entry, siteAssignments, workerAssignments);
   const odsustvoOf = (radnikId: string) => odsustvaDana.find((o) => o.radnik_id === radnikId);
   const odsustvoLabel = (o: RadnikOdsustvo) => (o.vrsta === 'bolovanje' ? 'Bolovanje' : 'Godišnji');
   const odsutniRadnici = [...new Set(odsustvaDana.map((o) => o.radnik_id))]
@@ -1063,7 +1069,7 @@ export function RasporedView() {
     if (!o) return null;
     return (
       <span
-        title={`${odsustvoLabel(o)} ${new Date(`${o.datum_od}T00:00:00`).toLocaleDateString('hr-HR')} – ${new Date(`${o.datum_do}T00:00:00`).toLocaleDateString('hr-HR')}`}
+        title={`${odsustvoLabel(o)} ${formatHrDate(new Date(`${o.datum_od}T00:00:00`))} – ${formatHrDate(new Date(`${o.datum_do}T00:00:00`))}`}
         className={`flex-shrink-0 rounded px-1 text-[9px] font-bold uppercase ${o.vrsta === 'bolovanje' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-800'}`}
       >
         {o.vrsta === 'bolovanje' ? 'BOL' : 'GO'}
@@ -1094,7 +1100,7 @@ export function RasporedView() {
             </div>
             <div className="mt-1 flex items-center justify-center gap-2">
               <label className="text-xs text-slate-500" htmlFor="raspored-date">Odaberi datum:</label>
-              <input
+              <input lang="hr-HR"
                 id="raspored-date"
                 type="date"
                 value={selectedDate}
@@ -1144,12 +1150,12 @@ export function RasporedView() {
       {odsutniRadnici.length > 0 && (
         <div role="alert" className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <p className="font-semibold">
-            Upozorenje: {new Date(`${selectedDate}T00:00:00`).toLocaleDateString('hr-HR')} nisu dostupni:
+            Upozorenje: {formatHrDate(new Date(`${selectedDate}T00:00:00`))} nisu dostupni:
           </p>
           <ul className="mt-1 space-y-0.5">
             {odsutniRadnici.map(({ radnik, odsustvo, rasporeden }) => (
               <li key={radnik.id}>
-                <span className="font-medium">{radnik.prezime} {radnik.ime}</span> – {odsustvoLabel(odsustvo).toLowerCase()} ({new Date(`${odsustvo.datum_od}T00:00:00`).toLocaleDateString('hr-HR')} – {new Date(`${odsustvo.datum_do}T00:00:00`).toLocaleDateString('hr-HR')})
+                <span className="font-medium">{radnik.prezime} {radnik.ime}</span> – {odsustvoLabel(odsustvo).toLowerCase()} ({formatHrDate(new Date(`${odsustvo.datum_od}T00:00:00`))} – {formatHrDate(new Date(`${odsustvo.datum_do}T00:00:00`))})
                 {rasporeden && <span className="ml-1 font-bold text-red-700">· raspoređen je na vozilo!</span>}
               </li>
             ))}
@@ -1188,7 +1194,7 @@ export function RasporedView() {
             <div className={`rounded-lg border px-4 py-3 text-sm ${!objava ? 'border-slate-200 bg-slate-50 text-slate-600' : objavaZastarjela ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
               {!objava
                 ? 'Raspored za ovaj dan još nije poslan radnicima.'
-                : `${objavaZastarjela ? 'Raspored je promijenjen nakon slanja — radnici još vide staru verziju. ' : 'Radnici vide ovaj raspored. '}Poslano ${new Date(objava.poslano_at).toLocaleString('hr-HR', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}.`}
+                : `${objavaZastarjela ? 'Raspored je promijenjen nakon slanja — radnici još vide staru verziju. ' : 'Radnici vide ovaj raspored. '}Poslano ${formatHrDateTime(new Date(objava.poslano_at), { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}.`}
             </div>
             <dl className="grid min-w-0 grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-3 text-center">
               {[
@@ -1660,6 +1666,7 @@ export function RasporedView() {
                       className="min-w-0 flex-1 bg-transparent text-xs font-semibold text-pink-400 outline-none focus:ring-1 focus:ring-sky-500"
                     />
                   )}
+                  <WorkerCount kind="ostalo" count={otherCount(entry)} />
                   <button
                     type="button"
                     onClick={() => void run(() => removeRasporedOstalo(entry.id))}
@@ -1700,7 +1707,7 @@ export function RasporedView() {
               <div className="mr-auto flex items-center gap-2">
                 {confirmDiscard ? (
                   <>
-                    <span className="text-xs text-slate-600">Obrisati nalog {nalogForm.broj}?</span>
+                    <span className="text-xs text-slate-600">Obrisati nalog {nalogForm.broj}? Povrat 30 dana u Radnim nalozima.</span>
                     <button
                       onClick={() => void discardNalog()}
                       disabled={nalogSaving}
@@ -1752,7 +1759,7 @@ export function RasporedView() {
             <div className={`flex flex-col items-stretch justify-between gap-3 rounded-lg px-3 py-2 text-xs xl:flex-row xl:flex-wrap xl:items-center ${nalogForm.zakljucen_at ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
               <span>
                 {nalogForm.zakljucen_at
-                  ? `Zaključen ${new Date(nalogForm.zakljucen_at).toLocaleString('hr-HR')}. Izmjene i dalje možeš spremati.`
+                  ? `Zaključen ${formatHrDateTime(new Date(nalogForm.zakljucen_at))}. Izmjene i dalje možeš spremati.`
                   : 'Nacrt – radnici još nisu obaviješteni. Nalog možeš dorađivati dok ga ne zaključiš.'}
               </span>
               {nalogForm.zakljucen_at && (
@@ -1844,7 +1851,7 @@ export function RasporedView() {
                           Na nalogu {zadatakNalozi[z.nalog_id] ?? 'drugom'}
                         </span>
                       )}
-                      {z.rok && <span className="text-xs text-slate-400">{new Date(z.rok + 'T00:00:00').toLocaleDateString('hr-HR')}</span>}
+                      {z.rok && <span className="text-xs text-slate-400">{formatHrDate(new Date(z.rok + 'T00:00:00'))}</span>}
                     </label>
                   ))}
                 </div>

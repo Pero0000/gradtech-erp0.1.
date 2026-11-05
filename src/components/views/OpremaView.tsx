@@ -1,3 +1,6 @@
+import { formatHrDate } from '@/lib/localization';
+import { DocumentChangeHistoryPanel, ResourceChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
+import { ResourceDeletionHistory } from '@/components/views/ResourceDeletionHistory';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Cog, FileText, LayoutGrid, MapPin, Pencil, Plus, Table2, Trash2, Wrench } from 'lucide-react';
 import type { Gradiliste, Oprema, OpremaDokument, OpremaDokumentVrsta, OpremaKategorija, OpremaStanje, OpremaStatus } from '@/types';
@@ -78,7 +81,7 @@ const emptyForm = {
 };
 
 const dateLabel = (value: string | null | undefined) => value
-  ? new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString('hr-HR')
+  ? formatHrDate(new Date(`${value.slice(0, 10)}T00:00:00`))
   : '—';
 const currency = (value: number) => value.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' });
 const errText = (reason: unknown) => reason instanceof Error ? reason.message : 'Dogodila se greška.';
@@ -153,6 +156,8 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Oprema | null>(null);
+  const [historyRestoring, setHistoryRestoring] = useState(false);
+  const [deletionVersion, setDeletionVersion] = useState(0);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -170,6 +175,9 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
   });
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [savingDocument, setSavingDocument] = useState(false);
+  const [documentHistoryRestoring, setDocumentHistoryRestoring] = useState(false);
+  const [documentHistoryVersion, setDocumentHistoryVersion] = useState(0);
+  const [documentFormVersion, setDocumentFormVersion] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -255,6 +263,10 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
   };
 
   const save = async () => {
+    if (historyRestoring) {
+      setError('U tijeku je vraćanje promjene. Pričekajte završetak prije spremanja.');
+      return;
+    }
     if (!form.naziv.trim()) return;
     if (form.jamstvo_mjeseci && (!Number.isInteger(Number(form.jamstvo_mjeseci)) || Number(form.jamstvo_mjeseci) < 1)) {
       setError('Trajanje jamstva mora biti pozitivan cijeli broj mjeseci.');
@@ -329,6 +341,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
   };
 
   const addDocument = async (item: Oprema) => {
+    if (savingDocument || documentHistoryRestoring) return;
     if (!documentForm.naziv.trim()) return;
     setSavingDocument(true);
     setError(null);
@@ -344,8 +357,10 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
       }, documentFile);
       setDocumentForm({ vrsta: 'servis', naziv: '', datum_od: '', datum_do: '', radni_sati: '', iznos: '', napomena: '' });
       setDocumentFile(null);
+      setDocumentFormVersion((value) => value + 1);
       const itemDocuments = await fetchOpremaDokumenti(item.id);
       setDocuments((previous) => ({ ...previous, [item.id]: itemDocuments }));
+      setDocumentHistoryVersion((value) => value + 1);
     } catch (reason) {
       setError(errText(reason));
     } finally {
@@ -354,16 +369,21 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
   };
 
   const removeDocument = async (item: OpremaDokument) => {
+    if (savingDocument || documentHistoryRestoring) return;
     if (!window.confirm(`Obrisati zapis „${item.naziv}”?`)) return;
     setError(null);
+    setSavingDocument(true);
     try {
       await deleteOpremaDokument(item);
       setDocuments((previous) => ({
         ...previous,
         [item.oprema_id]: (previous[item.oprema_id] ?? []).filter((document) => document.id !== item.id),
       }));
+      setDocumentHistoryVersion((value) => value + 1);
     } catch (reason) {
       setError(errText(reason));
+    } finally {
+      setSavingDocument(false);
     }
   };
 
@@ -372,6 +392,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
     setError(null);
     try {
       await deleteOprema(deleteId);
+      setDeletionVersion((value) => value + 1);
       setDeleteId(null);
       await load();
     } catch (reason) {
@@ -394,6 +415,13 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
     const location = itemLocation(item, itemUsage);
     return (
       <div className="mt-4 border-t border-slate-200 pt-4" onClick={(event) => event.stopPropagation()}>
+        <DocumentChangeHistoryPanel table="oprema_dokumenti" parentId={item.id} module={kategorija === 'alat' ? 'alat' : 'strojevi'} refreshVersion={documentHistoryVersion} disabled={savingDocument} onRestoringChange={setDocumentHistoryRestoring} onRestore={async () => {
+          setDocumentForm({ vrsta: 'servis', naziv: '', datum_od: '', datum_do: '', radni_sati: '', iznos: '', napomena: '' });
+          setDocumentFile(null);
+          setDocumentFormVersion((value) => value + 1);
+          const itemDocuments = await fetchOpremaDokumenti(item.id);
+          setDocuments((previous) => ({ ...previous, [item.id]: itemDocuments }));
+        }} />
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs text-slate-500">Nabavna vrijednost</p><p className="mt-1 font-semibold text-slate-900">{currency(item.nabavna_vrijednost)}</p></div>
           <div className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs text-slate-500">Trošak servisa</p><p className="mt-1 font-semibold text-slate-900">{currency(serviceCost)}</p></div>
@@ -430,7 +458,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
                 </p>
                 {document.napomena && <p className="mt-1 whitespace-pre-wrap text-slate-600">{document.napomena}</p>}
               </div>
-              <button type="button" onClick={() => void removeDocument(document)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Obriši servis ${document.naziv}`}>
+              <button type="button" disabled={savingDocument || documentHistoryRestoring} onClick={() => void removeDocument(document)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Obriši servis ${document.naziv}`}>
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
@@ -489,7 +517,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
                 <p className="font-medium text-slate-800">{document.url ? <a href={document.url} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline">{document.naziv}</a> : document.naziv}</p>
                 <p className="mt-0.5 text-slate-500">{documentLabels[document.vrsta]} · {dateLabel(document.datum_od)}{document.datum_do && ` – ${dateLabel(document.datum_do)}`}</p>
               </div>
-              <button type="button" onClick={() => void removeDocument(document)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Obriši dokument ${document.naziv}`}><Trash2 className="h-3.5 w-3.5" /></button>
+              <button type="button" disabled={savingDocument || documentHistoryRestoring} onClick={() => void removeDocument(document)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={`Obriši dokument ${document.naziv}`}><Trash2 className="h-3.5 w-3.5" /></button>
             </div>
           ))}
         </div>
@@ -510,9 +538,9 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
             )}
             <TextInput type="number" min="0" step="0.01" value={documentForm.iznos} onChange={(event) => setDocumentForm((previous) => ({ ...previous, iznos: event.target.value }))} placeholder="Trošak (€)" />
             <TextInput value={documentForm.napomena} onChange={(event) => setDocumentForm((previous) => ({ ...previous, napomena: event.target.value }))} placeholder="Napomena" />
-            <TextInput type="file" onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)} />
+            <TextInput key={`${item.id}:${documentFormVersion}`} type="file" onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)} />
           </div>
-          <button type="button" onClick={() => void addDocument(item)} disabled={savingDocument || !documentForm.naziv.trim()} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50">
+          <button type="button" onClick={() => void addDocument(item)} disabled={savingDocument || documentHistoryRestoring || !documentForm.naziv.trim()} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50">
             <Plus className="h-3.5 w-3.5" /> {savingDocument ? 'Spremanje…' : 'Dodaj zapis'}
           </button>
         </div>
@@ -524,6 +552,12 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
 
   return (
     <div className="min-w-0 max-w-full break-words">
+      <ResourceDeletionHistory module={kategorija === 'alat' ? 'alat' : 'strojevi'} refreshVersion={deletionVersion} onRestore={async () => {
+        setModalOpen(false);
+        setEditing(null);
+        setExpandedId(null);
+        await load();
+      }} />
       <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:flex-wrap xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">{label}</h1>
@@ -679,16 +713,21 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { if (!historyRestoring) setModalOpen(false); }}
         title={editing ? `Uredi ${kategorija}` : `Novi ${kategorija}`}
         wide="md"
         footer={(
           <>
-            <button type="button" onClick={() => setModalOpen(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Odustani</button>
-            <button type="button" onClick={() => void save()} disabled={saving || !form.naziv.trim()} className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">{saving ? 'Spremanje…' : 'Spremi'}</button>
+            <button type="button" onClick={() => setModalOpen(false)} disabled={historyRestoring} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Odustani</button>
+            <button type="button" onClick={() => void save()} disabled={saving || historyRestoring || !form.naziv.trim()} className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">{saving ? 'Spremanje…' : 'Spremi'}</button>
           </>
         )}
       >
+        {editing && <ResourceChangeHistoryPanel table="oprema" recordId={editing.id} module={kategorija === 'alat' ? 'alat' : 'strojevi'} disabled={saving} onRestoringChange={setHistoryRestoring} onRestore={async () => {
+          setModalOpen(false);
+          setEditing(null);
+          await load();
+        }} />}
         {error && <p className="mb-3 rounded-md bg-red-50 p-2 text-xs text-red-700">{error}</p>}
         <div className="space-y-3">
           <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
@@ -741,7 +780,7 @@ export function OpremaView({ kategorija }: { kategorija: OpremaKategorija }) {
         onClose={() => setDeleteId(null)}
         onConfirm={() => void removeItem()}
         title={`Obrisati ${kategorija === 'alat' ? 'alat' : 'stroj'}?`}
-        message="Oprema i njezini zapisi o servisima/dokumentima bit će trajno obrisani."
+        message="Oprema i povezani zapisi bit će uklonjeni. Zaštićeno brisanje može se vratiti 30 dana ako povezani podaci nisu naknadno promijenjeni i imate potrebna prava."
       />
     </div>
   );

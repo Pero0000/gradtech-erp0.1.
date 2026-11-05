@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useState, useEffect, useCallback } from 'react';
 import { useRequestScope } from '@/lib/useRequestScope';
 import { ClipboardList, Plus, Pencil, Trash2, Users, Calendar, AlertCircle, Printer, Bell, History } from 'lucide-react';
@@ -23,6 +24,10 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { NalogIzvrsenje } from './NalogIzvrsenje';
 import { ExportMenu } from '@/components/ui/ExportMenu';
 import { downloadNalogPdf } from '@/lib/nalogPdf';
+import { ResourceDeletionHistory } from '@/components/views/ResourceDeletionHistory';
+import { DeadlineChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
+import { OrderHistory, OrderTeamHistory } from '@/components/views/ContractedWorkHistory';
+import { HistoryMenu } from '@/components/views/HistoryDialog';
 
 const statusInfo: Record<NalogStatus, { variant: 'blue' | 'yellow' | 'green' | 'red'; label: string }> = {
   otvoren: { variant: 'blue', label: 'Otvoren' },
@@ -73,7 +78,7 @@ const addDays = (d: Date, n: number) => {
   return r;
 };
 
-const fmtDate = (s: string) => new Date(s + 'T00:00:00').toLocaleDateString('hr-HR');
+const fmtDate = (s: string) => formatHrDate(new Date(s + 'T00:00:00'));
 
 export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null } = {}) {
   const loadScope = useRequestScope();
@@ -87,7 +92,9 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
   const [editing, setEditing] = useState<RadniNalog | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [historyRestoring, setHistoryRestoring] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deletionVersion, setDeletionVersion] = useState(0);
   const [period, setPeriod] = useState<Period>(focusNalogId ? 'svi' : 'danas');
   const [showHistory, setShowHistory] = useState(false);
   const [customDate, setCustomDate] = useState('');
@@ -96,6 +103,9 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
   const [selectedId, setSelectedId] = useState<string | null>(focusNalogId ?? null);
   const [rokovi, setRokovi] = useState<Rok[]>([]);
   const [rokForm, setRokForm] = useState({ naziv: '', datum: '', opis: '' });
+  const [rokSaving, setRokSaving] = useState(false);
+  const [deadlineRestoring, setDeadlineRestoring] = useState(false);
+  const [deadlineVersion, setDeadlineVersion] = useState(0);
   const [printingId, setPrintingId] = useState<string | null>(null);
   const [notifyingId, setNotifyingId] = useState<string | null>(null);
 
@@ -111,6 +121,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
   };
 
   const notifyWorkers = async (n: RadniNalog) => {
+    if (historyRestoring) return;
     setNotifyingId(n.id);
     setError(null);
     try {
@@ -123,19 +134,22 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
     }
   };
 
-  const loadRokovi = useCallback(async () => {
+  const loadRokovi = useCallback(async (rethrow = false) => {
     const isCurrent = rokoviScope.start();
     if (!isCurrent()) return;
     try {
       const nextRokovi = await fetchRokoviNaloga();
       if (isCurrent()) setRokovi(nextRokovi);
     } catch (e) {
-      if (isCurrent()) setError(e instanceof Error ? e.message : 'Greška pri učitavanju rokova');
+      if (isCurrent()) setError(e && typeof e === 'object' && 'message' in e ? String(e.message) : 'Greška pri učitavanju rokova');
+      if (rethrow) throw e;
     }
   }, [rokoviScope]);
 
   const addRok = async (n: RadniNalog) => {
+    if (rokSaving || deadlineRestoring || historyRestoring) return;
     if (!rokForm.naziv.trim() || !rokForm.datum) return;
+    setRokSaving(true);
     try {
       await createRok({
         gradiliste_id: n.gradiliste_id ?? null,
@@ -151,42 +165,53 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
       await loadRokovi();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri spremanju roka');
+    } finally {
+      setRokSaving(false);
     }
   };
 
   const toggleRok = async (r: Rok) => {
+    if (rokSaving || deadlineRestoring || historyRestoring) return;
+    setRokSaving(true);
     try {
       await updateRok(r.id, { status: r.status === 'zavrsen' ? 'otvoren' : 'zavrsen' });
+      setDeadlineVersion((value) => value + 1);
       await loadRokovi();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri spremanju roka');
+    } finally {
+      setRokSaving(false);
     }
   };
 
   const removeRok = async (id: string) => {
+    if (rokSaving || deadlineRestoring || historyRestoring) return;
+    setRokSaving(true);
     try {
       await deleteRok(id);
+      setDeletionVersion((value) => value + 1);
       await loadRokovi();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri brisanju roka');
+    } finally {
+      setRokSaving(false);
     }
   };
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (rethrow = false) => {
     const isCurrent = loadScope.start();
     if (!isCurrent()) return;
-    setLoading(true);
+    if (!rethrow) setLoading(true);
     setError(null);
-    const deadlines = loadRokovi();
     try {
-      const [n, g, r] = await Promise.all([fetchRadniNalozi(), fetchGradilista(), fetchRadnici()]);
+      const [n, g, r] = await Promise.all([fetchRadniNalozi(), fetchGradilista(), fetchRadnici(), loadRokovi(rethrow)]);
       if (!isCurrent()) return;
       setItems(n);
       setGradilista(g);
       setRadnici(r);
-      await deadlines;
     } catch (e) {
-      if (isCurrent()) setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
+      if (isCurrent()) setError(e && typeof e === 'object' && 'message' in e ? String(e.message) : 'Greška pri učitavanju');
+      if (rethrow) throw e;
     } finally {
       if (isCurrent()) setLoading(false);
     }
@@ -198,6 +223,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
   }, [load, loadScope]);
 
   const openEdit = (n: RadniNalog) => {
+    if (historyRestoring) return;
     setEditing(n);
     setForm({
       broj: n.broj,
@@ -227,7 +253,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
   };
 
   const save = async () => {
-    if (!form.naslov.trim()) return;
+    if (!form.naslov.trim() || historyRestoring || saving) return;
     setSaving(true);
     try {
       const payload = {
@@ -254,12 +280,22 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
   };
 
   const handleDelete = async () => {
-    if (!deleteId) return;
+    if (!deleteId || historyRestoring || saving) return;
+    setSaving(true);
     try {
       await deleteRadniNalog(deleteId);
+      setDeletionVersion((value) => value + 1);
+      if (selectedId === deleteId) setSelectedId(null);
+      if (editing?.id === deleteId) {
+        setModalOpen(false);
+        setEditing(null);
+        setForm(emptyForm);
+      }
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri brisanju');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -306,8 +342,76 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
     ? ['zavrsen', 'otkazan']
     : Object.keys(statusInfo) as NalogStatus[];
 
+  const afterDeletionRestore = async () => {
+    setModalOpen(false);
+    setEditing(null);
+    setForm(emptyForm);
+    setSelectedId(null);
+    setDeleteId(null);
+    setRokForm({ naziv: '', datum: '', opis: '' });
+    setPeriod('svi');
+    setShowHistory(false);
+    setStatusFilter('svi');
+    setSearch('');
+    setDeletionVersion((value) => value + 1);
+    await load(true);
+  };
+
   return (
     <div>
+      <HistoryMenu>
+      <OrderHistory refreshVersion={deletionVersion} onRestore={afterDeletionRestore}
+        disabled={saving || modalOpen || rokSaving || deadlineRestoring || Boolean(notifyingId) || historyRestoring}
+        onRestoringChange={setHistoryRestoring} buttonLabel="Izmjene radnih naloga" />
+      <OrderTeamHistory refreshVersion={deletionVersion} onRestore={afterDeletionRestore}
+        disabled={saving || modalOpen || rokSaving || deadlineRestoring || Boolean(notifyingId) || historyRestoring}
+        onRestoringChange={setHistoryRestoring} buttonLabel="Povijest dodjele ekipe" />
+      <ResourceDeletionHistory
+        module="radni_nalozi"
+        refreshVersion={deletionVersion}
+        onRestore={afterDeletionRestore}
+        disabled={saving || modalOpen || rokSaving || deadlineRestoring || Boolean(notifyingId) || historyRestoring}
+        onRestoringChange={setHistoryRestoring}
+        buttonLabel="Obrisani radni nalozi"
+      />
+      <ResourceDeletionHistory
+        module="radni_nalozi"
+        table="obracun_naloga"
+        refreshVersion={deletionVersion}
+        onRestore={afterDeletionRestore}
+        disabled={saving || modalOpen || rokSaving || deadlineRestoring || Boolean(notifyingId) || historyRestoring}
+        onRestoringChange={setHistoryRestoring}
+        buttonLabel="Prethodni obračuni naloga"
+      />
+      <ResourceDeletionHistory
+        module="radni_nalozi"
+        table="kilometarski_obracun"
+        refreshVersion={deletionVersion}
+        onRestore={afterDeletionRestore}
+        disabled={saving || modalOpen || rokSaving || deadlineRestoring || Boolean(notifyingId) || historyRestoring}
+        onRestoringChange={setHistoryRestoring}
+        buttonLabel="Dnevni kilometarski obračuni"
+      />
+      <ResourceDeletionHistory
+        module="gradilista"
+        table="gradiliste_zadaci"
+        refreshVersion={deletionVersion}
+        onRestore={afterDeletionRestore}
+        disabled={saving || modalOpen || rokSaving || deadlineRestoring || Boolean(notifyingId) || historyRestoring}
+        onRestoringChange={setHistoryRestoring}
+        buttonLabel="Obrisani zadaci"
+      />
+      <ResourceDeletionHistory
+        module="gradilista"
+        table="rokovi"
+        refreshVersion={deletionVersion}
+        onRestore={afterDeletionRestore}
+        disabled={saving || modalOpen || rokSaving || deadlineRestoring || Boolean(notifyingId) || historyRestoring}
+        onRestoringChange={setHistoryRestoring}
+        buttonLabel="Obrisani rokovi"
+      />
+      </HistoryMenu>
+      <fieldset disabled={historyRestoring} className="min-w-0">
       <div className="flex min-w-0 flex-col items-stretch justify-between gap-3 mb-6 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Radni nalozi</h1>
@@ -374,7 +478,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
               </button>
             ))}
             {!showHistory && period === 'datum' && (
-              <input
+              <input lang="hr-HR"
                 type="date"
                 value={customDate}
                 onChange={(e) => setCustomDate(e.target.value)}
@@ -521,7 +625,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                   {n.rok && (
                     <span className="flex items-center gap-1.5 text-xs text-slate-500">
                       <Calendar className="h-3.5 w-3.5" />
-                      Rok: {new Date(n.rok + 'T00:00:00').toLocaleDateString('hr-HR')}
+                      Rok: {formatHrDate(new Date(n.rok + 'T00:00:00'))}
                     </span>
                   )}
                 </div>
@@ -532,11 +636,12 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                     Rokovi i važni datumi ({nalogRokovi.length})
                   </h4>
                   {nalogRokovi.length === 0 && <p className="mb-3 text-xs text-slate-400">Nema dodanih rokova.</p>}
-                  <div className="mb-3 space-y-1.5">
+                  <fieldset disabled={rokSaving || deadlineRestoring} className="mb-3 space-y-1.5">
                     {nalogRokovi.map((r) => {
                       const late = r.status === 'otvoren' && r.datum < toISO(new Date());
                       return (
-                        <div key={r.id} className="flex items-center gap-3 rounded-lg border border-slate-100 px-3 py-2 text-sm">
+                        <div key={r.id}>
+                        <div className="flex items-center gap-3 rounded-lg border border-slate-100 px-3 py-2 text-sm">
                           <input
                             type="checkbox"
                             checked={r.status === 'zavrsen'}
@@ -559,10 +664,22 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </div>
+                        <DeadlineChangeHistoryPanel
+                          recordId={r.id}
+                          refreshVersion={deadlineVersion}
+                          disabled={rokSaving || deadlineRestoring}
+                          onRestoringChange={setDeadlineRestoring}
+                          onRestore={async () => {
+                            setRokForm({ naziv: '', datum: '', opis: '' });
+                            setDeadlineVersion((value) => value + 1);
+                            await loadRokovi();
+                          }}
+                        />
+                        </div>
                       );
                     })}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
+                  </fieldset>
+                  <fieldset disabled={rokSaving || deadlineRestoring} className="flex flex-wrap items-center gap-2">
                     <input
                       value={rokForm.naziv}
                       onChange={(e) => setRokForm((f) => ({ ...f, naziv: e.target.value }))}
@@ -570,7 +687,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                       placeholder="Naziv roka ili važnog datuma"
                       className="min-w-0 w-full flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm xl:w-auto"
                     />
-                    <input
+                    <input lang="hr-HR"
                       type="date"
                       value={rokForm.datum}
                       onChange={(e) => setRokForm((f) => ({ ...f, datum: e.target.value }))}
@@ -591,10 +708,10 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                       <Plus className="h-4 w-4" />
                       Dodaj
                     </button>
-                  </div>
+                  </fieldset>
                 </div>
 
-                <NalogIzvrsenje key={n.id} nalog={n} slotId={`rn-detail-slot-${n.id}`} visualSections onChange={() => void load()} />
+                <NalogIzvrsenje key={n.id} nalog={n} slotId={`rn-detail-slot-${n.id}`} visualSections onChange={() => { setDeletionVersion((value) => value + 1); void load(); }} />
               </div>
             );
           })()}
@@ -737,7 +854,11 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
               nalog={editing}
               slotId="nalog-modal-slot"
               radnikIds={form.radnik_ids}
-              onChange={(zavrsen) => setForm((f) => ({ ...f, status: zavrsen ? 'zavrsen' : f.status === 'zavrsen' ? 'u_tijeku' : f.status }))}
+              onChange={(zavrsen) => {
+                setForm((f) => ({ ...f, status: zavrsen ? 'zavrsen' : f.status === 'zavrsen' ? 'u_tijeku' : f.status }));
+                setDeletionVersion((value) => value + 1);
+                void loadRokovi();
+              }}
             />
           </div>
         )}
@@ -749,8 +870,9 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
         onClose={() => setDeleteId(null)}
         onConfirm={handleDelete}
         title="Izbrisati radni nalog?"
-        message="Ova radnja je nepovratna."
+        message="Obrisat će se nalog i povezani sati, troškovi i zapisi. Neriješene izvorne stavke vraćaju se gradilištu. Cijelu zaštićenu radnju moguće je vratiti 30 dana iz povijesti obrisanih naloga, uz prava svih zahvaćenih modula."
       />
+      </fieldset>
     </div>
   );
 }

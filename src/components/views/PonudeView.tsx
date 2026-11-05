@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Building2, CheckCircle2, Clock, FileDown, FileSignature, Pencil, Plus, Search, Settings2, Trash2, XCircle } from 'lucide-react';
 import type { Investitor, Objekt } from '@/types';
@@ -16,6 +17,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Field, Textarea, TextInput } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
 import { ExportMenu } from '@/components/ui/ExportMenu';
+import { ResourceDeletionHistory } from '@/components/views/ResourceDeletionHistory';
 
 const eur = (v: number) => v.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' });
 const errText = (e: unknown) => (e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : 'Greška');
@@ -315,6 +317,8 @@ export function PonudeView() {
 
       {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
+      <ResourceDeletionHistory module="ponude" refreshVersion={0} onRestore={load} disabled={loading} />
+
       <div className="mb-4 grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-4">
         {kpis.map((k) => (
           <div key={k.label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -389,7 +393,7 @@ export function PonudeView() {
                   <td className="px-3 py-3 font-semibold text-slate-900">{ponudaBroj(p)}</td>
                   <td className="px-3 py-3"><button type="button" onClick={() => { setEditing(p); setEditorOpen(true); }} className="text-left font-medium text-slate-800 hover:text-sky-600">{p.naslov}</button>{p.adresa_radova && <p className="text-xs text-slate-400">{p.adresa_radova}</p>}</td>
                   <td className="px-3 py-3 text-slate-600">{p.investitori?.naziv ?? '—'}</td>
-                  <td className="px-3 py-3 text-slate-600">{new Date(p.datum).toLocaleDateString('hr-HR')}</td>
+                  <td className="px-3 py-3 text-slate-600">{formatHrDate(new Date(p.datum))}</td>
                   <td className="px-3 py-3">
                     <select value={p.status} onChange={(e) => void changeStatus(p, e.target.value as PonudaStatus)} className="rounded-md border-0 bg-transparent p-0 text-xs focus:ring-0">
                       {Object.entries(statusLabel).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -460,7 +464,7 @@ export function PonudeView() {
           }
         }}
         title="Izbrisati ponudu?"
-        message="Ponuda i njezine stavke bit će trajno obrisane. Gradilište koje je iz nje nastalo ostaje."
+        message="Ponuda i njezine stavke bit će uklonjene iz prikaza i mogu se vratiti 30 dana. Gradilište koje je iz nje nastalo ostaje."
       />
       <ConfirmDialog
         open={convertTarget !== null}

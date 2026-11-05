@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useState, useEffect, useMemo } from 'react';
 import { Truck, Plus, Pencil, Trash2, Gauge, Calendar, Users, Weight, LayoutGrid, Table2, ArrowDown, ArrowUp, ArrowUpDown, RefreshCw, AlertTriangle } from 'lucide-react';
 import type { DnevniRasporedGradiliste, Vozilo, VoziloStatus, VoziloTip, VoziloDokument } from '@/types';
@@ -12,6 +13,8 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ExportMenu } from '@/components/ui/ExportMenu';
 import { VoziloFleetDetalji } from '@/components/views/VoziloFleetDetalji';
+import { ResourceChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
+import { ResourceDeletionHistory } from '@/components/views/ResourceDeletionHistory';
 import { todayISO } from '@/lib/rokovi';
 
 type VehicleDisplayStatus = VoziloStatus | 'na_gradilistu';
@@ -85,6 +88,8 @@ export function VozilaView() {
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Vozilo | null>(null);
+  const [historyRestoring, setHistoryRestoring] = useState(false);
+  const [deletionVersion, setDeletionVersion] = useState(0);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [recalculatingKm, setRecalculatingKm] = useState(false);
@@ -192,6 +197,10 @@ export function VozilaView() {
   };
 
   const save = async () => {
+    if (historyRestoring) {
+      setError('U tijeku je vraćanje promjene. Pričekajte završetak prije spremanja.');
+      return;
+    }
     if (!form.registracija.trim() || !form.marka.trim() || !form.tip.trim()) return;
     if (form.jamstvo_mjeseci && (!Number.isInteger(Number(form.jamstvo_mjeseci)) || Number(form.jamstvo_mjeseci) < 1)) {
       setError('Trajanje jamstva mora biti pozitivan cijeli broj mjeseci.');
@@ -276,6 +285,7 @@ export function VozilaView() {
     if (!deleteId) return;
     try {
       await deleteVozilo(deleteId);
+      setDeletionVersion((value) => value + 1);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri brisanju');
@@ -339,6 +349,13 @@ export function VozilaView() {
 
   return (
     <div className="min-w-0 max-w-full break-words">
+      <ResourceDeletionHistory module="vozila" refreshVersion={deletionVersion} onRestore={async () => {
+        setModalOpen(false);
+        setEditing(null);
+        setSelectedVehicle(null);
+        await load();
+        window.dispatchEvent(new Event('vozila-obavijest-updated'));
+      }} />
       <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Vozila</h1>
@@ -449,7 +466,7 @@ export function VozilaView() {
                         <>
                           {ns.km ? `${ns.km.toLocaleString('hr-HR')} km` : ''}
                           {ns.km && ns.datum ? ' / ' : ''}
-                          {ns.datum ? new Date(`${ns.datum}T00:00:00`).toLocaleDateString('hr-HR') : ''}
+                          {ns.datum ? formatHrDate(new Date(`${ns.datum}T00:00:00`)) : ''}
                         </>
                       ) : '—'}
                     </td>
@@ -575,20 +592,21 @@ export function VozilaView() {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { if (!historyRestoring) setModalOpen(false); }}
         title={editing ? 'Uredi vozilo' : 'Novo vozilo'}
         wide="screen"
         footer={
           <>
             <button
               onClick={() => setModalOpen(false)}
+              disabled={historyRestoring}
               className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
             >
               Odustani
             </button>
             <button
               onClick={save}
-              disabled={saving || !form.registracija.trim() || !form.marka.trim()}
+              disabled={saving || historyRestoring || !form.registracija.trim() || !form.marka.trim()}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50 transition-colors"
             >
               {saving ? 'Spremanje…' : 'Spremi'}
@@ -596,6 +614,13 @@ export function VozilaView() {
           </>
         }
       >
+        {editing && <ResourceChangeHistoryPanel table="vozila" recordId={editing.id} module="vozila" disabled={saving} onRestoringChange={setHistoryRestoring} onRestore={async () => {
+          setModalOpen(false);
+          setEditing(null);
+          setSelectedVehicle(null);
+          await load();
+          window.dispatchEvent(new Event('vozila-obavijest-updated'));
+        }} />}
         <div className="grid min-w-0 grid-cols-1 items-start gap-6 2xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
           <div className="min-w-0 space-y-4">
           <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
@@ -789,7 +814,7 @@ export function VozilaView() {
           </div>
           {editing ? (
             <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/50 p-4">
-              <VoziloDokumenti voziloId={editing.id} onChange={() => void loadServisi()} />
+              <VoziloDokumenti key={editing.id} voziloId={editing.id} onChange={() => void loadServisi()} />
             </div>
           ) : (
             <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-sm text-slate-500">Povijest servisa, troškove i dokumente možeš dodati nakon prvog spremanja vozila.</p>
@@ -820,7 +845,7 @@ export function VozilaView() {
         onClose={() => setDeleteId(null)}
         onConfirm={handleDelete}
         title="Izbrisati vozilo?"
-        message="Ova radnja je nepovratna. Vozilo će biti uklonjeno iz svih rasporeda."
+        message="Vozilo i povezani zapisi bit će uklonjeni. Zaštićeno brisanje može se vratiti 30 dana ako povezani podaci nisu naknadno promijenjeni i imate potrebna prava."
       />
     </div>
   );

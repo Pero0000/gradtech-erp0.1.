@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useState, useEffect, useRef, useCallback, type DragEvent } from 'react';
 import { useRequestScope } from '@/lib/useRequestScope';
 import { Building2, Plus, Pencil, Trash2, Calendar, GripVertical, AlertTriangle } from 'lucide-react';
@@ -23,6 +24,10 @@ import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { GradilisteDetailsPanel } from '@/components/views/GradilisteDetailsPanel';
+import { ResourceChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
+import { ResourceDeletionHistory } from '@/components/views/ResourceDeletionHistory';
+import { ContractedWorkHistory, TaskHistory } from '@/components/views/ContractedWorkHistory';
+import { HistoryMenu } from '@/components/views/HistoryDialog';
 import { nextDeadline, deadlineAlert } from '@/lib/rokovi';
 import { useAuth } from '@/auth/useAuth';
 import { DEFAULT_GRADILISTE_COLUMN_LABELS } from '@/lib/company';
@@ -95,7 +100,7 @@ const emptyArchiveFilter = {
 type ArchiveSortKey = 'naziv' | 'investitor' | 'objekt' | 'regija' | 'datum_pocetka' | 'datum_zavrsetka';
 
 const formatDate = (value: string | null | undefined) =>
-  value ? new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString('hr-HR') : '—';
+  value ? formatHrDate(new Date(`${value.slice(0, 10)}T00:00:00`)) : '—';
 
 function emptyGradilisteColumns(): string[][] {
   return [[], [], []];
@@ -170,6 +175,8 @@ export function GradilistaView({
   const [editing, setEditing] = useState<Gradiliste | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [historyRestoring, setHistoryRestoring] = useState(false);
+  const [deletionVersion, setDeletionVersion] = useState(0);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [newInvestorName, setNewInvestorName] = useState('');
   const [investorMode, setInvestorMode] = useState<'manual' | 'select'>('manual');
@@ -190,7 +197,7 @@ export function GradilistaView({
     return save;
   }, []);
 
-  const loadRokovi = useCallback(async () => {
+  const loadRokovi = useCallback(async (rethrow = false) => {
     const isCurrent = rokoviScope.start();
     if (!isCurrent()) return;
     try {
@@ -198,20 +205,22 @@ export function GradilistaView({
       if (isCurrent()) setRokovi(nextRokovi);
     } catch (reason) {
       if (isCurrent()) setError(getErrorMessage(reason, 'Greška pri učitavanju rokova gradilišta.'));
+      if (rethrow) throw reason;
     }
   }, [rokoviScope]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (rethrow = false) => {
     const isCurrent = loadScope.start();
     if (!isCurrent()) return;
-    setLoading(true);
+    if (!rethrow) setLoading(true);
     setError(null);
-    void loadRokovi();
+    if (!rethrow) void loadRokovi();
     try {
       const [nextItems, nextInvestitori, savedLayout] = await Promise.all([
         fetchGradilista(),
         fetchInvestitori(),
         layoutSaveQueue.current.then(() => fetchGradilisteBoardLayout()),
+        rethrow ? loadRokovi(true) : Promise.resolve(),
       ]);
       if (!isCurrent()) return;
       setItems(nextItems);
@@ -225,6 +234,7 @@ export function GradilistaView({
       }
     } catch (e) {
       if (isCurrent()) setError(getErrorMessage(e, 'Greška pri učitavanju'));
+      if (rethrow) throw e;
     } finally {
       if (isCurrent()) setLoading(false);
     }
@@ -292,7 +302,7 @@ export function GradilistaView({
   }, [form.investitorId]);
 
   const handleDragStart = (event: DragEvent<HTMLDivElement>, gradilisteId: string) => {
-    if (!canEditBoard) return;
+    if (!canEditBoard || historyRestoring) return;
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', gradilisteId);
     setDraggedId(gradilisteId);
@@ -301,7 +311,7 @@ export function GradilistaView({
   const handleDrop = (event: DragEvent<HTMLElement>, targetColumn: number, targetId?: string) => {
     event.preventDefault();
     event.stopPropagation();
-    if (!canEditBoard) return;
+    if (!canEditBoard || historyRestoring) return;
     const gradilisteId = event.dataTransfer.getData('text/plain') || draggedId;
     const sourceColumn = columnIds.findIndex((column) => column.includes(gradilisteId ?? ''));
     if (!gradilisteId || sourceColumn < 0 || gradilisteId === targetId) return;
@@ -378,6 +388,7 @@ export function GradilistaView({
     setArchiveSort((current) => ({ key, asc: current.key === key ? !current.asc : key === 'naziv' || key === 'investitor' || key === 'objekt' || key === 'regija' }));
 
   const openCreate = (columnIndex?: number) => {
+    if (historyRestoring) return;
     setEditing(null);
     setForm({ ...emptyForm, status: categoryDefaultStatus[activeCategory] });
     setTargetColumn(columnIndex === undefined ? '' : String(columnIndex));
@@ -400,6 +411,7 @@ export function GradilistaView({
   };
 
   const openEdit = (g: Gradiliste) => {
+    if (historyRestoring) return;
     setEditing(g);
     const currentColumn = columnIds.findIndex((column) => column.includes(g.id));
     setTargetColumn(String(Math.max(currentColumn, 0)));
@@ -438,7 +450,7 @@ export function GradilistaView({
   };
 
   const save = async () => {
-    if (!form.naziv.trim() || !targetColumn) return;
+    if (saving || historyRestoring || !form.naziv.trim() || !targetColumn) return;
     setSaving(true);
     setError(null);
     try {
@@ -525,9 +537,10 @@ export function GradilistaView({
   };
 
   const handleDelete = async () => {
-    if (!deleteId) return;
+    if (!deleteId || historyRestoring) return;
     try {
       await deleteGradiliste(deleteId);
+      setDeletionVersion((value) => value + 1);
       if (selectedGradilisteId === deleteId) setSelectedGradilisteId(null);
       await load();
     } catch (e) {
@@ -539,8 +552,65 @@ export function GradilistaView({
     return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
   }
 
+  const afterDeletionRestore = async () => {
+    setModalOpen(false);
+    setEditing(null);
+    setForm(emptyForm);
+    setSelectedGradilisteId(null);
+    setDeleteId(null);
+    setDeletionVersion((value) => value + 1);
+    await load(true);
+  };
+
   return (
     <div className="gradilista-view-container min-w-0">
+      <HistoryMenu>
+        <ResourceDeletionHistory
+          module="gradilista"
+          refreshVersion={deletionVersion}
+          onRestore={afterDeletionRestore}
+          disabled={saving || modalOpen || Boolean(selectedGradilisteId) || historyRestoring}
+          onRestoringChange={setHistoryRestoring}
+          buttonLabel="Obrisana gradilišta"
+        />
+        <ResourceDeletionHistory
+          module="gradilista"
+          table="gradiliste_zadaci"
+          refreshVersion={deletionVersion}
+          onRestore={afterDeletionRestore}
+          disabled={saving || modalOpen || Boolean(selectedGradilisteId) || historyRestoring}
+          onRestoringChange={setHistoryRestoring}
+          buttonLabel="Obrisani zadaci"
+        />
+        <ResourceDeletionHistory
+          module="gradilista"
+          table="rokovi"
+          refreshVersion={deletionVersion}
+          onRestore={afterDeletionRestore}
+          disabled={saving || modalOpen || Boolean(selectedGradilisteId) || historyRestoring}
+          onRestoringChange={setHistoryRestoring}
+          buttonLabel="Obrisani rokovi"
+        />
+        <ResourceDeletionHistory
+          module="gradilista"
+          table="ugovoreni_radovi"
+          refreshVersion={deletionVersion}
+          onRestore={afterDeletionRestore}
+          disabled={saving || modalOpen || Boolean(selectedGradilisteId) || historyRestoring}
+          onRestoringChange={setHistoryRestoring}
+          buttonLabel="Obrisani ugovoreni radovi"
+        />
+        <ContractedWorkHistory disabled={saving || modalOpen || Boolean(selectedGradilisteId) || historyRestoring}
+          refreshVersion={deletionVersion} onRestoringChange={setHistoryRestoring} onRestore={afterDeletionRestore}
+          buttonLabel="Izmjene ugovorenih radova" />
+        <TaskHistory disabled={saving || modalOpen || Boolean(selectedGradilisteId) || historyRestoring}
+          refreshVersion={deletionVersion} onRestoringChange={setHistoryRestoring} onRestore={afterDeletionRestore}
+          buttonLabel="Izmjene zadataka i rokova" />
+      </HistoryMenu>
+      {(modalOpen || selectedGradilisteId) && <p className="mb-4 text-xs text-slate-500">
+        Za povrat iz povijesti zatvorite obrazac i detalje gradilišta kako se povrat ne bi preklapao s njihovim spremanjem.
+      </p>}
+      <fieldset disabled={historyRestoring} className="min-w-0">
       <div className="gradilista-page-header mb-6 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Gradilišta</h1>
@@ -711,7 +781,7 @@ export function GradilistaView({
                       {archiveItems.map((g) => (
                         <tr
                           key={g.id}
-                          onClick={() => setSelectedGradilisteId(g.id)}
+                          onClick={() => { if (!historyRestoring) setSelectedGradilisteId(g.id); }}
                           className={`group cursor-pointer ${selectedGradilisteId === g.id ? 'bg-sky-50' : 'hover:bg-slate-50'}`}
                         >
                           <td className="max-w-56 px-3 py-2.5">
@@ -836,7 +906,7 @@ export function GradilistaView({
                         setDropTargetId(g.id);
                       }}
                       onDrop={(event) => handleDrop(event, columnIndex, g.id)}
-                      onClick={() => setSelectedGradilisteId(g.id)}
+                      onClick={() => { if (!historyRestoring) setSelectedGradilisteId(g.id); }}
                       className={`gradiliste-board-card group relative cursor-grab rounded-xl border bg-white p-3 shadow-sm transition-all active:cursor-grabbing hover:shadow-md ${selectedGradilisteId === g.id ? 'border-sky-500 ring-1 ring-sky-200' : 'border-slate-200'} ${draggedId === g.id ? 'opacity-50' : ''} ${dropTargetId === g.id ? 'ring-2 ring-sky-400' : ''}`}
                     >
                       <div className="mb-2 flex min-w-0 flex-col items-start gap-1.5 pr-12">
@@ -899,16 +969,16 @@ export function GradilistaView({
                     {g.datum_pocetka && (
                       <div className="flex min-w-0 items-center gap-1 whitespace-nowrap text-[10px]">
                         <span className="flex-shrink-0 font-medium text-slate-500">Početak</span>
-                        <span className="truncate font-semibold text-slate-900" title={new Date(g.datum_pocetka).toLocaleDateString('hr-HR')}>
-                          {new Date(g.datum_pocetka).toLocaleDateString('hr-HR', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                        <span className="truncate font-semibold text-slate-900" title={formatHrDate(new Date(g.datum_pocetka))}>
+                          {formatHrDate(new Date(g.datum_pocetka), { day: '2-digit', month: '2-digit', year: '2-digit' })}
                         </span>
                       </div>
                     )}
                     {g.datum_zavrsetka && (
                       <div className="flex min-w-0 items-center gap-1 whitespace-nowrap text-[10px]">
                         <span className="flex-shrink-0 font-medium text-slate-500">Kraj</span>
-                        <span className="truncate font-semibold text-slate-900" title={new Date(g.datum_zavrsetka).toLocaleDateString('hr-HR')}>
-                          {new Date(g.datum_zavrsetka).toLocaleDateString('hr-HR', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                        <span className="truncate font-semibold text-slate-900" title={formatHrDate(new Date(g.datum_zavrsetka))}>
+                          {formatHrDate(new Date(g.datum_zavrsetka), { day: '2-digit', month: '2-digit', year: '2-digit' })}
                         </span>
                       </div>
                     )}
@@ -922,7 +992,7 @@ export function GradilistaView({
                       <Calendar className="h-3.5 w-3.5 flex-shrink-0 text-amber-600" />
                       <span className="font-semibold uppercase text-[9px]">Idući rok</span>
                       <span className="min-w-0 flex-1 truncate">{next.label}</span>
-                      <span className="flex-shrink-0 font-semibold">{new Date(`${next.datum}T00:00:00`).toLocaleDateString('hr-HR')}</span>
+                      <span className="flex-shrink-0 font-semibold">{formatHrDate(new Date(`${next.datum}T00:00:00`))}</span>
                     </div>
                   ) : null;
                 })()}
@@ -954,7 +1024,7 @@ export function GradilistaView({
                   item.id === selectedGradiliste.id ? { ...item, ...updates } : item,
                 ));
               }}
-              onRokoviChange={() => void loadRokovi()}
+              onRokoviChange={() => { setDeletionVersion((value) => value + 1); void loadRokovi(); }}
               onOpenNalog={onOpenNalog}
             />
           )}
@@ -968,20 +1038,21 @@ export function GradilistaView({
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { if (!saving && !historyRestoring) setModalOpen(false); }}
         title={editing ? 'Uredi gradilište' : 'Novo gradilište'}
         wide="md"
         footer={
           <>
             <button
               onClick={() => setModalOpen(false)}
+              disabled={saving || historyRestoring}
               className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
             >
               Odustani
             </button>
             <button
               onClick={save}
-              disabled={saving || !form.naziv.trim() || !targetColumn}
+              disabled={saving || historyRestoring || !form.naziv.trim() || !targetColumn}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50 transition-colors"
             >
               {saving ? 'Spremanje…' : 'Spremi'}
@@ -994,6 +1065,23 @@ export function GradilistaView({
             {error}
           </div>
         )}
+        {editing && <div className="mb-4">
+          <ResourceChangeHistoryPanel
+            table="gradilista"
+            recordId={editing.id}
+            module="gradilista"
+            disabled={saving}
+            onRestoringChange={setHistoryRestoring}
+            onRestore={async () => {
+              setModalOpen(false);
+              setEditing(null);
+              setForm(emptyForm);
+              setSelectedGradilisteId(null);
+              await load();
+            }}
+          />
+        </div>}
+        <fieldset disabled={saving || historyRestoring} className="min-w-0">
         <div className="grid gap-x-6 gap-y-4 xl:grid-cols-2">
           <Field label="Vrsta gradilišta *">
             <Select value={targetColumn} onChange={(event) => setTargetColumn(event.target.value)}>
@@ -1220,7 +1308,7 @@ export function GradilistaView({
                   {lista.map(({ z, index }) => (
                     <div key={`${z.naziv}-${index}`} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
                       <span className="min-w-0 flex-1 truncate">{z.naziv}</span>
-                      {z.rok && <span className="text-xs text-slate-500">{new Date(`${z.rok}T00:00:00`).toLocaleDateString('hr-HR')}</span>}
+                      {z.rok && <span className="text-xs text-slate-500">{formatHrDate(new Date(`${z.rok}T00:00:00`))}</span>}
                       <button
                         type="button"
                         onClick={() => setNewZadaci((prev) => prev.filter((_, i) => i !== index))}
@@ -1259,6 +1347,7 @@ export function GradilistaView({
             );
           })}
         </div>
+        </fieldset>
       </Modal>
 
       <ConfirmDialog
@@ -1266,8 +1355,9 @@ export function GradilistaView({
         onClose={() => setDeleteId(null)}
         onConfirm={handleDelete}
         title="Izbrisati gradilište?"
-        message="Ova radnja je nepovratna. Svi povezani rasporedi će također biti izbrisani."
+        message="Obrisat će se gradilište i povezani podaci, uključujući naloge, rasporede i financijske zapise. Cijelu zaštićenu radnju moguće je vratiti 30 dana iz povijesti obrisanih gradilišta. Potrebna su prava svih zahvaćenih modula."
       />
+      </fieldset>
     </div>
   );
 }

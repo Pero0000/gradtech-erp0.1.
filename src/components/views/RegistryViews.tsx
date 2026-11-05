@@ -1,4 +1,7 @@
-import { useEffect, useState } from 'react';
+import { formatHrDate } from '@/lib/localization';
+import { useCallback, useEffect, useState } from 'react';
+import { useAuth } from '@/auth/useAuth';
+import { useRequestScope } from '@/lib/useRequestScope';
 import { ArrowDown, ArrowUp, ArrowUpDown, BookOpen, Building2, Pencil, Plus, RotateCcw, Search, Trash2, Users } from 'lucide-react';
 import type { Faktura, Gradiliste, Investitor, InvestitorKontakt, Objekt, ObjektZnanje, RadniNalog, RadnoVrijeme, Trosak } from '@/types';
 import {
@@ -25,6 +28,8 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Field, Select, Textarea, TextInput } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
 import { ExportMenu } from '@/components/ui/ExportMenu';
+import { InvestorChangeHistoryPanel, ObjectChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
+import { HistoryMenu } from '@/components/views/HistoryDialog';
 
 const months = [
   'Siječanj',
@@ -91,7 +96,7 @@ function formatCurrency(value: number) {
 }
 
 function formatDate(value: string | null | undefined) {
-  return value ? new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString('hr-HR') : '—';
+  return value ? formatHrDate(new Date(`${value.slice(0, 10)}T00:00:00`)) : '—';
 }
 
 function errorMessage(error: unknown) {
@@ -103,6 +108,9 @@ function errorMessage(error: unknown) {
 }
 
 export function InvestitoriView() {
+  const { canAccess } = useAuth();
+  const loadScope = useRequestScope();
+  const contactScope = useRequestScope();
   const [investitori, setInvestitori] = useState<Investitor[]>([]);
   const [objekti, setObjekti] = useState<Objekt[]>([]);
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
@@ -123,6 +131,8 @@ export function InvestitoriView() {
   const [editing, setEditing] = useState<Investitor | null>(null);
   const [form, setForm] = useState(emptyInvestitorForm);
   const [saving, setSaving] = useState(false);
+  const [historyRestoring, setHistoryRestoring] = useState(false);
+  const [historyInvestorId, setHistoryInvestorId] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Investitor | null>(null);
   const [selectedInvestor, setSelectedInvestor] = useState<Investitor | null>(null);
   const [investorContacts, setInvestorContacts] = useState<InvestitorKontakt[]>([]);
@@ -131,38 +141,35 @@ export function InvestitoriView() {
   const [contactError, setContactError] = useState<string | null>(null);
   const [contactSaving, setContactSaving] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      fetchInvestitori(),
-      fetchAllObjekti(),
-      fetchGradilista(),
-      fetchTroskovi(),
-      fetchRadnoVrijeme(),
-      fetchFakture(),
-      fetchRadniNalozi(),
-    ])
-      .then(([nextInvestitori, nextObjekti, nextGradilista, nextTroskovi, nextRadnoVrijeme, nextFakture, nextNalozi]) => {
-        if (cancelled) return;
-        setInvestitori(nextInvestitori);
-        setObjekti(nextObjekti);
-        setGradilista(nextGradilista);
-        setTroskovi(nextTroskovi);
-        setRadnoVrijeme(nextRadnoVrijeme);
-        setNalozi(nextNalozi);
-        setFakture(nextFakture);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(errorMessage(e));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+  const load = useCallback(async (rethrow = false) => {
+    const isCurrent = loadScope.start();
+    if (!isCurrent()) return;
+    if (!rethrow) setLoading(true);
+    setError(null);
+    try {
+      const [nextInvestitori, nextObjekti, nextGradilista, nextTroskovi, nextRadnoVrijeme, nextFakture, nextNalozi] = await Promise.all([
+        fetchInvestitori(), fetchAllObjekti(), fetchGradilista(), fetchTroskovi(), fetchRadnoVrijeme(), fetchFakture(), fetchRadniNalozi(),
+      ]);
+      if (!isCurrent()) return;
+      setInvestitori(nextInvestitori);
+      setObjekti(nextObjekti);
+      setGradilista(nextGradilista);
+      setTroskovi(nextTroskovi);
+      setRadnoVrijeme(nextRadnoVrijeme);
+      setNalozi(nextNalozi);
+      setFakture(nextFakture);
+    } catch (reason) {
+      if (isCurrent()) setError(errorMessage(reason));
+      if (rethrow) throw reason;
+    } finally {
+      if (isCurrent()) setLoading(false);
+    }
+  }, [loadScope]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  useEffect(() => {
+    void load();
+    return () => loadScope.invalidate();
+  }, [load, loadScope]);
 
   const years = Array.from(new Set(investitori.map((investitor) => investitor.created_at.slice(0, 4))))
     .filter(Boolean)
@@ -296,6 +303,7 @@ export function InvestitoriView() {
   };
 
   const openCreate = () => {
+    if (historyRestoring || saving) return;
     setEditing(null);
     setForm(emptyInvestitorForm);
     setError(null);
@@ -303,6 +311,7 @@ export function InvestitoriView() {
   };
 
   const openEdit = (investitor: Investitor) => {
+    if (historyRestoring || saving) return;
     setEditing(investitor);
     setForm({
       naziv: investitor.naziv,
@@ -321,7 +330,7 @@ export function InvestitoriView() {
   };
 
   const saveInvestitor = async () => {
-    if (!form.naziv.trim()) return;
+    if (!form.naziv.trim() || saving || historyRestoring) return;
     setSaving(true);
     setError(null);
     const payload = {
@@ -351,7 +360,8 @@ export function InvestitoriView() {
   };
 
   const removeInvestitor = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || saving || historyRestoring) return;
+    setSaving(true);
     setError(null);
     try {
       await deleteInvestitor(deleteTarget.id);
@@ -359,24 +369,32 @@ export function InvestitoriView() {
       setDeleteTarget(null);
     } catch (e) {
       setError(errorMessage(e));
+    } finally {
+      setSaving(false);
     }
   };
 
   const openInvestorOverview = async (investitor: Investitor) => {
+    if (historyRestoring) return;
+    const isCurrent = contactScope.start();
+    if (!isCurrent()) return;
     setSelectedInvestor(investitor);
     setContactError(null);
     setContactEditing(null);
     setContactForm({ uloga: '', ime: '', telefon: '', email: '', napomena: '' });
     try {
-      setInvestorContacts(await fetchInvestitorKontakti(investitor.id));
+      const contacts = await fetchInvestitorKontakti(investitor.id);
+      if (isCurrent()) setInvestorContacts(contacts);
     } catch (e) {
-      setContactError(errorMessage(e));
-      setInvestorContacts([]);
+      if (isCurrent()) {
+        setContactError(errorMessage(e));
+        setInvestorContacts([]);
+      }
     }
   };
 
   const submitContact = async () => {
-    if (!selectedInvestor || !contactForm.uloga.trim() || !contactForm.ime.trim()) return;
+    if (!selectedInvestor || !contactForm.uloga.trim() || !contactForm.ime.trim() || contactSaving || historyRestoring) return;
     setContactSaving(true);
     setContactError(null);
     try {
@@ -399,6 +417,8 @@ export function InvestitoriView() {
   };
 
   const removeContact = async (kontakt: InvestitorKontakt) => {
+    if (contactSaving || historyRestoring) return;
+    setContactSaving(true);
     setContactError(null);
     try {
       await deleteInvestitorKontakt(kontakt.id);
@@ -409,6 +429,8 @@ export function InvestitoriView() {
       }
     } catch (e) {
       setContactError(errorMessage(e));
+    } finally {
+      setContactSaving(false);
     }
   };
 
@@ -445,8 +467,42 @@ export function InvestitoriView() {
     return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
   }
 
+  const afterInvestorRestore = async () => {
+    contactScope.invalidate();
+    setModalOpen(false);
+    setEditing(null);
+    setForm(emptyInvestitorForm);
+    setDeleteTarget(null);
+    setSelectedInvestor(null);
+    setInvestorContacts([]);
+    setContactEditing(null);
+    setContactForm({ uloga: '', ime: '', telefon: '', email: '', napomena: '' });
+    setContactError(null);
+    setQuery('');
+    setYear('');
+    setMonth('');
+    setDateFrom('');
+    setDateTo('');
+    await load(true);
+  };
+  const historyDisabled = saving || contactSaving || modalOpen || deleteTarget !== null || selectedInvestor !== null || historyRestoring;
+
   return (
     <div className="min-w-0 max-w-full">
+      {canAccess('investitori', 'edit') && <HistoryMenu>
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-slate-900">Povijest izmjena investitora (30 dana)</h2>
+        <p className="text-xs text-slate-500">Odaberite investitora. Za povrat zatvorite obrazac i pregled investitora. Zasebni kontakti i povezani poslovni zapisi ne vraćaju se.</p>
+        <select aria-label="Investitor za povijest izmjena" value={historyInvestorId} disabled={historyDisabled}
+          onChange={(event) => setHistoryInvestorId(event.target.value)} className="max-w-full rounded-lg border border-slate-300 p-2 text-sm">
+          <option value="">Odaberite investitora</option>
+          {investitori.map((investitor) => <option key={investitor.id} value={investitor.id}>{investitor.naziv}</option>)}
+        </select>
+        {historyInvestorId && <InvestorChangeHistoryPanel recordId={historyInvestorId} onRestore={afterInvestorRestore}
+          disabled={historyDisabled} onRestoringChange={setHistoryRestoring} />}
+      </section>
+      </HistoryMenu>}
+      <fieldset disabled={historyRestoring} className="min-w-0">
       <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-4 xl:flex-row xl:flex-wrap xl:items-end">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Investitori</h1>
@@ -626,7 +682,7 @@ export function InvestitoriView() {
                       {formatCurrency(finances.difference)}
                     </td>
                     <td className="px-5 py-3.5 text-right text-sm text-slate-500">
-                      {new Date(investitor.created_at).toLocaleDateString('hr-HR')}
+                      {formatHrDate(new Date(investitor.created_at))}
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="flex justify-end gap-1">
@@ -887,11 +943,14 @@ export function InvestitoriView() {
         title="Izbrisati investitora?"
         message="Investitora je moguće izbrisati samo ako nema povezane objekte."
       />
+      </fieldset>
     </div>
   );
 }
 
 export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: string) => void } = {}) {
+  const { canAccess } = useAuth();
+  const loadScope = useRequestScope();
   const [objekti, setObjekti] = useState<Objekt[]>([]);
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [fakture, setFakture] = useState<Faktura[]>([]);
@@ -908,6 +967,8 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
   const [editing, setEditing] = useState<Objekt | null>(null);
   const [form, setForm] = useState(emptyObjektForm);
   const [saving, setSaving] = useState(false);
+  const [historyRestoring, setHistoryRestoring] = useState(false);
+  const [historyObjectId, setHistoryObjectId] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Objekt | null>(null);
   const [selectedObjekt, setSelectedObjekt] = useState<Objekt | null>(null);
   const [znanjeFormOpen, setZnanjeFormOpen] = useState(false);
@@ -916,30 +977,35 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
   const [znanjeError, setZnanjeError] = useState<string | null>(null);
   const [znanjeForm, setZnanjeForm] = useState({ kategorija: 'Materijali', naslov: '', opis: '' });
 
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([fetchAllObjekti(), fetchGradilista(), fetchFakture(), fetchInvestitori(), fetchTroskovi(), fetchRadnoVrijeme(), fetchRadniNalozi()])
-      .then(([nextObjekti, nextGradilista, nextFakture, nextInvestitori, nextTroskovi, nextRadnoVrijeme, nextNalozi]) => {
-        if (cancelled) return;
-        setObjekti(nextObjekti);
-        setGradilista(nextGradilista);
-        setFakture(nextFakture);
-        setInvestitori(nextInvestitori);
-        setTroskovi(nextTroskovi);
-        setRadnoVrijeme(nextRadnoVrijeme);
-        setNalozi(nextNalozi);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(errorMessage(e));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+  const load = useCallback(async (rethrow = false) => {
+    const isCurrent = loadScope.start();
+    if (!isCurrent()) return;
+    if (!rethrow) setLoading(true);
+    setError(null);
+    try {
+      const [nextObjekti, nextGradilista, nextFakture, nextInvestitori, nextTroskovi, nextRadnoVrijeme, nextNalozi] = await Promise.all([
+        fetchAllObjekti(), fetchGradilista(), fetchFakture(), fetchInvestitori(), fetchTroskovi(), fetchRadnoVrijeme(), fetchRadniNalozi(),
+      ]);
+      if (!isCurrent()) return;
+      setObjekti(nextObjekti);
+      setGradilista(nextGradilista);
+      setFakture(nextFakture);
+      setInvestitori(nextInvestitori);
+      setTroskovi(nextTroskovi);
+      setRadnoVrijeme(nextRadnoVrijeme);
+      setNalozi(nextNalozi);
+    } catch (reason) {
+      if (isCurrent()) setError(errorMessage(reason));
+      if (rethrow) throw reason;
+    } finally {
+      if (isCurrent()) setLoading(false);
+    }
+  }, [loadScope]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  useEffect(() => {
+    void load();
+    return () => loadScope.invalidate();
+  }, [load, loadScope]);
 
   const gradilistaPoObjektu = new Map<string, Gradiliste[]>();
   for (const gradiliste of gradilista) {
@@ -1046,6 +1112,7 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
   };
 
   const openCreate = () => {
+    if (historyRestoring || saving) return;
     setEditing(null);
     setForm(emptyObjektForm);
     setError(null);
@@ -1053,6 +1120,7 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
   };
 
   const openEdit = (objekt: Objekt) => {
+    if (historyRestoring || saving) return;
     setEditing(objekt);
     setForm({
       naziv: objekt.naziv,
@@ -1069,6 +1137,7 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
   };
 
   const openObjektKnowledge = (objekt: Objekt) => {
+    if (historyRestoring || znanjeSaving) return;
     setSelectedObjekt(objekt);
     setZnanjeError(null);
     setZnanjeFormOpen(false);
@@ -1077,6 +1146,7 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
   };
 
   const editObjektKnowledge = (entry: ObjektZnanje) => {
+    if (historyRestoring || znanjeSaving) return;
     setZnanjeEditingId(entry.id);
     setZnanjeForm({ kategorija: entry.kategorija, naslov: entry.naslov, opis: entry.opis });
     setZnanjeError(null);
@@ -1084,7 +1154,7 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
   };
 
   const saveKnowledgeEntry = async () => {
-    if (!selectedObjekt || !znanjeForm.naslov.trim()) return;
+    if (!selectedObjekt || !znanjeForm.naslov.trim() || znanjeSaving || historyRestoring) return;
     setZnanjeSaving(true);
     setZnanjeError(null);
     const entry: ObjektZnanje = {
@@ -1113,7 +1183,7 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
   };
 
   const removeKnowledgeEntry = async (entryId: string) => {
-    if (!selectedObjekt) return;
+    if (!selectedObjekt || znanjeSaving || historyRestoring) return;
     setZnanjeSaving(true);
     setZnanjeError(null);
     const nextKnowledge = (selectedObjekt.znanje ?? []).filter((item) => item.id !== entryId);
@@ -1135,7 +1205,7 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
   };
 
   const submitObjekt = async () => {
-    if (!form.naziv.trim() || !form.investitor_id) return;
+    if (!form.naziv.trim() || !form.investitor_id || saving || historyRestoring) return;
     setSaving(true);
     setError(null);
     try {
@@ -1160,7 +1230,8 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
   };
 
   const removeObjekt = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || saving || historyRestoring) return;
+    setSaving(true);
     setError(null);
     try {
       await deleteObjekt(deleteTarget.id);
@@ -1169,6 +1240,7 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
       setError(errorMessage(e));
     } finally {
       setDeleteTarget(null);
+      setSaving(false);
     }
   };
 
@@ -1241,8 +1313,37 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
     return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
   }
 
+  const afterObjectRestore = async () => {
+    setModalOpen(false);
+    setEditing(null);
+    setForm(emptyObjektForm);
+    setDeleteTarget(null);
+    setSelectedObjekt(null);
+    setZnanjeFormOpen(false);
+    setZnanjeEditingId(null);
+    setZnanjeForm({ kategorija: 'Materijali', naslov: '', opis: '' });
+    setZnanjeError(null);
+    setQuery('');
+    await load(true);
+  };
+  const historyDisabled = saving || znanjeSaving || modalOpen || selectedObjekt !== null || deleteTarget !== null || historyRestoring;
+
   return (
     <div className="min-w-0 max-w-full">
+      {canAccess('objekti', 'edit') && <HistoryMenu>
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-slate-900">Povijest izmjena objekta (30 dana)</h2>
+        <p className="text-xs text-slate-500">Odaberite objekt. Za povrat zatvorite obrazac i pregled objekta. Znanje objekta, gradilišta i financijski zapisi ne vraćaju se.</p>
+        <select aria-label="Objekt za povijest izmjena" value={historyObjectId} disabled={historyDisabled}
+          onChange={(event) => setHistoryObjectId(event.target.value)} className="max-w-full rounded-lg border border-slate-300 p-2 text-sm">
+          <option value="">Odaberite objekt</option>
+          {objekti.map((objekt) => <option key={objekt.id} value={objekt.id}>{objekt.naziv}</option>)}
+        </select>
+        {historyObjectId && <ObjectChangeHistoryPanel recordId={historyObjectId} onRestore={afterObjectRestore}
+          disabled={historyDisabled} onRestoringChange={setHistoryRestoring} />}
+      </section>
+      </HistoryMenu>}
+      <fieldset disabled={historyRestoring} className="min-w-0">
       <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-4 xl:flex-row xl:flex-wrap xl:items-end">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Objekti</h1>
@@ -1568,6 +1669,7 @@ export function ObjektiView({ onOpenGradiliste }: { onOpenGradiliste?: (id: stri
         title="Izbrisati objekt?"
         message="Objekt je moguće izbrisati samo ako nema povezana gradilišta."
       />
+      </fieldset>
     </div>
   );
 }

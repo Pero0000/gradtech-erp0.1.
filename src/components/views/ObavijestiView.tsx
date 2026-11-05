@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useEffect, useMemo, useState } from 'react';
 import { Bell, BellRing, CheckCircle2, Search } from 'lucide-react';
 import type { View } from '@/components/Sidebar';
@@ -156,7 +157,7 @@ export function ObavijestiView({ onNavigate, canResolveVozila }: { onNavigate: (
                   <p className="truncate text-sm font-semibold text-slate-900">{o.title}</p>
                   <p className="truncate text-xs text-slate-500">{o.tipLabel} · {o.detail}</p>
                 </div>
-                {o.datum && <span className="text-xs text-slate-500">{new Date(`${o.datum}T00:00:00`).toLocaleDateString('hr-HR')}</span>}
+                {o.datum && <span className="text-xs text-slate-500">{formatHrDate(new Date(`${o.datum}T00:00:00`))}</span>}
               </button>
               {canResolveVozila && (o.voziloObavijestId || o.voziloGorivoAnomalijaId) && (
                 <button

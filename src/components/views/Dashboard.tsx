@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
@@ -77,7 +78,7 @@ const dateKey = (value: string | null | undefined) => value?.slice(0, 10) ?? '';
 const dm = (iso: string | null | undefined) => {
   if (!iso) return '—';
   const parsed = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso);
-  return Number.isNaN(parsed.getTime()) ? '—' : parsed.toLocaleDateString('hr-HR', { day: '2-digit', month: '2-digit' });
+  return Number.isNaN(parsed.getTime()) ? '—' : formatHrDate(parsed, { day: '2-digit', month: '2-digit' });
 };
 
 const levelBadge: Record<ObavijestLevel, string> = {
@@ -294,7 +295,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         <div className="min-w-0">
           <h1 className="text-xl font-bold leading-tight text-slate-900">Nadzorna ploča</h1>
           <p className="truncate text-xs text-slate-500">
-            {new Date().toLocaleDateString('hr-HR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · Stanje koje traži pažnju
+            {formatHrDate(new Date(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · Stanje koje traži pažnju
           </p>
         </div>
       </header>

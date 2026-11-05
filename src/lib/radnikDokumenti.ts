@@ -7,3 +7,11 @@ export const dokumentVrste: Record<RadnikDokumentVrsta, string> = {
   osposobljavanje: 'Osposobljavanje',
   ostalo: 'Ostalo',
 };
+
+export interface RadnikDokumentKategorija {
+  vrsta: RadnikDokumentVrsta;
+  naziv: string;
+}
+
+export const osnovneDokumentKategorije: RadnikDokumentKategorija[] =
+  (Object.keys(dokumentVrste) as RadnikDokumentVrsta[]).map((vrsta) => ({ vrsta, naziv: dokumentVrste[vrsta] }));

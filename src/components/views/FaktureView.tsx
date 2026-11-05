@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useState, useEffect } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, FileText, Plus, Pencil, Trash2, Euro, Search, X } from 'lucide-react';
 import type { Faktura, FakturaStatus, Gradiliste, Investitor } from '@/types';
@@ -18,6 +19,8 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ExportMenu } from '@/components/ui/ExportMenu';
 import { useAuth } from '@/auth/useAuth';
+import { ResourceDeletionHistory } from '@/components/views/ResourceDeletionHistory';
+import { InvoiceChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
 
 const statusInfo: Record<FakturaStatus, { variant: 'blue' | 'green' | 'red'; label: string }> = {
   izdana: { variant: 'blue', label: 'Izdana' },
@@ -74,6 +77,9 @@ export function FaktureView() {
   const [editing, setEditing] = useState<Faktura | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [savingInvestor, setSavingInvestor] = useState(false);
+  const [historyRestoring, setHistoryRestoring] = useState(false);
+  const [deletionVersion, setDeletionVersion] = useState(0);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [filterGradiliste, setFilterGradiliste] = useState('');
   const [filterInvestitor, setFilterInvestitor] = useState('');
@@ -85,19 +91,37 @@ export function FaktureView() {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const rabatSmjer = editing?.rabat_smjer ?? company?.postavke.invoice_rebate_mode ?? 'pribroji';
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (rethrow = false) => {
+    if (!rethrow) setLoading(true);
     setError(null);
     try {
-      const [f, g, inv] = await Promise.all([fetchFakture(), fetchGradilista(), fetchInvestitori().catch(() => [])]);
+      const [f, g, inv] = await Promise.all([fetchFakture(), fetchGradilista(),
+        rethrow ? fetchInvestitori() : fetchInvestitori().catch(() => [])]);
       setItems(f);
       setGradilista(g);
       setInvestitori(inv);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
+      setError(getErrorMessage(e, 'Greška pri učitavanju'));
+      if (rethrow) throw e;
     } finally {
       setLoading(false);
     }
+  };
+
+  const refreshAfterRestore = async () => {
+    setModalOpen(false);
+    setEditing(null);
+    setNewInv(null);
+    setForm(emptyForm);
+    setDeleteId(null);
+    setFilterGradiliste('');
+    setFilterInvestitor('');
+    setFilterStatus('');
+    setQuery('');
+    setOd('');
+    setDoDatuma('');
+    setDeletionVersion((value) => value + 1);
+    await load(true);
   };
 
   useEffect(() => {
@@ -105,6 +129,7 @@ export function FaktureView() {
   }, []);
 
   const openCreate = () => {
+    if (saving || savingInvestor || historyRestoring) return;
     setNewInv(null);
     setEditing(null);
     const selectedSite = gradilista.find((site) => site.id === filterGradiliste);
@@ -118,6 +143,7 @@ export function FaktureView() {
   };
 
   const openEdit = (f: Faktura) => {
+    if (saving || savingInvestor || historyRestoring) return;
     setNewInv(null);
     setEditing(f);
     setForm({
@@ -137,8 +163,10 @@ export function FaktureView() {
   };
 
   const addInvestitor = async () => {
+    if (saving || savingInvestor || historyRestoring) return;
     const naziv = (newInv ?? '').trim();
     if (!naziv) return;
+    setSavingInvestor(true);
     try {
       const created = await createInvestitor({ naziv });
       setInvestitori((prev) => [...prev, created].sort((a, b) => a.naziv.localeCompare(b.naziv, 'hr')));
@@ -146,6 +174,8 @@ export function FaktureView() {
       setNewInv(null);
     } catch (e) {
       setError(getErrorMessage(e, 'Greška pri dodavanju investitora'));
+    } finally {
+      setSavingInvestor(false);
     }
   };
 
@@ -166,6 +196,7 @@ export function FaktureView() {
   };
 
   const save = async () => {
+    if (saving || savingInvestor || historyRestoring) return;
     const iznos = Number(form.iznos || 0);
     const rabat = Number(form.rabat || 0);
     const total = rabatSmjer === 'oduzmi' ? iznos - rabat : iznos + rabat;
@@ -201,12 +232,21 @@ export function FaktureView() {
   };
 
   const handleDelete = async () => {
-    if (!deleteId) return;
+    if (!deleteId || saving || savingInvestor || historyRestoring) return;
+    setSaving(true);
     try {
       await deleteFaktura(deleteId);
+      setDeleteId(null);
+      setEditing(null);
+      setNewInv(null);
+      setForm(emptyForm);
+      setModalOpen(false);
+      setDeletionVersion((value) => value + 1);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri brisanju');
+      setError(getErrorMessage(e, 'Greška pri brisanju'));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -291,6 +331,9 @@ export function FaktureView() {
 
   return (
     <div className="min-w-0 max-w-full break-words">
+      <ResourceDeletionHistory module="fakture" refreshVersion={deletionVersion} disabled={saving || savingInvestor}
+        onRestoringChange={setHistoryRestoring} onRestore={refreshAfterRestore} />
+      <fieldset disabled={saving || savingInvestor || historyRestoring} className="min-w-0">
       <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Fakture</h1>
@@ -351,8 +394,8 @@ export function FaktureView() {
           <option value="">Svi statusi</option>
           {Object.entries(statusInfo).map(([value, info]) => <option key={value} value={value}>{info.label}</option>)}
         </select>
-        <input type="date" value={od} onChange={(event) => setOd(event.target.value)} title="Datum izdavanja od" aria-label="Datum izdavanja od" className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm" />
-        <input type="date" value={doDatuma} onChange={(event) => setDoDatuma(event.target.value)} title="Datum izdavanja do" aria-label="Datum izdavanja do" className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm" />
+        <input lang="hr-HR" type="date" value={od} onChange={(event) => setOd(event.target.value)} title="Datum izdavanja od" aria-label="Datum izdavanja od" className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm" />
+        <input lang="hr-HR" type="date" value={doDatuma} onChange={(event) => setDoDatuma(event.target.value)} title="Datum izdavanja do" aria-label="Datum izdavanja do" className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm" />
         {hasFilters && <button type="button" onClick={resetFilters} className="inline-flex items-center gap-1 rounded-lg px-2.5 py-2 text-sm text-slate-500 hover:bg-slate-100"><X className="h-4 w-4" /> Očisti</button>}
       </div>
 
@@ -432,10 +475,10 @@ export function FaktureView() {
                     <td className="max-w-72 truncate whitespace-nowrap px-5 py-3.5 text-sm text-slate-600" title={f.investitori?.naziv ?? '—'}>{f.investitori?.naziv ?? '—'}</td>
                     <td className="max-w-72 truncate whitespace-nowrap px-5 py-3.5 text-sm text-slate-600" title={f.kupac ?? '—'}>{f.kupac ?? '—'}</td>
                     <td className="px-5 py-3.5 text-sm text-slate-500">
-                      {new Date(f.datum_izdavanja + 'T00:00:00').toLocaleDateString('hr-HR')}
+                      {formatHrDate(new Date(f.datum_izdavanja + 'T00:00:00'))}
                     </td>
                     <td className="px-5 py-3.5 text-sm text-slate-500">
-                      {f.datum_dospjecja ? new Date(f.datum_dospjecja + 'T00:00:00').toLocaleDateString('hr-HR') : '—'}
+                      {f.datum_dospjecja ? formatHrDate(new Date(f.datum_dospjecja + 'T00:00:00')) : '—'}
                     </td>
                     <td className="px-5 py-3.5 text-right text-sm text-slate-600">
                       {f.iznos.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' })}
@@ -484,11 +527,12 @@ export function FaktureView() {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { if (!saving && !savingInvestor && !historyRestoring) setModalOpen(false); }}
         title={editing ? 'Uredi fakturu' : 'Nova faktura'}
         footer={
           <>
             <button
+              disabled={saving || savingInvestor || historyRestoring}
               onClick={() => setModalOpen(false)}
               className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
             >
@@ -496,7 +540,7 @@ export function FaktureView() {
             </button>
             <button
               onClick={save}
-              disabled={saving || !mozeSpremitiFakturu}
+              disabled={saving || savingInvestor || historyRestoring || !mozeSpremitiFakturu}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50 transition-colors"
             >
               {saving ? 'Spremanje…' : 'Spremi'}
@@ -509,7 +553,9 @@ export function FaktureView() {
             {error}
           </div>
         )}
-        <div className="space-y-4">
+        {modalOpen && editing && <InvoiceChangeHistoryPanel recordId={editing.id}
+          disabled={saving || savingInvestor} onRestoringChange={setHistoryRestoring} onRestore={refreshAfterRestore} />}
+        <fieldset disabled={saving || savingInvestor || historyRestoring} className="space-y-4">
           <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Broj fakture *">
               <TextInput
@@ -653,16 +699,17 @@ export function FaktureView() {
               placeholder="Opis usluge…"
             />
           </Field>
-        </div>
+        </fieldset>
       </Modal>
 
       <ConfirmDialog
         open={deleteId !== null}
-        onClose={() => setDeleteId(null)}
+        onClose={() => { if (!saving && !savingInvestor && !historyRestoring) setDeleteId(null); }}
         onConfirm={handleDelete}
         title="Izbrisati fakturu?"
-        message="Ova radnja je nepovratna."
+        message="Fakturu možete vratiti iz povijesti pojedinačnih brisanja 30 dana, ako postoje izvorne veze i nema naknadnog konflikta. Ovo nije storno računa."
       />
+      </fieldset>
     </div>
   );
 }

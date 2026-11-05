@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Trash2, Calculator } from 'lucide-react';
 import type { OdsustvoVrsta, Radnik, RadnikOdsustvo } from '@/types';
@@ -23,6 +24,7 @@ import {
 import { Modal } from '@/components/ui/Modal';
 import { Field, Select, TextInput, Textarea } from '@/components/ui/Field';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { ResourceDeletionHistory } from '@/components/views/ResourceDeletionHistory';
 
 const VRSTE_ODSUSTVA: { value: OdsustvoVrsta; label: string }[] = [
   { value: 'godisnji', label: 'Godišnji odmor' },
@@ -32,7 +34,7 @@ const VRSTE_ODSUSTVA: { value: OdsustvoVrsta; label: string }[] = [
 
 const eur = (n: number) => n.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' });
 const broj = (n: number) => n.toLocaleString('hr-HR', { maximumFractionDigits: 1 });
-const fmtDatum = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('hr-HR');
+const fmtDatum = (iso: string) => formatHrDate(new Date(`${iso}T00:00:00`));
 
 const trenutniMjesec = () => {
   const now = new Date();
@@ -58,11 +60,14 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
   const [savingOdsustvo, setSavingOdsustvo] = useState(false);
   const [deleteOdsustvoId, setDeleteOdsustvoId] = useState<string | null>(null);
   const [selectedRadnikId, setSelectedRadnikId] = useState<string | null>(null);
+  const [deletionVersion, setDeletionVersion] = useState(0);
+  const [historyRestoring, setHistoryRestoring] = useState(false);
+  const writing = savingOdsustvo || savingPravo !== null;
 
   const raspon = useMemo(() => mjesecRaspon(mjesec), [mjesec]);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (rethrow = false) => {
+    if (!rethrow) setLoading(true);
     setError(null);
     try {
       const [r, rv] = await Promise.all([fetchRadnici(), fetchObracunRadnoVrijeme(raspon.od, raspon.do)]);
@@ -71,12 +76,14 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
       try {
         setOdsustva(await fetchOdsustvaRaspon(raspon.od, raspon.do));
         setOdsustvaDostupna(true);
-      } catch {
+      } catch (reason) {
         setOdsustva([]);
         setOdsustvaDostupna(false);
+        if (rethrow) throw reason;
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri učitavanju obračuna');
+      if (rethrow) throw e;
     } finally {
       setLoading(false);
     }
@@ -139,6 +146,7 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
   }, [selected, unosi, odsustva, mjesec, raspon.od, raspon.do]);
 
   const togglePortalVrijeme = async (radnik: Radnik, value: boolean) => {
+    if (!canEdit || writing || historyRestoring) return;
     setSavingPravo(`${radnik.id}:portal`);
     setError(null);
     try {
@@ -152,6 +160,7 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
   };
 
   const setPortalVrijemeSvima = async (value: boolean) => {
+    if (!canEdit || writing || historyRestoring) return;
     const zaPromjenu = radnici.filter((r) => r.portal_vrijeme !== value);
     if (zaPromjenu.length === 0) return;
     setSavingPravo('portal:svi');
@@ -169,6 +178,7 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
   };
 
   const togglePravo = async (radnik: Radnik, key: ObracunKategorija, value: boolean) => {
+    if (!canEdit || writing || historyRestoring) return;
     const polje = PRAVO_POLJA[key];
     setSavingPravo(`${radnik.id}:${key}`);
     setError(null);
@@ -183,6 +193,7 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
   };
 
   const saveOdsustvo = async () => {
+    if (!canEdit || writing || historyRestoring) return;
     if (!odsustvoForm || !odsustvoForm.radnik_id || !odsustvoForm.datum_od || !odsustvoForm.datum_do) return;
     if (odsustvoForm.datum_do < odsustvoForm.datum_od) {
       setError('Datum završetka ne može biti prije datuma početka.');
@@ -198,6 +209,7 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
         napomena: odsustvoForm.napomena.trim() || null,
       });
       setOdsustvoForm(null);
+      setDeletionVersion((value) => value + 1);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri spremanju odsustva');
@@ -207,12 +219,17 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
   };
 
   const removeOdsustvo = async () => {
-    if (!deleteOdsustvoId) return;
+    if (!canEdit || writing || historyRestoring || !deleteOdsustvoId) return;
+    setSavingOdsustvo(true);
     try {
       await deleteOdsustvo(deleteOdsustvoId);
+      setDeleteOdsustvoId(null);
+      setDeletionVersion((value) => value + 1);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri brisanju odsustva');
+      setError(e && typeof e === 'object' && 'message' in e ? String(e.message) : 'Greška pri brisanju odsustva');
+    } finally {
+      setSavingOdsustvo(false);
     }
   };
 
@@ -225,6 +242,17 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
 
   return (
     <div>
+      {canEdit && <ResourceDeletionHistory module="radnici" table="radnici_odsustva" refreshVersion={deletionVersion}
+        disabled={writing || loading} onRestoringChange={setHistoryRestoring}
+        workerNames={Object.fromEntries(radnici.map((r) => [r.id, `${r.ime} ${r.prezime}`]))}
+        onRestore={async () => {
+          setOdsustvoForm(null);
+          setDeleteOdsustvoId(null);
+          setSelectedRadnikId(null);
+          setDeletionVersion((value) => value + 1);
+          await load(true);
+        }} />}
+      <fieldset disabled={historyRestoring || writing} className="min-w-0">
       <div className="mb-4 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:flex-wrap xl:items-center">
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => setMjesec((m) => pomakniMjesec(m, -1))} className="rounded-lg border border-slate-300 p-2 text-slate-600 hover:bg-slate-50" aria-label="Prethodni mjesec">
@@ -416,7 +444,7 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
 
       <Modal
         open={selectedRadnikId !== null}
-        onClose={() => setSelectedRadnikId(null)}
+        onClose={() => { if (!historyRestoring && !writing) setSelectedRadnikId(null); }}
         title={selected ? `${selected.radnik.ime} ${selected.radnik.prezime} — ${mjesecNaziv}` : 'Detalji radnika'}
         wide="screen"
       >
@@ -516,17 +544,17 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
 
       <Modal
         open={odsustvoForm !== null}
-        onClose={() => setOdsustvoForm(null)}
+        onClose={() => { if (!historyRestoring && !writing) setOdsustvoForm(null); }}
         title="Upiši odsustvo"
         footer={
           <>
-            <button type="button" onClick={() => setOdsustvoForm(null)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
+            <button type="button" disabled={writing || historyRestoring} onClick={() => setOdsustvoForm(null)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
               Odustani
             </button>
             <button
               type="button"
               onClick={() => void saveOdsustvo()}
-              disabled={savingOdsustvo || !odsustvoForm?.radnik_id}
+              disabled={writing || historyRestoring || !odsustvoForm?.radnik_id}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
             >
               {savingOdsustvo ? 'Spremanje…' : 'Spremi'}
@@ -535,7 +563,7 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
         }
       >
         {odsustvoForm && (
-          <div className="space-y-4">
+          <fieldset disabled={writing || historyRestoring} className="space-y-4">
             <Field label="Radnik *">
               <Select value={odsustvoForm.radnik_id} onChange={(e) => setOdsustvoForm({ ...odsustvoForm, radnik_id: e.target.value })}>
                 <option value="">— Odaberi —</option>
@@ -563,17 +591,18 @@ export function ObracunSatiPanel({ canEdit }: { canEdit: boolean }) {
             <Field label="Napomena">
               <Textarea rows={2} value={odsustvoForm.napomena} onChange={(e) => setOdsustvoForm({ ...odsustvoForm, napomena: e.target.value })} />
             </Field>
-          </div>
+          </fieldset>
         )}
       </Modal>
 
       <ConfirmDialog
         open={deleteOdsustvoId !== null}
-        onClose={() => setDeleteOdsustvoId(null)}
+        onClose={() => { if (!historyRestoring && !writing) setDeleteOdsustvoId(null); }}
         onConfirm={removeOdsustvo}
         title="Obrisati odsustvo?"
-        message="Obračun za mjesec će se ponovno izračunati."
+        message="Obračun za mjesec će se ponovno izračunati. Odsustvo možete vratiti iz povijesti 30 dana, ako odsustva istog djelatnika nisu naknadno mijenjana."
       />
+      </fieldset>
     </div>
   );
 }

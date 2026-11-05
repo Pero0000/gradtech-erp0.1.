@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
@@ -47,7 +48,7 @@ const statusLabels = {
 
 const eur = (amount: number) => `${amount.toLocaleString('hr-HR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 const dateLabel = (value: string | null | undefined) => value
-  ? new Date(`${value}T00:00:00`).toLocaleDateString('hr-HR')
+  ? formatHrDate(new Date(`${value}T00:00:00`))
   : 'Nije evidentirano';
 const daysUntil = (value: string) => Math.ceil(
   (new Date(`${value}T00:00:00`).getTime() - new Date(`${todayISO()}T00:00:00`).getTime()) / 86400000,
@@ -305,6 +306,7 @@ export function VoziloFleetDetalji({
 
         {!loading && tab === 'servisi' && (
           <VoziloDokumenti
+            key={vozilo.id}
             voziloId={vozilo.id}
             onChange={() => {
               void load();

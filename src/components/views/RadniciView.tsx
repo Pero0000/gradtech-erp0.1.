@@ -1,7 +1,10 @@
+import { formatHrDate } from '@/lib/localization';
 import { useState, useEffect, useMemo } from 'react';
-import { Users, Plus, Pencil, Trash2, Phone, Mail, HardHat, ArrowDown, ArrowUp, ArrowUpDown, History, AlertTriangle } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Phone, Mail, HardHat, ArrowDown, ArrowUp, ArrowUpDown, AlertTriangle } from 'lucide-react';
 import type { Radnik, RadnikStatus, BonusTip, RadnikPovijest, RadnikDokument, RadnikDokumentVrsta } from '@/types';
 import { RadnikDokumenti } from '@/components/views/RadnikDokumenti';
+import { ResourceChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
+import { ResourceDeletionHistory } from '@/components/views/ResourceDeletionHistory';
 import { fetchRadnici, createRadnik, updateRadnik, deleteRadnik, fetchRadnikPovijest, addRadnikPovijest, fetchSviRadnikDokumenti, fetchRadnikKategorije, addRadnikKategorija } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
@@ -11,6 +14,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ExportMenu } from '@/components/ui/ExportMenu';
 import { RadnikDetalj } from '@/components/views/RadnikDetalj';
 import { todayISO } from '@/lib/rokovi';
+import { HistoryButton, HistoryDialog } from './HistoryDialog';
 
 const statusBadge: Record<RadnikStatus, { variant: 'green' | 'gray' | 'orange'; label: string }> = {
   aktivan: { variant: 'green', label: 'Aktivan' },
@@ -98,12 +102,17 @@ export function RadniciView() {
   const [items, setItems] = useState<Radnik[]>([]);
   const [documents, setDocuments] = useState<RadnikDokument[]>([]);
   const [povijest, setPovijest] = useState<RadnikPovijest[]>([]);
+  const [povijestOpen, setPovijestOpen] = useState(false);
+  const [povijestLoading, setPovijestLoading] = useState(false);
+  const [povijestError, setPovijestError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('ime');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Radnik | null>(null);
+  const [historyRestoring, setHistoryRestoring] = useState(false);
+  const [deletionVersion, setDeletionVersion] = useState(0);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -112,10 +121,6 @@ export function RadniciView() {
   const [novaKategorija, setNovaKategorija] = useState('');
   const [kategorijaSaving, setKategorijaSaving] = useState(false);
   const [kategorijaError, setKategorijaError] = useState<string | null>(null);
-
-  const loadPovijest = (id: string) => {
-    fetchRadnikPovijest(id).then(setPovijest).catch(() => setPovijest([]));
-  };
 
   const load = async () => {
     setLoading(true);
@@ -140,15 +145,35 @@ export function RadniciView() {
     load();
   }, []);
 
+  const editingId = editing?.id;
+  useEffect(() => {
+    if (!modalOpen || !povijestOpen || !editingId) return;
+    let active = true;
+    setPovijest([]);
+    setPovijestLoading(true);
+    setPovijestError(null);
+    void fetchRadnikPovijest(editingId).then((history) => {
+      if (active) setPovijest(history);
+    }).catch((reason: unknown) => {
+      if (active) setPovijestError(reason instanceof Error ? reason.message : 'Povijest promjena cijena nije dostupna.');
+    }).finally(() => {
+      if (active) setPovijestLoading(false);
+    });
+    return () => { active = false; };
+  }, [modalOpen, povijestOpen, editingId]);
+
   const openCreate = () => {
     setEditing(null);
+    setPovijestOpen(false);
+    setPovijest([]);
     setForm(emptyForm);
     setModalOpen(true);
   };
 
   const openEdit = (r: Radnik) => {
     setEditing(r);
-    loadPovijest(r.id);
+    setPovijestOpen(false);
+    setPovijest([]);
     setForm({
       ime: r.ime,
       prezime: r.prezime,
@@ -173,6 +198,10 @@ export function RadniciView() {
   };
 
   const save = async () => {
+    if (historyRestoring) {
+      setError('U tijeku je vraćanje promjene. Pričekajte završetak prije spremanja.');
+      return;
+    }
     if (!form.ime.trim() || !form.prezime.trim()) return;
     setSaving(true);
     try {
@@ -244,6 +273,7 @@ export function RadniciView() {
     if (!deleteId) return;
     try {
       await deleteRadnik(deleteId);
+      setDeletionVersion((value) => value + 1);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri brisanju');
@@ -283,6 +313,12 @@ export function RadniciView() {
 
   return (
     <div className="min-w-0 max-w-full">
+      <ResourceDeletionHistory module="radnici" refreshVersion={deletionVersion} onRestore={async () => {
+        setModalOpen(false);
+        setEditing(null);
+        setSelectedRadnik(null);
+        await load();
+      }} />
       <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Djelatnici</h1>
@@ -427,20 +463,21 @@ export function RadniciView() {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { if (!historyRestoring) setModalOpen(false); }}
         title={editing ? 'Uredi radnika' : 'Novi radnik'}
         wide="screen"
         footer={
           <>
             <button
               onClick={() => setModalOpen(false)}
+              disabled={historyRestoring}
               className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
             >
               Odustani
             </button>
             <button
               onClick={save}
-              disabled={saving || !form.ime.trim() || !form.prezime.trim()}
+              disabled={saving || historyRestoring || !form.ime.trim() || !form.prezime.trim()}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50 transition-colors"
             >
               {saving ? 'Spremanje…' : 'Spremi'}
@@ -448,6 +485,12 @@ export function RadniciView() {
           </>
         }
       >
+        {editing && <ResourceChangeHistoryPanel table="radnici" recordId={editing.id} module="radnici" disabled={saving} onRestoringChange={setHistoryRestoring} onRestore={async () => {
+          setModalOpen(false);
+          setEditing(null);
+          setSelectedRadnik(null);
+          await load();
+        }} />}
         <div className="space-y-4">
           <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
             <Field label="Ime *">
@@ -593,23 +636,29 @@ export function RadniciView() {
           </div>
           {editing ? (
             <>
-              <div className="rounded-lg border border-slate-200 p-3">
-                <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-800"><History className="h-4 w-4" /> Povijest promjena plaće</p>
-                {povijest.length === 0 ? (
-                  <p className="text-xs text-slate-400">Još nema zabilježenih promjena (bilježe se od sada pri svakom spremanju).</p>
+              <HistoryButton onClick={() => setPovijestOpen(true)} ariaLabel="Povijest promjena plaće" />
+              <HistoryDialog open={povijestOpen && Boolean(editing)} onClose={() => setPovijestOpen(false)} title="Povijest promjena plaće">
+                {povijestError && <p role="alert" className="text-sm text-red-700">{povijestError}</p>}
+                {povijestLoading && <p role="status" className="text-sm text-slate-500">Učitavanje povijesti…</p>}
+                {!povijestLoading && !povijestError && (povijest.length === 0 ? (
+                  <p className="text-sm text-slate-500">Još nema zabilježenih promjena cijena.</p>
                 ) : (
-                  <ul className="max-h-48 divide-y divide-slate-100 overflow-y-auto text-xs">
+                  <ul className="divide-y divide-slate-100 text-sm">
                     {povijest.map((p) => (
-                      <li key={p.id} className="flex flex-wrap items-center gap-x-2 py-1.5">
-                        <span className="w-20 text-slate-400">{new Date(p.created_at).toLocaleDateString('hr-HR')}</span>
+                      <li key={p.id} className="flex flex-wrap items-center gap-x-2 py-2">
+                        <span className="text-slate-500">{formatHrDate(new Date(p.created_at))}</span>
                         <span className="font-medium text-slate-700">{p.polje}</span>
                         <span className="text-slate-500">{p.stara_vrijednost} → <b className="text-slate-800">{p.nova_vrijednost}</b></span>
                       </li>
                     ))}
                   </ul>
-                )}
-              </div>
-              <RadnikDokumenti radnikId={editing.id} />
+                ))}
+              </HistoryDialog>
+              <RadnikDokumenti key={editing.id} radnikId={editing.id} onChange={() => {
+                void fetchSviRadnikDokumenti().then(setDocuments).catch((reason: unknown) => {
+                  setError(reason instanceof Error ? reason.message : 'Dokumenti djelatnika nisu osvježeni.');
+                });
+              }} />
             </>
           ) : (
             <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Dokumenti i rokovi mogu se dodati nakon prvog spremanja radnika.</p>
@@ -622,7 +671,7 @@ export function RadniciView() {
         onClose={() => setDeleteId(null)}
         onConfirm={handleDelete}
         title="Izbrisati radnika?"
-        message="Ova radnja je nepovratna. Radnik će biti uklonjen iz svih rasporeda."
+        message="Djelatnik i povezani zapisi bit će uklonjeni. Zaštićeno brisanje može se vratiti 30 dana ako povezani podaci nisu naknadno promijenjeni i imate potrebna prava."
       />
     </div>
   );

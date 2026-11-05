@@ -1,4 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { formatHrDate } from '@/lib/localization';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAuth } from '@/auth/useAuth';
+import { useRequestScope } from '@/lib/useRequestScope';
+import { CatalogChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
+import { HistoryMenu } from '@/components/views/HistoryDialog';
 import { ChevronDown, ChevronRight, ListChecks, Pencil, Plus, Search, Trash2, History, MapPin } from 'lucide-react';
 import type { Gradiliste } from '@/types';
 import { fetchGradilista } from '@/lib/api';
@@ -18,15 +23,18 @@ const emptyForm = { sifra: '', naziv: '', vrsta_posla: '', podgrupa: '', jedinic
 const jedinice = ['m2', 'm', 'm3', 'kom', 'h', 'kg', 'l', 'paušal'];
 
 const eur = (v: number) => v.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' });
-const dt = (v: string) => new Date(v).toLocaleDateString('hr-HR');
+const dt = (v: string) => formatHrDate(new Date(v));
 
 const errText = (e: unknown) => (e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : 'Greška');
 
-function StavkaDetalji({ stavka, gradilista, onChanged }: { stavka: Stavka; gradilista: Gradiliste[]; onChanged: () => void }) {
+function StavkaDetalji({ stavka, gradilista, onChanged, onWritingChange }: {
+  stavka: Stavka; gradilista: Gradiliste[]; onChanged: () => void; onWritingChange: (writing: boolean) => void;
+}) {
   const [log, setLog] = useState<StavkaCijenaLog[]>([]);
   const [uses, setUses] = useState<GradilisteStavka[]>([]);
   const [ponudeUses, setPonudeUses] = useState<StavkaPonudaUse[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [writing, setWriting] = useState(false);
   const [form, setForm] = useState({ gradiliste_id: '', kolicina: '1', cijena: stavka.cijena.toString() });
 
   const load = async () => {
@@ -47,7 +55,9 @@ function StavkaDetalji({ stavka, gradilista, onChanged }: { stavka: Stavka; grad
 
   const add = async () => {
     const kolicina = parseFloat(form.kolicina.replace(',', '.'));
-    if (!form.gradiliste_id || !(kolicina > 0)) return;
+    if (!form.gradiliste_id || !(kolicina > 0) || writing) return;
+    setWriting(true);
+    onWritingChange(true);
     try {
       await addStavkaNaGradiliste({
         gradiliste_id: form.gradiliste_id,
@@ -61,21 +71,30 @@ function StavkaDetalji({ stavka, gradilista, onChanged }: { stavka: Stavka; grad
       onChanged();
     } catch (e) {
       setError(errText(e));
+    } finally {
+      setWriting(false);
+      onWritingChange(false);
     }
   };
 
   const remove = async (id: string) => {
+    if (writing) return;
+    setWriting(true);
+    onWritingChange(true);
     try {
       await removeStavkaSGradilista(id);
       await load();
       onChanged();
     } catch (e) {
       setError(errText(e));
+    } finally {
+      setWriting(false);
+      onWritingChange(false);
     }
   };
 
   return (
-    <div className="grid min-w-0 grid-cols-1 gap-4 border-t border-slate-100 bg-slate-50 p-4 xl:grid-cols-2">
+    <fieldset disabled={writing} className="grid min-w-0 grid-cols-1 gap-4 border-t border-slate-100 bg-slate-50 p-4 xl:grid-cols-2">
       {error && <p className="rounded bg-red-50 p-2 text-xs text-red-700 xl:col-span-2">{error}</p>}
       <div>
         <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-800"><History className="h-4 w-4" /> Povijest cijene</p>
@@ -134,11 +153,13 @@ function StavkaDetalji({ stavka, gradilista, onChanged }: { stavka: Stavka; grad
           </ul>
         )}
       </div>
-    </div>
+    </fieldset>
   );
 }
 
 export function StavkeView() {
+  const { canAccess } = useAuth();
+  const loadScope = useRequestScope();
   const [items, setItems] = useState<Stavka[]>([]);
   const [gradilista, setGradilista] = useState<Gradiliste[]>([]);
   const [counts, setCounts] = useState<Map<string, number>>(new Map());
@@ -150,27 +171,35 @@ export function StavkeView() {
   const [editing, setEditing] = useState<Stavka | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [historyRestoring, setHistoryRestoring] = useState(false);
+  const [historyCatalogId, setHistoryCatalogId] = useState('');
+  const [detailWriting, setDetailWriting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Stavka | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async (rethrow = false) => {
+    const isCurrent = loadScope.start();
+    if (!isCurrent()) return;
     setError(null);
     try {
       const [s, g] = await Promise.all([fetchStavke(), fetchGradilista()]);
       const c = await fetchStavkeBrojKoristenja(s);
+      if (!isCurrent()) return;
       setItems(s);
       setGradilista(g);
       setCounts(c);
     } catch (e) {
-      setError(errText(e));
+      if (isCurrent()) setError(errText(e));
+      if (rethrow) throw e;
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  };
+  }, [loadScope]);
 
   useEffect(() => {
     void load();
-  }, []);
+    return () => loadScope.invalidate();
+  }, [load, loadScope]);
 
   const vrste = useMemo(() => [...new Set(items.map((i) => i.vrsta_posla).filter((v): v is string => !!v))].sort(), [items]);
 
@@ -187,13 +216,14 @@ export function StavkeView() {
   }, [items, query, vrsta]);
 
   const openForm = (s?: Stavka) => {
+    if (historyRestoring || saving) return;
     setEditing(s ?? null);
     setForm(s ? { sifra: s.sifra ?? '', naziv: s.naziv, vrsta_posla: s.vrsta_posla ?? '', podgrupa: s.podgrupa ?? '', jedinica: s.jedinica, cijena: s.cijena.toString(), opis: s.opis ?? '' } : emptyForm);
     setModalOpen(true);
   };
 
   const save = async () => {
-    if (!form.naziv.trim()) return;
+    if (!form.naziv.trim() || saving || historyRestoring) return;
     setSaving(true);
     try {
       const payload = {
@@ -205,7 +235,7 @@ export function StavkeView() {
         cijena: parseFloat(form.cijena.replace(',', '.')) || 0,
         opis: form.opis.trim() || null,
       };
-      if (editing) await updateStavka(editing.id, payload, editing.cijena);
+      if (editing) await updateStavka(editing.id, payload);
       else await createStavka(payload);
       setModalOpen(false);
       await load();
@@ -217,19 +247,48 @@ export function StavkeView() {
   };
 
   const remove = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || saving || historyRestoring) return;
+    setSaving(true);
     try {
       await deleteStavka(deleteTarget.id);
       await load();
     } catch (e) {
       setError(errText(e));
+    } finally {
+      setSaving(false);
     }
   };
 
   if (loading) return <div className="flex items-center justify-center py-20 text-slate-400">Učitavanje…</div>;
 
+  const afterCatalogRestore = async () => {
+    setModalOpen(false);
+    setEditing(null);
+    setForm(emptyForm);
+    setDeleteTarget(null);
+    setExpanded(null);
+    setQuery('');
+    setVrsta('');
+    await load(true);
+  };
+  const historyDisabled = saving || detailWriting || modalOpen || expanded !== null || deleteTarget !== null || historyRestoring;
+
   return (
     <div className="min-w-0 max-w-full break-words">
+      {canAccess('stavke', 'edit') && <HistoryMenu>
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-slate-900">Povijest izmjena stavke (30 dana)</h2>
+        <p className="text-xs text-slate-500">Odaberite stavku. Prije povrata zatvorite obrazac i detalje korištenja. Spremljeni poslovni dokumenti ne mijenjaju se.</p>
+        <select aria-label="Stavka za povijest izmjena" value={historyCatalogId} disabled={historyDisabled}
+          onChange={(event) => setHistoryCatalogId(event.target.value)} className="max-w-full rounded-lg border border-slate-300 p-2 text-sm">
+          <option value="">Odaberite stavku</option>
+          {items.map((item) => <option key={item.id} value={item.id}>{item.sifra ? `${item.sifra} · ` : ''}{item.naziv}</option>)}
+        </select>
+        {historyCatalogId && <CatalogChangeHistoryPanel recordId={historyCatalogId} onRestore={afterCatalogRestore}
+          disabled={historyDisabled} onRestoringChange={setHistoryRestoring} />}
+      </section>
+      </HistoryMenu>}
+      <fieldset disabled={historyRestoring || detailWriting} className="min-w-0">
       <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Troškovničke stavke</h1>
@@ -298,7 +357,7 @@ export function StavkeView() {
                           <button onClick={() => setDeleteTarget(s)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
                         </div>
                       </div>
-                      {open && <StavkaDetalji stavka={s} gradilista={gradilista} onChanged={() => void fetchStavkeBrojKoristenja(items).then(setCounts)} />}
+                      {open && <StavkaDetalji stavka={s} gradilista={gradilista} onChanged={() => void load()} onWritingChange={setDetailWriting} />}
                     </div>
                   );
                 })}
@@ -350,6 +409,7 @@ export function StavkeView() {
         title="Izbrisati stavku?"
         message="Briše se i povijest cijene te veze s gradilištima."
       />
+      </fieldset>
     </div>
   );
 }

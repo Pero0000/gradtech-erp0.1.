@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Building2,
@@ -33,7 +34,6 @@ import type { KooperantRacun, KooperantRacunStavka } from '@/lib/aiKooperantRacu
 import {
   createKooperant,
   createTrosak,
-  createTroskovi,
   deleteKooperant,
   deleteKooperantDokument,
   deleteKooperantRacun,
@@ -46,6 +46,7 @@ import {
   fetchTroskovi,
   getKooperantDokumentUrl,
   saveKooperantAngazman,
+  saveKooperantRacun,
   updateKooperantDokumentGradiliste,
   updateKooperantRacunPaid,
   updateKooperant,
@@ -60,6 +61,10 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ExportMenu } from '@/components/ui/ExportMenu';
 import { Field, Select, Textarea, TextInput } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
+import { useRequestScope } from '@/lib/useRequestScope';
+import { CooperatorChangeHistoryPanel, EngagementChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
+import { ResourceDeletionHistory } from '@/components/views/ResourceDeletionHistory';
+import { HistoryMenu } from '@/components/views/HistoryDialog';
 
 const emptyForm = {
   naziv: '',
@@ -94,7 +99,7 @@ const emptyCostForm = {
 
 const eur = (value: number) => value.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' });
 const displayDate = (value: string | null | undefined) =>
-  value ? new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString('hr-HR') : '—';
+  value ? formatHrDate(new Date(`${value.slice(0, 10)}T00:00:00`)) : '—';
 
 const documentTypes: { value: KooperantDokumentVrsta; label: string }[] = [
   { value: 'ugovor', label: 'Ugovori' },
@@ -168,6 +173,8 @@ function statusVariant(status: KooperantAngazmanStatus): 'green' | 'gray' | 'red
 
 export function KooperantiView() {
   const { canAccess } = useAuth();
+  const loadScope = useRequestScope();
+  const profileScope = useRequestScope();
   const canEditKooperanti = canAccess('kooperanti', 'edit');
   const canEditCosts = canAccess('troskovi', 'edit');
   const canViewSites = canAccess('gradilista', 'view');
@@ -190,6 +197,9 @@ export function KooperantiView() {
   const [editing, setEditing] = useState<Kooperant | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [historyRestoring, setHistoryRestoring] = useState(false);
+  const [historyCooperatorId, setHistoryCooperatorId] = useState('');
+  const [historyEngagementId, setHistoryEngagementId] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Kooperant | null>(null);
   const [selected, setSelected] = useState<Kooperant | null>(null);
   const [activeTab, setActiveTab] = useState<ProfileTab>('pregled');
@@ -214,8 +224,14 @@ export function KooperantiView() {
   const [analyzingInvoice, setAnalyzingInvoice] = useState(false);
   const [savingInvoice, setSavingInvoice] = useState(false);
   const [updatingOfferId, setUpdatingOfferId] = useState<string | null>(null);
+  const [updatingCostId, setUpdatingCostId] = useState<string | null>(null);
+  const [deletingDocument, setDeletingDocument] = useState(false);
+  const writing = saving || savingEngagement || savingCost || uploading || deletingCost || deletingDocument
+    || analyzingInvoice || savingInvoice || updatingOfferId !== null || updatingCostId !== null;
 
-  const load = useCallback(async (showLoading = true) => {
+  const load = useCallback(async (showLoading = true, rethrow = false) => {
+    const isCurrent = loadScope.start();
+    if (!isCurrent()) return;
     if (showLoading) setLoading(true);
     setError(null);
     if (!showLoading) setProfileError(null);
@@ -227,6 +243,7 @@ export function KooperantiView() {
         canViewSites ? fetchGradilista() : Promise.resolve([]),
         canViewInvoices ? fetchFakture() : Promise.resolve([]),
       ]);
+      if (!isCurrent()) return;
       setItems(nextItems);
       setTroskovi(nextCosts);
       setAngazmani(nextEngagements);
@@ -234,16 +251,20 @@ export function KooperantiView() {
       setFakture(nextInvoices);
     } catch (reason) {
       const message = errorMessage(reason);
-      setError(message);
-      if (!showLoading) setProfileError(message);
+      if (isCurrent()) {
+        setError(message);
+        if (!showLoading) setProfileError(message);
+      }
+      if (rethrow) throw reason;
     } finally {
-      if (showLoading) setLoading(false);
+      if (isCurrent() && showLoading) setLoading(false);
     }
-  }, [canViewInvoices, canViewSites]);
+  }, [canViewInvoices, canViewSites, loadScope]);
 
   useEffect(() => {
     void load();
-  }, [load]);
+    return () => loadScope.invalidate();
+  }, [load, loadScope]);
 
   const byKooperant = useMemo(() => {
     const map = new Map<string, Trosak[]>();
@@ -395,6 +416,7 @@ export function KooperantiView() {
   );
 
   const openForm = (kooperant?: Kooperant) => {
+    if (historyRestoring || writing) return;
     setEditing(kooperant ?? null);
     setForm(kooperant ? {
       naziv: kooperant.naziv,
@@ -414,7 +436,7 @@ export function KooperantiView() {
   };
 
   const save = async () => {
-    if (!form.naziv.trim()) return;
+    if (!form.naziv.trim() || historyRestoring || saving) return;
     setSaving(true);
     setError(null);
     const payload = {
@@ -444,7 +466,8 @@ export function KooperantiView() {
   };
 
   const remove = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || historyRestoring || saving) return;
+    setSaving(true);
     setError(null);
     try {
       await deleteKooperant(deleteTarget.id);
@@ -452,10 +475,15 @@ export function KooperantiView() {
       await load();
     } catch (reason) {
       setError(errorMessage(reason));
+    } finally {
+      setSaving(false);
     }
   };
 
   const openProfile = async (kooperant: Kooperant) => {
+    if (historyRestoring || writing) return;
+    const isCurrent = profileScope.start();
+    if (!isCurrent()) return;
     setSelected(kooperant);
     setActiveTab('pregled');
     setShowCostForm(false);
@@ -469,6 +497,7 @@ export function KooperantiView() {
     setDocumentUrls({});
     try {
       const nextDocuments = await fetchKooperantDokumenti(kooperant.id);
+      if (!isCurrent()) return;
       setDocuments(nextDocuments);
       const results = await Promise.all(nextDocuments.map(async (document) => {
         try {
@@ -477,15 +506,17 @@ export function KooperantiView() {
           return { id: document.id, url: null, error: errorMessage(reason) };
         }
       }));
+      if (!isCurrent()) return;
       setDocumentUrls(Object.fromEntries(results.flatMap((result) => result.url ? [[result.id, result.url]] : [])));
       const failedUrl = results.find((result) => result.error);
       if (failedUrl?.error) setProfileError(`Dokumenti su učitani, ali poveznica nije dostupna: ${failedUrl.error}`);
     } catch (reason) {
-      setProfileError(errorMessage(reason));
+      if (isCurrent()) setProfileError(errorMessage(reason));
     }
   };
 
   const openEngagementForm = (engagement?: EngagementRow) => {
+    if (historyRestoring) return;
     setEditingEngagementId(engagement && !engagement.id.startsWith('legacy:') ? engagement.id : null);
     setEngagementForm(engagement ? {
       gradiliste_id: engagement.gradiliste_id,
@@ -499,7 +530,7 @@ export function KooperantiView() {
   };
 
   const saveEngagement = async () => {
-    if (!selected || !engagementForm.gradiliste_id) return;
+    if (!selected || !engagementForm.gradiliste_id || historyRestoring || savingEngagement) return;
     const amount = engagementForm.dogovoreni_iznos.trim() ? Number(engagementForm.dogovoreni_iznos) : null;
     if (amount !== null && (!Number.isFinite(amount) || amount < 0)) {
       setProfileError('Dogovoreni iznos mora biti nula ili pozitivan broj.');
@@ -528,7 +559,7 @@ export function KooperantiView() {
   };
 
   const saveCost = async () => {
-    if (!selected || !costForm.opis.trim() || !costForm.iznos.trim()) return;
+    if (!selected || !costForm.opis.trim() || !costForm.iznos.trim() || historyRestoring || savingCost) return;
     const amount = Number(costForm.iznos);
     if (!Number.isFinite(amount) || amount <= 0) {
       setProfileError('Unesi ispravan iznos veći od nule.');
@@ -557,6 +588,8 @@ export function KooperantiView() {
   };
 
   const toggleCostPaid = async (cost: Trosak) => {
+    if (historyRestoring || updatingCostId !== null) return;
+    setUpdatingCostId(cost.id);
     setProfileError(null);
     try {
       const placen = !cost.placen;
@@ -569,11 +602,13 @@ export function KooperantiView() {
       await load(false);
     } catch (reason) {
       setProfileError(errorMessage(reason));
+    } finally {
+      setUpdatingCostId(null);
     }
   };
 
   const uploadDocument = async (file: File | undefined) => {
-    if (!selected || !file) return;
+    if (!selected || !file || historyRestoring || uploading) return;
     setUploading(true);
     setProfileError(null);
     try {
@@ -593,7 +628,7 @@ export function KooperantiView() {
   };
 
   const uploadOffer = async (file: File | undefined) => {
-    if (!selected || !file) return;
+    if (!selected || !file || historyRestoring || uploading) return;
     setUploading(true);
     setProfileError(null);
     try {
@@ -613,6 +648,7 @@ export function KooperantiView() {
   };
 
   const attachOfferToSite = async (document: KooperantDokument, gradilisteId: string) => {
+    if (historyRestoring || updatingOfferId !== null) return;
     setUpdatingOfferId(document.id);
     setProfileError(null);
     try {
@@ -626,7 +662,7 @@ export function KooperantiView() {
   };
 
   const analyzeInvoice = async (file: File | undefined) => {
-    if (!file) return;
+    if (!file || historyRestoring || analyzingInvoice) return;
     setAnalyzingInvoice(true);
     setProfileError(null);
     setInvoiceDraft(null);
@@ -667,7 +703,7 @@ export function KooperantiView() {
   };
 
   const saveInvoiceCosts = async () => {
-    if (!selected || !invoiceDraft || !invoiceSiteId) return;
+    if (!selected || !invoiceDraft || !invoiceSiteId || historyRestoring || savingInvoice) return;
     if (invoiceDraft.data.valuta.toUpperCase() !== 'EUR') {
       setProfileError('Troškovi se vode u EUR. Ovaj račun nije u EUR; unesite ili preračunajte iznose ručno prije knjiženja.');
       return;
@@ -697,46 +733,31 @@ export function KooperantiView() {
     const placenoAt = invoicePaid ? new Date().toISOString().slice(0, 10) : null;
     setSavingInvoice(true);
     setProfileError(null);
-    let uploadedDocument: KooperantDokument | null = null;
     let followupWarning: string | null = null;
     try {
-      uploadedDocument = await uploadKooperantDokument(selected.id, 'racun', invoiceDraft.file);
-      try {
-        const costs = lines.map((item) => ({
-          gradiliste_id: invoiceSiteId,
-          kategorija: 'kooperanti' as const,
-          kooperant_id: selected.id,
-          kooperant_racun_id: uploadedDocument!.id,
-          broj_racuna: invoiceNumber,
+      const uploadedDocument = await saveKooperantRacun({
+        kooperantId: selected.id,
+        gradilisteId: invoiceSiteId,
+        file: invoiceDraft.file,
+        brojRacuna: invoiceNumber,
+        datum,
+        placen: invoicePaid,
+        placenoAt,
+        stavke: lines.map((item) => ({
+          opis: item.opis.trim(),
+          iznos: Math.round(item.iznos * 100) / 100,
           kolicina: item.kolicina || null,
           jedinica: item.jedinica.trim() || null,
           jedinicna_cijena: item.cijena,
-          opis: item.opis.trim(),
-          iznos: Math.round(item.iznos * 100) / 100,
-          datum,
-          placen: invoicePaid,
-          placeno_at: placenoAt,
-        }));
-        await createTroskovi(costs);
-      } catch (reason) {
-        try {
-          await deleteKooperantDokument(uploadedDocument);
-          uploadedDocument = null;
-        } catch (cleanupReason) {
-          throw new Error(`Troškovi nisu spremljeni: ${errorMessage(reason)} Račun je učitan, ali ga nije moguće automatski ukloniti: ${errorMessage(cleanupReason)}`);
-        }
-        throw reason;
-      }
+        })),
+      });
 
-      if (uploadedDocument) {
-        const savedDocument = uploadedDocument;
-        setDocuments((current) => [savedDocument, ...current]);
-        try {
-          const url = await getKooperantDokumentUrl(savedDocument.putanja);
-          setDocumentUrls((current) => ({ ...current, [savedDocument.id]: url }));
-        } catch (reason) {
-          followupWarning = `Troškovi su spremljeni, ali poveznica na učitani račun nije dostupna: ${errorMessage(reason)}`;
-        }
+      setDocuments((current) => [uploadedDocument, ...current]);
+      try {
+        const url = await getKooperantDokumentUrl(uploadedDocument.putanja);
+        setDocumentUrls((current) => ({ ...current, [uploadedDocument.id]: url }));
+      } catch (reason) {
+        followupWarning = `Troškovi su spremljeni, ali poveznica na učitani račun nije dostupna: ${errorMessage(reason)}`;
       }
       setInvoiceDraft(null);
       setInvoiceSiteId('');
@@ -751,7 +772,8 @@ export function KooperantiView() {
   };
 
   const removeDocument = async () => {
-    if (!pendingDocumentDelete) return;
+    if (!pendingDocumentDelete || historyRestoring || deletingDocument) return;
+    setDeletingDocument(true);
     setProfileError(null);
     let followupWarning: string | null = null;
     try {
@@ -760,8 +782,11 @@ export function KooperantiView() {
         : [];
       if (selected && invoiceCosts.length > 0) {
         await deleteKooperantRacun(selected.id, pendingDocumentDelete.id);
+      } else if (pendingDocumentDelete.vrsta === 'racun') {
+        await deleteKooperantRacun(pendingDocumentDelete.kooperant_id, pendingDocumentDelete.id);
+      } else {
+        await deleteKooperantDokument(pendingDocumentDelete);
       }
-      await deleteKooperantDokument(pendingDocumentDelete);
       setDocuments((current) => current.filter((document) => document.id !== pendingDocumentDelete.id));
       setDocumentUrls((current) => {
         const next = { ...current };
@@ -772,12 +797,14 @@ export function KooperantiView() {
       if (invoiceCosts.length > 0) await load(false);
     } catch (reason) {
       followupWarning = errorMessage(reason);
+    } finally {
+      setDeletingDocument(false);
     }
     if (followupWarning) setProfileError(followupWarning);
   };
 
   const removeCostGroup = async () => {
-    if (!selected || !pendingCostDelete) return;
+    if (!selected || !pendingCostDelete || historyRestoring || deletingCost) return;
     setDeletingCost(true);
     setProfileError(null);
     const group = pendingCostDelete;
@@ -787,17 +814,12 @@ export function KooperantiView() {
         await deleteKooperantRacun(selected.id, group.invoiceId);
         const sourceDocument = documents.find((document) => document.id === group.invoiceId && document.vrsta === 'racun');
         if (sourceDocument) {
-          try {
-            await deleteKooperantDokument(sourceDocument);
-            setDocuments((current) => current.filter((document) => document.id !== sourceDocument.id));
-            setDocumentUrls((current) => {
-              const next = { ...current };
-              delete next[sourceDocument.id];
-              return next;
-            });
-          } catch (reason) {
-            followupWarning = `Stavke računa su obrisane, ali izvorni dokument nije: ${errorMessage(reason)}`;
-          }
+          setDocuments((current) => current.filter((document) => document.id !== sourceDocument.id));
+          setDocumentUrls((current) => {
+            const next = { ...current };
+            delete next[sourceDocument.id];
+            return next;
+          });
         }
       } else {
         const cost = group.costs[0];
@@ -871,8 +893,67 @@ export function KooperantiView() {
     { id: 'aktivnosti', label: 'Aktivnosti' },
   ];
 
+  const afterCooperatorRestore = async () => {
+    profileScope.invalidate();
+    setModalOpen(false);
+    setEditing(null);
+    setForm(emptyForm);
+    setDeleteTarget(null);
+    setSelected(null);
+    setDocuments([]);
+    setDocumentUrls({});
+    setPendingDocumentDelete(null);
+    setPendingCostDelete(null);
+    setShowEngagementForm(false);
+    setEditingEngagementId(null);
+    setEngagementForm(emptyEngagementForm);
+    setShowCostForm(false);
+    setCostForm(emptyCostForm);
+    setInvoiceDraft(null);
+    setInvoiceSiteId('');
+    setInvoicePaid(false);
+    setExpandedInvoiceId(null);
+    setActiveTab('pregled');
+    setProfileError(null);
+    setQuery('');
+    await load(false, true);
+  };
+  const historyDisabled = writing || modalOpen || selected !== null || deleteTarget !== null
+    || pendingDocumentDelete !== null || pendingCostDelete !== null || historyRestoring;
+
   return (
     <div className="min-w-0 max-w-full break-words">
+      {canEditKooperanti && <HistoryMenu>
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-slate-900">Povijest izmjena kooperanta (30 dana)</h2>
+        <p className="text-xs text-slate-500">Odaberite kooperanta. Za povrat zatvorite obrazac i profil. Angažmani, dokumenti, računi i troškovi ne vraćaju se.</p>
+        <select aria-label="Kooperant za povijest izmjena" value={historyCooperatorId} disabled={historyDisabled}
+          onChange={(event) => setHistoryCooperatorId(event.target.value)} className="max-w-full rounded-lg border border-slate-300 p-2 text-sm">
+          <option value="">Odaberite kooperanta</option>
+          {items.map((kooperant) => <option key={kooperant.id} value={kooperant.id}>{kooperant.naziv}</option>)}
+        </select>
+        {historyCooperatorId && <CooperatorChangeHistoryPanel recordId={historyCooperatorId} onRestore={afterCooperatorRestore}
+          disabled={historyDisabled} onRestoringChange={setHistoryRestoring} />}
+      </section>
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-slate-900">Povijest izmjena angažmana (30 dana)</h2>
+        <p className="text-xs text-slate-500">Odaberite spremljeni angažman. Povrat mijenja samo dogovoreni iznos, spremljeni status, datume i napomenu; računi i troškovi ostaju nepromijenjeni.</p>
+        <select aria-label="Angažman za povijest izmjena" value={historyEngagementId} disabled={historyDisabled}
+          onChange={(event) => setHistoryEngagementId(event.target.value)} className="max-w-full rounded-lg border border-slate-300 p-2 text-sm">
+          <option value="">Odaberite angažman</option>
+          {angazmani.map((angazman) => <option key={angazman.id} value={angazman.id}>
+            {angazman.kooperanti?.naziv ?? items.find((item) => item.id === angazman.kooperant_id)?.naziv ?? angazman.kooperant_id}
+            {' · '}{angazman.gradilista?.naziv ?? angazman.gradiliste_id}{' · '}{angazman.id}
+          </option>)}
+        </select>
+        {historyEngagementId && <EngagementChangeHistoryPanel recordId={historyEngagementId} onRestore={afterCooperatorRestore}
+          disabled={historyDisabled} onRestoringChange={setHistoryRestoring} />}
+      </section>
+      <ResourceDeletionHistory module="kooperanti" table="kooperant_racuni"
+        refreshVersion={0} onRestore={afterCooperatorRestore} disabled={historyDisabled}
+        onRestoringChange={setHistoryRestoring} buttonLabel="Obrisani računi kooperanata" />
+      </HistoryMenu>}
+      <fieldset disabled={historyRestoring} className="min-w-0">
       <div className="mb-6 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Kooperanti</h1>
@@ -1629,8 +1710,11 @@ export function KooperantiView() {
         title={pendingCostDelete?.invoice ? 'Izbrisati cijeli račun?' : 'Izbrisati trošak?'}
         message={pendingCostDelete?.invoice
           ? `Bit će izbrisane sve ${pendingCostDelete.costs.length} stavke računa${documents.some((document) => document.id === pendingCostDelete.invoiceId && document.vrsta === 'racun') ? ' i izvorni dokument računa' : ''}. Ova radnja se ne može poništiti.`
-          : 'Trošak će biti trajno izbrisan. Ova radnja se ne može poništiti.'}
+          : pendingCostDelete?.costs[0]?.nalog_id
+            ? 'Trošak pripada nalogu. Samostalni povrat ove stavke još nije podržan.'
+            : 'Ručni trošak možete vratiti u modulu Troškovi, u povijesti pojedinačnih brisanja (30 dana).'}
       />
+      </fieldset>
     </div>
   );
 }

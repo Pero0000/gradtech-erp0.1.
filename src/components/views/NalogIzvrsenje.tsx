@@ -1,8 +1,12 @@
+import { formatHrDateTime } from '@/lib/localization';
+import { useAuth } from '@/auth/useAuth';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, FileText, Gauge, Hammer, History, Package, Plus, Trash2, X, ListChecks, Wrench } from 'lucide-react';
+import { Camera, Check, ChevronLeft, ChevronRight, Clock, FileText, Gauge, Hammer, Package, Plus, Trash2, X, ListChecks, Wrench } from 'lucide-react';
 import type { GradilisteZadatak, Oprema, RadniNalog, ZadatakVrsta } from '@/types';
 import { zadatakVrsta } from '@/types';
+import { WorkOrderItemChangeHistory } from '@/components/views/WorkOrderItemChangeHistory';
+import { HistoryButton, HistoryDialog } from '@/components/views/HistoryDialog';
 import {
   addNalogStavka,
   addNalogAlatFromInventory,
@@ -29,6 +33,8 @@ import {
   setNalogPoslovodja,
   setNalogVozac,
   setNalogZavrsen,
+  retryNalogKilometrazaSync,
+  restoreWorkOrderStatusChange,
   updateGradilisteZadatak,
   updateNalogStavka,
   uploadNalogDokument,
@@ -61,6 +67,8 @@ const auditActions: Record<string, string> = {
   order_status_changed: 'Status naloga je promijenjen',
   report_updated: 'Završni izvještaj je izmijenjen',
   report_confirmations_updated: 'Potvrde izvještaja su izmijenjene',
+  office_status_changed: 'Status i završni izvještaj izmijenjeni su u ERP-u',
+  office_status_restored: 'Prethodni status i izvršenje naloga su vraćeni',
   item_added: 'Dodana je stavka materijala/alata',
   item_removed: 'Uklonjena je stavka materijala/alata',
   item_checked: 'Stavka materijala/alata je označena',
@@ -90,6 +98,19 @@ const auditDetailLabels: Record<string, string> = {
   mobile_alat_na: 'Alat nije potreban',
   old_status: 'Prethodni status',
   new_status: 'Novi status',
+  old_mobile_status: 'Prethodni mobilni status',
+  new_mobile_status: 'Novi mobilni status',
+  old_bez_izvrsenja: 'Prethodno: bez izvršenja',
+  new_bez_izvrsenja: 'Bez izvršenja',
+  old_zakljucen_at: 'Prethodno zaključano',
+  new_zakljucen_at: 'Zaključano',
+  old_km_pocetak: 'Prethodni početni kilometri',
+  new_km_pocetak: 'Novi početni kilometri',
+  old_km_kraj: 'Prethodni završni kilometri',
+  new_km_kraj: 'Novi završni kilometri',
+  old_napomena: 'Prethodna napomena',
+  new_napomena: 'Nova napomena',
+  settlement_id: 'ID obračuna',
   old_potvrde: 'Prethodne potvrde',
   new_potvrde: 'Nove potvrde',
   tip: 'Vrsta',
@@ -105,7 +126,23 @@ function auditValue(value: unknown) {
   return JSON.stringify(value);
 }
 
-function AuditLog({ entries }: { entries: MobileWorkOrderAuditEntry[] }) {
+function compareAuditEntries(a: MobileWorkOrderAuditEntry, b: MobileWorkOrderAuditEntry) {
+  const timestampOrder = b.created_at.localeCompare(a.created_at);
+  if (timestampOrder !== 0) return timestampOrder;
+  const idOrder = BigInt(b.id) - BigInt(a.id);
+  return idOrder > 0n ? 1 : idOrder < 0n ? -1 : 0;
+}
+
+function AuditLog({ entries, onRestoreStatusChange, restoringStatusId }: {
+  entries: MobileWorkOrderAuditEntry[];
+  onRestoreStatusChange?: (entry: MobileWorkOrderAuditEntry) => void;
+  restoringStatusId?: string | null;
+}) {
+  const restoredChanges = new Set(entries
+    .filter((entry) => entry.action === 'office_status_restored')
+    .map((entry) => entry.details.status_change_id)
+    .filter((id): id is string => typeof id === 'string'));
+  const restoreCutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
   return (
     <div className="pt-3">
       {entries.length === 0 ? (
@@ -118,15 +155,30 @@ function AuditLog({ entries }: { entries: MobileWorkOrderAuditEntry[] }) {
                 {auditActions[entry.action] ?? entry.action.replace(/_/g, ' ')}
               </p>
               <p className="mt-0.5 text-xs text-slate-500">
-                {entry.actor_name} · {new Date(entry.created_at).toLocaleString('hr-HR')}
+                {entry.actor_name} · {formatHrDateTime(new Date(entry.created_at))}
               </p>
               {Object.entries(entry.details)
-                .filter(([, value]) => value !== undefined)
+                .filter(([key, value]) => value !== undefined
+                  && !['settlement_id', 'status_change_id', 'task_count'].includes(key))
                 .map(([key, value]) => (
                   <p key={key} className="mt-1 break-words text-xs text-slate-600">
                     {auditDetailLabels[key] ?? key}: {auditValue(value)}
                   </p>
                 ))}
+              {entry.action === 'office_status_changed'
+                && typeof entry.details.status_change_id === 'string'
+                && !restoredChanges.has(entry.details.status_change_id)
+                && new Date(entry.created_at).getTime() > restoreCutoff
+                && onRestoreStatusChange && (
+                  <button
+                    type="button"
+                    disabled={Boolean(restoringStatusId)}
+                    onClick={() => onRestoreStatusChange(entry)}
+                    className="mt-2 inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+                  >
+                    {restoringStatusId === entry.details.status_change_id ? 'Vraćam promjenu…' : 'Vrati status i izvršenje'}
+                  </button>
+                )}
             </li>
           ))}
         </ol>
@@ -179,7 +231,7 @@ function CompletedAdditionalWorkHistory({ items }: { items: GradilisteZadatak[] 
           {items.map((item) => {
             const completedAt = item.gotovo_at ? new Date(item.gotovo_at) : null;
             const completedAtLabel = completedAt && !Number.isNaN(completedAt.getTime())
-              ? completedAt.toLocaleString('hr-HR')
+              ? formatHrDateTime(completedAt)
               : null;
             return (
               <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
@@ -337,6 +389,7 @@ export function NalogIzvrsenje({
   slotId?: string;
   onChange?: (zavrsen: boolean) => void;
 }) {
+  const { canAccess } = useAuth();
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   useEffect(() => {
     setSlot(slotId ? document.getElementById(slotId) : null);
@@ -362,6 +415,8 @@ export function NalogIzvrsenje({
     }, 'Greška pri spremanju vozača.');
   };
   const [error, setError] = useState<string | null>(null);
+  const [retryingKmSync, setRetryingKmSync] = useState(false);
+  const [restoringStatusId, setRestoringStatusId] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [km, setKm] = useState({ pocetak: '', kraj: '' });
   const [stavke, setStavke] = useState<NalogStavka[]>([]);
@@ -378,6 +433,11 @@ export function NalogIzvrsenje({
   const [foto, setFoto] = useState<NalogFoto[]>([]);
   const [selectedFotoId, setSelectedFotoId] = useState<string | null>(null);
   const [audit, setAudit] = useState<MobileWorkOrderAuditEntry[]>([]);
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [auditHasMore, setAuditHasMore] = useState(false);
+  const [auditLoadingMore, setAuditLoadingMore] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const selectedFotoIndex = foto.findIndex((f) => f.id === selectedFotoId);
@@ -402,14 +462,13 @@ export function NalogIzvrsenje({
 
   const load = useCallback(async () => {
     setError(null);
-    const [izv, vr, zad, fo, st, dok, history, inventory, machines] = await Promise.allSettled([
+    const [izv, vr, zad, fo, st, dok, inventory, machines] = await Promise.allSettled([
       fetchNalogIzvrsenje(nalog.id),
       fetchNalogRadnikVrijeme(nalog.id),
       fetchNalogZadaci(nalog.id),
       fetchNalogFoto(nalog.id),
       fetchNalogStavke(nalog.id),
       fetchNalogDokumenti(nalog.id),
-      fetchMobileWorkOrderAudit(nalog.id),
       fetchOprema('alat'),
       fetchOprema('stroj'),
     ]);
@@ -447,26 +506,119 @@ export function NalogIzvrsenje({
     else setError((e) => e ?? errText(zad.reason, 'Greška pri učitavanju zadataka.') + ' Pokreni migraciju 20261015220000_zadaci_nalog_veza.sql.');
     if (fo.status === 'fulfilled') setFoto(fo.value);
     else setError((e) => e ?? errText(fo.reason, 'Greška pri učitavanju fotografija.') + hint);
-    if (history.status === 'fulfilled') setAudit(history.value);
-    else setError((e) => e ?? errText(history.reason, 'Greška pri učitavanju povijesti promjena.') + ' Pokreni migraciju 20261016200000_mobile_work_order_audit.sql.');
     if (nalog.gradiliste_id) setGradDokumenti(await fetchGradilisteDokumenti(nalog.gradiliste_id).catch(() => []));
     setGradLinked(await fetchNalogGradilisteDokumentIds(nalog.id).catch(() => []));
   }, [nalog.id, nalog.gradiliste_id]);
 
+  const loadAudit = useCallback(async (isCurrent: () => boolean = () => true) => {
+    const page = await fetchMobileWorkOrderAudit(nalog.id);
+    if (!isCurrent()) return;
+    setAudit((current) => {
+      const byId = new Map([...page, ...current].map((entry) => [entry.id, entry]));
+      return [...byId.values()].sort(compareAuditEntries);
+    });
+    setAuditHasMore(page.length === 50);
+  }, [nalog.id]);
+
   useEffect(() => {
+    setAudit([]);
+    setAuditHasMore(false);
+    setAuditError(null);
+  }, [nalog.id]);
+
+  useEffect(() => {
+    if (!auditOpen) return;
+    let active = true;
     const refreshAudit = () => {
       if (document.visibilityState !== 'visible') return;
-      void fetchMobileWorkOrderAudit(nalog.id)
-        .then(setAudit)
-        .catch((reason: unknown) => setError(errText(reason, 'Greška pri osvježavanju povijesti promjena.')));
+      setAuditLoading(true);
+      setAuditError(null);
+      void loadAudit(() => active).catch((reason: unknown) => {
+        if (active) setAuditError(errText(reason, 'Greška pri učitavanju povijesti aktivnosti.') + ' Pokreni migraciju 20261016200000_mobile_work_order_audit.sql.');
+      }).finally(() => {
+        if (active) setAuditLoading(false);
+      });
     };
+    refreshAudit();
     const timer = window.setInterval(refreshAudit, 30_000);
     document.addEventListener('visibilitychange', refreshAudit);
     return () => {
+      active = false;
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', refreshAudit);
     };
-  }, [nalog.id]);
+  }, [nalog.id, auditOpen, loadAudit]);
+
+  const loadOlderAudit = async () => {
+    if (auditLoadingMore || audit.length === 0) return;
+    setAuditLoadingMore(true);
+    try {
+      const last = audit[audit.length - 1];
+      const page = await fetchMobileWorkOrderAudit(nalog.id, { created_at: last.created_at, id: last.id });
+      setAudit((current) => {
+        const byId = new Map([...current, ...page].map((entry) => [entry.id, entry]));
+        return [...byId.values()].sort(compareAuditEntries);
+      });
+      setAuditHasMore(page.length === 50);
+    } catch (reason) {
+      setAuditError(errText(reason, 'Greška pri učitavanju starije povijesti aktivnosti.'));
+    } finally {
+      setAuditLoadingMore(false);
+    }
+  };
+
+  const canRestoreStatusChange = (entry: MobileWorkOrderAuditEntry) =>
+    canAccess('radni_nalozi', 'edit')
+    && (Number(entry.details.task_count ?? 0) === 0 || canAccess('gradilista', 'edit'))
+    && (!entry.details.settlement_id
+      || (canAccess('radno_vrijeme', 'edit') && canAccess('troskovi', 'edit')));
+
+  const restoreStatusChange = async (entry: MobileWorkOrderAuditEntry) => {
+    const statusChangeId = entry.details.status_change_id;
+    if (typeof statusChangeId !== 'string' || !canRestoreStatusChange(entry) || restoringStatusId) return;
+    if (!window.confirm(
+      'Vratiti status, završni izvještaj, obračun i povezane zadatke/rokove na stanje prije ove promjene? Povrat se odbija ako su podaci naknadno mijenjani. Kilometarski troškovi sinkronizirat će se nakon povrata.',
+    )) return;
+    setRestoringStatusId(statusChangeId);
+    setError(null);
+    try {
+      await restoreWorkOrderStatusChange(statusChangeId, nalog.id);
+      setZavrsen(entry.details.old_status === 'zavrsen');
+      setBezIzvrsenja(Boolean(entry.details.old_bez_izvrsenja));
+      setKm({
+        pocetak: entry.details.old_km_pocetak == null ? '' : String(entry.details.old_km_pocetak),
+        kraj: entry.details.old_km_kraj == null ? '' : String(entry.details.old_km_kraj),
+      });
+      setNapomena(typeof entry.details.old_napomena === 'string' ? entry.details.old_napomena : '');
+      onChange?.(entry.details.old_status === 'zavrsen');
+      await load();
+      try {
+        await loadAudit();
+      } catch (reason) {
+        setAuditError(errText(reason, 'Status je vraćen, ali povijest aktivnosti nije osvježena.'));
+      }
+    } catch (reason) {
+      if (reason instanceof Error && reason.message.startsWith('Status naloga je vraćen')) {
+        setZavrsen(entry.details.old_status === 'zavrsen');
+        setBezIzvrsenja(Boolean(entry.details.old_bez_izvrsenja));
+        setKm({
+          pocetak: entry.details.old_km_pocetak == null ? '' : String(entry.details.old_km_pocetak),
+          kraj: entry.details.old_km_kraj == null ? '' : String(entry.details.old_km_kraj),
+        });
+        setNapomena(typeof entry.details.old_napomena === 'string' ? entry.details.old_napomena : '');
+        onChange?.(entry.details.old_status === 'zavrsen');
+        await load();
+        try {
+          await loadAudit();
+        } catch (auditReason) {
+          setAuditError(errText(auditReason, 'Status je vraćen, ali povijest aktivnosti nije osvježena.'));
+        }
+      }
+      setError(errText(reason, 'Greška pri vraćanju statusa i izvršenja naloga.'));
+    } finally {
+      setRestoringStatusId(null);
+    }
+  };
 
   const ownPaths = new Set([...dokumenti.map((d) => d.putanja), ...foto.map((f) => f.putanja)]);
   const pickerDocs = gradDokumenti.filter((d) => !ownPaths.has(d.putanja));
@@ -533,12 +685,23 @@ export function NalogIzvrsenje({
       }
     }
     void guard(async () => {
-      if (value && !zavrsiBezIzvrsenja) {
-        const pocetak = km.pocetak === '' ? null : Number(km.pocetak);
-        const kraj = km.kraj === '' ? null : Number(km.kraj);
-        await saveNalogIzvrsenje(nalog.id, { km_pocetak: pocetak, km_kraj: kraj, napomena: napomena.trim() || null });
+      const izvrsenje = value && !zavrsiBezIzvrsenja
+        ? {
+          km_pocetak: km.pocetak === '' ? null : Number(km.pocetak),
+          km_kraj: km.kraj === '' ? null : Number(km.kraj),
+          napomena: napomena.trim() || null,
+        }
+        : undefined;
+      try {
+        await setNalogZavrsen(nalog.id, value, bezPotvrdeDjelatnika, zavrsiBezIzvrsenja, izvrsenje);
+      } catch (reason) {
+        if (reason instanceof Error && reason.message.startsWith('Nalog je ')) {
+          setZavrsen(value);
+          setBezIzvrsenja(value && zavrsiBezIzvrsenja);
+          onChange?.(value);
+        }
+        throw reason;
       }
-      await setNalogZavrsen(nalog.id, value, bezPotvrdeDjelatnika, zavrsiBezIzvrsenja);
       setZavrsen(value);
       setBezIzvrsenja(value && zavrsiBezIzvrsenja);
       onChange?.(value);
@@ -584,6 +747,7 @@ export function NalogIzvrsenje({
     void guard(async () => {
       await deleteGradilisteZadatak(id);
       setZadaci((prev) => prev.filter((x) => x.id !== id));
+      onChange?.(zavrsen);
     }, 'Greška pri brisanju zadatka.');
 
   const onFiles = async (files: FileList | null) => {
@@ -674,10 +838,35 @@ export function NalogIzvrsenje({
   const inputCls = 'min-w-0 max-w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm';
   const modulePanelCls = visualSections ? 'rounded-xl border border-slate-200 bg-white p-4 shadow-sm' : '';
   const visibleVremena = radnikIds ? vremena.filter((v) => radnikIds.includes(v.radnik_id)) : vremena;
+  const kmSyncFailed = error?.includes('dnevni kilometarski troškovi nisu sinkronizirani')
+    || error?.includes('kilometraža vozila nije sinkronizirana');
 
   return (
     <div className={`min-w-0 break-words xl:columns-2 xl:gap-x-6 [&>*]:mb-5 [&>*]:min-w-0 [&>*]:break-inside-avoid ${hideZadaci ? '' : 'mt-5 border-t border-slate-100 pt-4'}`}>
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>}
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <p className="whitespace-pre-line">{error}</p>
+          {kmSyncFailed && (
+            <button
+              type="button"
+              disabled={retryingKmSync}
+              onClick={() => {
+                setRetryingKmSync(true);
+                void retryNalogKilometrazaSync(nalog.id)
+                  .then(() => {
+                    setError(null);
+                    onChange?.(zavrsen);
+                  })
+                  .catch((reason: unknown) => setError(`Kilometarski troškovi i dalje nisu sinkronizirani. ${errText(reason, 'Pokušaj ponovno.')}`))
+                  .finally(() => setRetryingKmSync(false));
+              }}
+              className="mt-2 rounded-md border border-red-300 bg-white px-2.5 py-1.5 font-semibold text-red-800 hover:bg-red-100 disabled:opacity-50"
+            >
+              {retryingKmSync ? 'Sinkroniziram kilometre...' : 'Ponovi sinkronizaciju kilometara'}
+            </button>
+          )}
+        </div>
+      )}
 
       {slot && createPortal(
         zavrsen ? (
@@ -921,6 +1110,9 @@ export function NalogIzvrsenje({
           />
         </div>
       </div>}
+      {!hideStavke && <div className="xl:col-span-2">
+        <WorkOrderItemChangeHistory nalogId={nalog.id} onRestore={reloadStavke} />
+      </div>}
       <div className={`${modulePanelCls} flex items-center gap-3`}>
         <button onClick={() => void saveDetails()} className="rounded-lg bg-sky-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-sky-700">
           Spremi kilometre i napomenu
@@ -1068,17 +1260,23 @@ export function NalogIzvrsenje({
         document.body,
       )}
       <div className="xl:col-span-2">
-        <details className={`group rounded-xl border border-slate-200 ${visualSections ? 'bg-white shadow-sm' : 'bg-slate-50'}`}>
-          <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 [&::-webkit-details-marker]:hidden">
-            <History className="h-4 w-4 flex-shrink-0 text-slate-400" />
-            <span className="font-medium text-slate-700">Povijest aktivnosti</span>
-            <span className="text-xs text-slate-400">{audit.length}</span>
-            <ChevronDown className="ml-auto h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
-          </summary>
-          <div className="border-t border-slate-200 px-3 pb-3">
-            <AuditLog entries={audit} />
-          </div>
-        </details>
+        <HistoryButton onClick={() => setAuditOpen(true)} ariaLabel="Povijest aktivnosti" />
+        <HistoryDialog open={auditOpen} onClose={() => setAuditOpen(false)} title="Povijest aktivnosti naloga">
+            {auditError && <p role="alert" className="rounded-lg bg-red-50 p-2 text-sm text-red-700">{auditError}</p>}
+            {auditLoading && audit.length === 0 && <p role="status" className="text-sm text-slate-500">Učitavanje povijesti…</p>}
+            {!auditLoading && !auditError && audit.length === 0 && <p className="text-sm text-slate-500">Nema zabilježenih aktivnosti.</p>}
+            {audit.length > 0 && <AuditLog
+              entries={audit}
+              onRestoreStatusChange={canAccess('radni_nalozi', 'edit') ? (entry) => {
+                if (canRestoreStatusChange(entry)) void restoreStatusChange(entry);
+              } : undefined}
+              restoringStatusId={restoringStatusId}
+            />}
+            {auditHasMore && <button type="button" onClick={() => void loadOlderAudit()} disabled={auditLoadingMore}
+              className="mt-3 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-sky-700 disabled:opacity-50">
+              {auditLoadingMore ? 'Učitavanje…' : 'Učitaj starije aktivnosti'}
+            </button>}
+        </HistoryDialog>
       </div>
     </div>
   );

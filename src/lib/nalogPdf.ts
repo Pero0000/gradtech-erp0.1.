@@ -1,10 +1,11 @@
+import { formatHrDate } from './localization';
 import type { Gradiliste, RadniNalog, Vozilo, VoziloDokument } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { fetchNalogIzvrsenje, fetchNalogRadnikVrijeme, fetchNalogStavke, fetchNalogZadaci, fetchVoziloDokumenti } from '@/lib/api';
 import { nextServis } from '@/lib/servis';
 
 const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
-const fmtDate = (s?: string | null) => (s ? new Date(s.length <= 10 ? `${s}T00:00:00` : s).toLocaleDateString('hr-HR') : '');
+const fmtDate = (s?: string | null) => (s ? formatHrDate(new Date(s.length <= 10 ? `${s}T00:00:00` : s)) : '');
 const hhmm = (s?: string | null) => (s ? s.slice(0, 5) : '');
 const num = (n?: number | null) => (n == null ? '' : n.toLocaleString('hr-HR'));
 
@@ -131,7 +132,7 @@ export async function downloadNalogPdf(nalog: RadniNalog, gradiliste?: Pick<Grad
     </div>
     <div class="box"><div class="h">Opis radova</div>${lines(opisLinije, Math.max(8, opisLinije.length + 2))}</div>
     <div class="sig"><div>Poslovođa</div><div>Odgovorna osoba</div></div>
-    <div class="ft"><span>TM Color · radni nalog ${esc(nalog.broj)}</span><span>Ispisano ${new Date().toLocaleDateString('hr-HR')}</span></div>
+    <div class="ft"><span>TM Color · radni nalog ${esc(nalog.broj)}</span><span>Ispisano ${formatHrDate(new Date())}</span></div>
   </div>`;
 
   const host = document.createElement('div');

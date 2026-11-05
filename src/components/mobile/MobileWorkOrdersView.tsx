@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Camera, Fuel, ImagePlus, Trash2, Check, ChevronLeft, ChevronRight, ClipboardCheck, Clock3, CreditCard, FileText, Flag, Gauge, ListChecks, LogOut, MapPin, Moon, Package, Play, Plus, RefreshCw, Sun, Truck, Wrench } from 'lucide-react';
 import { useAuth } from '@/auth/useAuth';
@@ -730,7 +731,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                 </span>
               </div>
               {selected.opis && <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">{selected.opis}</p>}
-              {selected.rok && <p className="mt-3 text-xs text-slate-500">Rok: {new Date(`${selected.rok}T00:00:00`).toLocaleDateString('hr-HR')}</p>}
+              {selected.rok && <p className="mt-3 text-xs text-slate-500">Rok: {formatHrDate(new Date(`${selected.rok}T00:00:00`))}</p>}
             </article>
 
             {loading && <p className="rounded-xl bg-white p-4 text-sm text-slate-500">Učitavanje naloga…</p>}
@@ -1252,7 +1253,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
             <div className="rounded-3xl bg-slate-900 p-5 text-white shadow-lg">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm text-slate-400">{new Date().toLocaleDateString('hr-HR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+                  <p className="text-sm text-slate-400">{formatHrDate(new Date(), { weekday: 'long', day: 'numeric', month: 'long' })}</p>
                   <h2 className="mt-1 text-2xl font-bold">Dobro jutro, {workerName?.split(' ')[0] ?? 'djelatniče'}</h2>
                   <p className="mt-1 text-sm text-slate-400">{profile?.email}</p>
                 </div>
@@ -1318,7 +1319,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                   <h3 className="mt-2 font-bold text-slate-900">{order.naslov}</h3>
                   {order.gradiliste_naziv && <p className="mt-1 text-sm text-slate-500">{order.gradiliste_naziv}</p>}
                   <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
-                    <span>{order.rok ? `Rok: ${new Date(`${order.rok}T00:00:00`).toLocaleDateString('hr-HR')}` : 'Otvori detalje naloga'}</span>
+                    <span>{order.rok ? `Rok: ${formatHrDate(new Date(`${order.rok}T00:00:00`))}` : 'Otvori detalje naloga'}</span>
                     <ChevronRight className="h-4 w-4 text-slate-400" />
                   </div>
                 </button>

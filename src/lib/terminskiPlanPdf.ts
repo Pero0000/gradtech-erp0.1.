@@ -1,3 +1,4 @@
+import { formatHrDate } from './localization';
 import { hrPraznici } from '@/lib/obracunSati';
 
 export interface TerminskiPlanPdfRow {
@@ -35,7 +36,7 @@ function utcDay(value: string) {
 }
 
 function dateLabel(value: string) {
-  return new Date(`${value}T12:00:00`).toLocaleDateString('hr-HR', { day: 'numeric', month: 'short' });
+  return formatHrDate(new Date(`${value}T12:00:00`), { day: 'numeric', month: 'short' });
 }
 
 function pageMarkup(spec: TerminskiPlanPdfSpec) {

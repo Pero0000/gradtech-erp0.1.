@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, BadgeCheck, FileText, Wallet } from 'lucide-react';
 import type { OdsustvoVrsta, Radnik, RadnikDokument, RadnikDokumentVrsta, RadnikOdsustvo, RadniNalog, RadnikPovijest } from '@/types';
@@ -14,6 +15,7 @@ import {
 import { computeObracun, hrPraznici, mjesecRaspon, pravaRadnika } from '@/lib/obracunSati';
 import { todayISO } from '@/lib/rokovi';
 import { Modal } from '@/components/ui/Modal';
+import { HistoryButton, HistoryDialog } from './HistoryDialog';
 import { RadnikDokumenti } from '@/components/views/RadnikDokumenti';
 import { Badge } from '@/components/ui/Badge';
 
@@ -25,7 +27,7 @@ const tabs: { key: Tab; label: string; icon: typeof Activity }[] = [
   { key: 'aktivnost', label: 'Aktivnost', icon: Activity },
 ];
 const euro = (value: number) => value.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' });
-const dateLabel = (value: string) => new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString('hr-HR');
+const dateLabel = (value: string) => formatHrDate(new Date(`${value.slice(0, 10)}T00:00:00`));
 const monthRange = (today: string) => mjesecRaspon(today.slice(0, 7));
 const mandatoryDocs: { type: RadnikDokumentVrsta; label: string }[] = [
   { type: 'lijecnicki', label: 'Liječnički pregled' },
@@ -166,11 +168,15 @@ export function RadnikDetalj({ radnik, open, onClose, onEdit }: {
   const [error, setError] = useState('');
   const [documents, setDocuments] = useState<RadnikDokument[]>([]);
   const [history, setHistory] = useState<RadnikPovijest[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
   const [absences, setAbsences] = useState<RadnikOdsustvo[]>([]);
   const [monthHours, setMonthHours] = useState<ObracunRadnoVrijemeRow[]>([]);
   const [orders, setOrders] = useState<RadniNalog[]>([]);
   const [currentSite, setCurrentSite] = useState<string | null>(null);
   const [currentOrder, setCurrentOrder] = useState<RadniNalog | null>(null);
+  const radnikId = radnik?.id;
   const today = todayISO();
   const month = monthRange(today);
 
@@ -181,16 +187,14 @@ export function RadnikDetalj({ radnik, open, onClose, onEdit }: {
     setError('');
     void Promise.all([
       fetchRadnikDokumenti(radnik.id),
-      fetchRadnikPovijest(radnik.id),
       fetchOdsustvaRaspon(`${today.slice(0, 4)}-01-01`, `${today.slice(0, 4)}-12-31`),
       fetchObracunRadnoVrijeme(month.od, month.do),
       fetchDnevniRaspored(today),
       fetchRadniNalozi(),
       fetchGradilista(),
-    ]).then(([docs, payHistory, leave, hours, schedule, workOrders, siteRows]) => {
+    ]).then(([docs, leave, hours, schedule, workOrders, siteRows]) => {
       if (!active) return;
       setDocuments(docs);
-      setHistory(payHistory);
       setAbsences(leave.filter((item) => item.radnik_id === radnik.id));
       setMonthHours(hours.filter((item) => item.radnik_id === radnik.id));
       const assignedVehicles = new Set(schedule.radnici.filter((item) => item.radnik_id === radnik.id).map((item) => item.vozilo_id));
@@ -210,6 +214,22 @@ export function RadnikDetalj({ radnik, open, onClose, onEdit }: {
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [open, radnik, today, month.do, month.od]);
+
+  useEffect(() => {
+    if (!open || !radnikId || tab !== 'place' || !historyOpen) return;
+    let active = true;
+    setHistory([]);
+    setHistoryLoading(true);
+    setHistoryError('');
+    void fetchRadnikPovijest(radnikId).then((entries) => {
+      if (active) setHistory(entries);
+    }).catch((reason: unknown) => {
+      if (active) setHistoryError(reason instanceof Error ? reason.message : 'Povijest promjena cijena nije dostupna.');
+    }).finally(() => {
+      if (active) setHistoryLoading(false);
+    });
+    return () => { active = false; };
+  }, [open, radnikId, tab, historyOpen]);
 
   const latestDocuments = useMemo(() => {
     if (!radnik) return new Map<RadnikDokumentVrsta, RadnikDokument>();
@@ -320,10 +340,14 @@ export function RadnikDetalj({ radnik, open, onClose, onEdit }: {
                   ? <p className="text-sm text-slate-500">Nema upisanih bonusa.</p>
                   : <ul className="divide-y divide-slate-100">{(radnik.bonusi ?? []).filter((bonus) => bonus.naziv || bonus.iznos).map((bonus, index) => <li key={`${bonus.naziv}-${index}`} className="flex justify-between gap-3 py-2 text-sm"><span>{bonus.naziv} · {bonusTipLabel[bonus.tip]}</span><strong>{euro(bonus.iznos)}</strong></li>)}</ul>}
               </section>
-              <section className="rounded-xl border border-slate-200 bg-white p-4">
-                <h3 className="mb-3 text-sm font-semibold">Povijest promjena cijena</h3>
-                {history.length === 0 ? <p className="text-sm text-slate-500">Nema spremljenih promjena cijena.</p> : <ul className="divide-y divide-slate-100">{history.map((item) => <li key={item.id} className="flex flex-wrap gap-x-3 py-2 text-sm"><span className="text-slate-500">{dateLabel(item.created_at)}</span><strong>{item.polje}</strong><span>{item.stara_vrijednost ?? '—'} → {item.nova_vrijednost ?? '—'}</span></li>)}</ul>}
-              </section>
+              <HistoryButton onClick={() => setHistoryOpen(true)} ariaLabel="Povijest promjena cijena" />
+              <HistoryDialog open={historyOpen && tab === 'place'} onClose={() => setHistoryOpen(false)} title="Povijest promjena cijena">
+                {historyError && <p role="alert" className="text-sm text-red-700">{historyError}</p>}
+                {historyLoading && <p role="status" className="text-sm text-slate-500">Učitavanje povijesti…</p>}
+                {!historyLoading && !historyError && (history.length === 0
+                  ? <p className="text-sm text-slate-500">Nema spremljenih promjena cijena.</p>
+                  : <ul className="divide-y divide-slate-100">{history.map((item) => <li key={item.id} className="flex flex-wrap gap-x-3 py-2 text-sm"><span className="text-slate-500">{dateLabel(item.created_at)}</span><strong>{item.polje}</strong><span>{item.stara_vrijednost ?? '—'} → {item.nova_vrijednost ?? '—'}</span></li>)}</ul>)}
+              </HistoryDialog>
             </div>}
             {tab === 'dokumenti' && <RadnikDokumenti radnikId={radnik.id} />}
             {tab === 'aktivnost' && <ActivityPanel radnik={radnik} today={today} />}

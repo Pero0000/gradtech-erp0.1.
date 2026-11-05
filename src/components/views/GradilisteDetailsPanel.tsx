@@ -1,5 +1,7 @@
+import { formatHrDate, formatHrDateTime } from '@/lib/localization';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/auth/useAuth';
+import { DeadlineChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
 import { companyStorage, getUniversalHourlyRate } from '@/lib/company';
 import { downloadFile } from '@/lib/downloadFile';
 import {
@@ -128,7 +130,7 @@ function currency(value: number) {
 }
 
 function date(value: string | null) {
-  return value ? new Date(`${value}T00:00:00`).toLocaleDateString('hr-HR') : '—';
+  return value ? formatHrDate(new Date(`${value}T00:00:00`)) : '—';
 }
 
 type SectionTone = 'sky' | 'amber' | 'violet' | 'rose' | 'emerald' | 'slate';
@@ -577,6 +579,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const [deadlineModalOpen, setDeadlineModalOpen] = useState(false);
   const [editingDeadline, setEditingDeadline] = useState<Rok | null>(null);
   const [savingDeadline, setSavingDeadline] = useState(false);
+  const [deadlineRestoring, setDeadlineRestoring] = useState(false);
   const [deadlineForm, setDeadlineForm] = useState({ naziv: '', datum_pocetka: '', datum_zavrsetka: '', kooperant_id: '', opis: '' });
 
   const afterDeadlineChange = async () => {
@@ -599,6 +602,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   };
 
   const saveDeadline = async () => {
+    if (savingDeadline || deadlineRestoring) return;
     if (!deadlineForm.naziv.trim() || !deadlineForm.datum_pocetka || !deadlineForm.datum_zavrsetka) return;
     if (deadlineForm.datum_zavrsetka < deadlineForm.datum_pocetka) {
       setError('Datum kraja ne može biti prije datuma početka.');
@@ -788,6 +792,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   };
 
   const saveVtr = async () => {
+    if (savingVtr) return;
     const selectedOffer = vtrSource === 'ponuda' && vtrOfferMethod === 'existing'
       ? vtrOffers.find((offer) => offer.id === vtrOfferId)
       : undefined;
@@ -853,7 +858,9 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   };
 
   const removeVtr = async (item: UgovoreniRad) => {
-    if (!window.confirm(`Obrisati VTR rad „${item.naziv}”?`)) return;
+    if (savingVtr) return;
+    if (!window.confirm(`Obrisati VTR rad „${item.naziv}”? Rad i sačuvani prilog možete vratiti u modulu Gradilišta, u povijesti pojedinačno obrisanih ugovorenih i VTR radova (30 dana). Ponuda se ne briše niti mijenja.`)) return;
+    setSavingVtr(true);
     setError(null);
     try {
       await deleteUgovoreniRad(item.id);
@@ -861,13 +868,8 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     } catch (reason) {
       setError(errText(reason, 'Greška pri brisanju VTR rada.'));
       return;
-    }
-    if (item.dokument_putanja) {
-      try {
-        await deleteUgovoreniRadDokument(item.dokument_putanja);
-      } catch (reason) {
-        setError(`VTR rad je obrisan, ali njegova datoteka nije uklonjena: ${errText(reason, 'nepoznata greška')}`);
-      }
+    } finally {
+      setSavingVtr(false);
     }
   };
 
@@ -918,7 +920,9 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   };
 
   const removeCost = async (item: Trosak) => {
-    if (!window.confirm(`Obrisati trošak „${item.opis}”?`)) return;
+    if (!window.confirm(`Obrisati trošak „${item.opis}”?\n${item.nalog_id || item.kooperant_racun_id
+      ? 'Samostalni povrat troška naloga ili grupnog računa još nije podržan.'
+      : 'Povrat ručnog troška dostupan je u modulu Troškovi, u povijesti pojedinačnih brisanja (30 dana).'}`)) return;
     try {
       await deleteTrosak(item.id);
       await reloadDetails();
@@ -1422,7 +1426,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                   ) : (
                     <span className={`min-w-0 flex-1 break-words ${z.gotovo ? 'font-medium text-emerald-800 line-through decoration-emerald-400' : 'text-slate-800'}`}>{z.naziv}</span>
                   )}
-                  <input
+                  <input lang="hr-HR"
                     type="date"
                     value={z.rok ?? ''}
                     onChange={(event) => void setZadatakRok(z, event.target.value)}
@@ -1467,7 +1471,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                   placeholder={sekcija.placeholder}
                   className="min-w-0 rounded-lg border border-slate-300 px-3 py-1.5 text-xs xl:flex-1"
                 />
-                <input
+                <input lang="hr-HR"
                   type="date"
                   value={newZadatakRok[sekcija.vrsta]}
                   onChange={(event) => setNewZadatakRok((prev) => ({ ...prev, [sekcija.vrsta]: event.target.value }))}
@@ -1657,7 +1661,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                       <div className="flex flex-shrink-0 items-center gap-1">
                         <span className="font-medium text-slate-600">{currency(item.ostvareni_iznos ?? 0)} / {currency(item.ugovoreni_iznos)}</span>
                         {item.vrsta === 'vtr' && (
-                          <button type="button" onClick={() => void removeVtr(item)} className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-600" aria-label={`Obriši VTR rad ${item.naziv}`}>
+                          <button type="button" disabled={savingVtr} onClick={() => void removeVtr(item)} className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-50" aria-label={`Obriši VTR rad ${item.naziv}`}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         )}
@@ -1762,7 +1766,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                               <img loading="lazy" src={foto.thumbnailUrl} alt={foto.naziv ?? `Fotografija naloga ${foto.nalog_broj}`} className="h-full w-full object-cover" />
                             </button>
                             <span className="block shrink-0 truncate px-2 py-1.5 text-[10px] text-slate-600">
-                              {foto.created_at ? new Date(foto.created_at).toLocaleDateString('hr-HR') : 'Bez datuma'}
+                              {foto.created_at ? formatHrDate(new Date(foto.created_at)) : 'Bez datuma'}
                             </span>
                             <button
                               type="button"
@@ -1848,7 +1852,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                 <p className="truncate text-xs text-slate-500">
                   {sortedRadniNalogFoto[activePhotoIndex].nalog_naslov ?? ''}
                   {sortedRadniNalogFoto[activePhotoIndex].created_at
-                    ? ` · ${new Date(sortedRadniNalogFoto[activePhotoIndex].created_at!).toLocaleString('hr-HR')}`
+                    ? ` · ${formatHrDateTime(new Date(sortedRadniNalogFoto[activePhotoIndex].created_at!))}`
                     : ''}
                 </p>
               </div>
@@ -2141,20 +2145,20 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
 
       <Modal
         open={deadlineModalOpen}
-        onClose={() => setDeadlineModalOpen(false)}
+        onClose={() => { if (!savingDeadline && !deadlineRestoring) setDeadlineModalOpen(false); }}
         title={editingDeadline ? 'Uredi rok' : 'Novi rok / važan datum'}
         footer={(
           <>
-            <button type="button" onClick={() => setDeadlineModalOpen(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
+            <button type="button" disabled={savingDeadline || deadlineRestoring} onClick={() => setDeadlineModalOpen(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
               Odustani
             </button>
-            <button type="button" onClick={() => void saveDeadline()} disabled={savingDeadline || !deadlineForm.naziv.trim() || !deadlineForm.datum_pocetka || !deadlineForm.datum_zavrsetka} className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">
+            <button type="button" onClick={() => void saveDeadline()} disabled={savingDeadline || deadlineRestoring || !deadlineForm.naziv.trim() || !deadlineForm.datum_pocetka || !deadlineForm.datum_zavrsetka} className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">
               {savingDeadline ? 'Spremanje…' : 'Spremi'}
             </button>
           </>
         )}
       >
-        <div className="space-y-4">
+        <fieldset disabled={savingDeadline || deadlineRestoring} className="space-y-4">
           <Field label="Naziv *">
             <TextInput value={deadlineForm.naziv} onChange={(event) => setDeadlineForm((previous) => ({ ...previous, naziv: event.target.value }))} placeholder="npr. Dolazak materijala" />
           </Field>
@@ -2175,7 +2179,18 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
           <Field label="Napomena">
             <Textarea rows={2} value={deadlineForm.opis} onChange={(event) => setDeadlineForm((previous) => ({ ...previous, opis: event.target.value }))} />
           </Field>
-        </div>
+        </fieldset>
+        {editingDeadline && <DeadlineChangeHistoryPanel
+          recordId={editingDeadline.id}
+          disabled={savingDeadline}
+          onRestoringChange={setDeadlineRestoring}
+          onRestore={async () => {
+            setDeadlineModalOpen(false);
+            setEditingDeadline(null);
+            setDeadlineForm({ naziv: '', datum_pocetka: '', datum_zavrsetka: '', kooperant_id: '', opis: '' });
+            await afterDeadlineChange();
+          }}
+        />}
       </Modal>
       <ConfirmDialog
         open={pendingPhotoDelete !== null}
@@ -2183,8 +2198,8 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
         onConfirm={() => void deletePhotos()}
         title={pendingPhotoDelete === 'all' ? 'Izbrisati sve fotografije?' : 'Izbrisati fotografiju?'}
         message={pendingPhotoDelete === 'all'
-          ? `Trajno ćete izbrisati svih ${sortedRadniNalogFoto.length} fotografija s radnih naloga ovog gradilišta.`
-          : 'Fotografija će biti trajno izbrisana s radnog naloga.'}
+          ? `Uklonit ćete svih ${sortedRadniNalogFoto.length} fotografija s radnih naloga ovog gradilišta. Datoteke ostaju sačuvane, ali samostalan povrat ovog brisanja još nije dostupan.`
+          : 'Fotografija će biti uklonjena s radnog naloga. Datoteka ostaje sačuvana, ali samostalan povrat ovog brisanja još nije dostupan.'}
       />
     </aside>
   );

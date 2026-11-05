@@ -1,3 +1,4 @@
+import { formatHrDate } from './localization';
 import { ponudaBroj, stavkaPopust, ponudaUkupno, type Ponuda, type PonudaStavka } from './ponude';
 import type { PonudaPostavke } from './ponudePostavke';
 
@@ -51,7 +52,7 @@ const STYLE = `
 
 function buildHtml(p: Ponuda, stavke: PonudaStavka[], s: PonudaPostavke, objektAdresa?: string | null) {
   const tot = ponudaUkupno(p, stavke);
-  const datum = new Date(p.datum).toLocaleDateString('hr-HR').replace(/\.$/, '');
+  const datum = formatHrDate(p.datum);
   const showPop = p.prikazi_popust !== false;
   const cols = showPop ? 10 : 6;
 

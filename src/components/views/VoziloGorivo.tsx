@@ -12,7 +12,9 @@ import {
   type VoziloGorivoInput,
 } from '@/lib/api';
 import { todayISO } from '@/lib/rokovi';
+import { parseDecimalInput, formatHrDate } from '@/lib/localization';
 import { Select, TextInput } from '@/components/ui/Field';
+import { FuelChangeHistory } from '@/components/views/FuelChangeHistory';
 
 const errorText = (reason: unknown) => {
   if (reason instanceof Error) return reason.message;
@@ -90,6 +92,7 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
   const [thresholdDraft, setThresholdDraft] = useState('50');
   const [savingThreshold, setSavingThreshold] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [historyVersion, setHistoryVersion] = useState(0);
 
   const load = async () => {
     setLoading(true);
@@ -148,7 +151,7 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
   };
 
   const save = async () => {
-    const litersValue = Number(litara);
+    const litersValue = parseDecimalInput(litara);
     const kmValue = Number(kilometraza);
     const worker = eligibleWorkers.find((item) => item.id === tocioId);
     if (!datum || !Number.isFinite(litersValue) || litersValue <= 0 || !kilometraza.trim()
@@ -169,6 +172,7 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
     try {
       if (editing) await updateVoziloGorivo(editing.id, input);
       else await addVoziloGorivo(input);
+      setHistoryVersion((current) => current + 1);
       reset();
       await load();
       onChange?.();
@@ -181,10 +185,11 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
   };
 
   const remove = async (entry: VoziloGorivo) => {
-    if (!window.confirm(`Obrisati unos od ${new Date(`${entry.datum}T00:00:00`).toLocaleDateString('hr-HR')}?`)) return;
+    if (!window.confirm(`Obrisati unos od ${formatHrDate(new Date(`${entry.datum}T00:00:00`))}?`)) return;
     setError(null);
     try {
       await deleteVoziloGorivo(entry.id);
+      setHistoryVersion((current) => current + 1);
       if (editing?.id === entry.id) reset();
       await load();
       onChange?.();
@@ -216,6 +221,13 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
 
   return (
     <div className="space-y-4">
+      {canEdit && <FuelChangeHistory key={vozilo.id} vehicleId={vozilo.id} refreshVersion={historyVersion} onRestore={async () => {
+        reset();
+        await load();
+        onChange?.();
+        window.dispatchEvent(new Event('vozila-obavijest-updated'));
+      }} />}
+
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <h3 className="font-semibold text-slate-900">Prag upozorenja na potrošnju</h3>
         <p className="mt-1 text-xs text-slate-600">
@@ -275,7 +287,7 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
             <TextInput type="date" value={datum} onChange={(event) => setDatum(event.target.value)} />
           </label>
           <label className="grid gap-1 text-xs font-medium text-slate-600">Litre goriva
-            <TextInput type="number" min="0.01" step="0.01" value={litara} onChange={(event) => setLitara(event.target.value)} placeholder="npr. 42,5" />
+            <TextInput type="text" inputMode="decimal" value={litara} onChange={(event) => setLitara(event.target.value)} placeholder="npr. 42,5" />
           </label>
           <label className="grid gap-1 text-xs font-medium text-slate-600">Kilometraža auta
             <TextInput type="number" min={0} step="1" value={kilometraza} onChange={(event) => setKilometraza(event.target.value)} />
@@ -318,7 +330,7 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
                 <article key={entry.id} className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 p-3">
                   <div className="min-w-0">
                     <p className="font-semibold text-slate-900">{Number(entry.litara).toLocaleString('hr-HR')} l · {Number(entry.kilometraza).toLocaleString('hr-HR')} km</p>
-                    <p className="text-xs text-slate-500">{new Date(`${entry.datum}T00:00:00`).toLocaleDateString('hr-HR')} · Točio/la: {entry.tocio_ime}</p>
+                    <p className="text-xs text-slate-500">{formatHrDate(new Date(`${entry.datum}T00:00:00`))} · Točio/la: {entry.tocio_ime}</p>
                     <p className="mt-1 text-xs text-slate-600">
                       {anomaly === 'odometer'
                         ? <span className="font-semibold text-rose-700">Provjeriti kilometražu: niža je od prethodnog točenja.</span>

@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { fetchAllRows } from './pagination';
 
 export interface Stavka {
   id: string;
@@ -40,32 +41,23 @@ function fail(error: { message?: string } | null): never {
 }
 
 export async function fetchStavke(): Promise<Stavka[]> {
-  const { data, error } = await supabase.from('stavke').select('*').order('vrsta_posla').order('naziv');
-  if (error) fail(error);
-  return (data ?? []) as Stavka[];
+  return fetchAllRows<Stavka>((from, to) => supabase.from('stavke').select('*')
+    .order('vrsta_posla').order('naziv').order('id').range(from, to));
 }
 
 export async function createStavka(s: StavkaInput) {
   const { data, error } = await supabase.from('stavke').insert(s).select().single();
   if (error) fail(error);
-  // početna cijena je prvi zapis u povijesti
-  await supabase.from('stavke_cijene_log').insert({ stavka_id: (data as Stavka).id, stara_cijena: null, nova_cijena: s.cijena });
   return data as Stavka;
 }
 
-// Pri promjeni cijene zapisuje se log stare i nove cijene
-export async function updateStavka(id: string, s: StavkaInput, staraCijena: number) {
-  const cijenaPromijenjena = Number(staraCijena) !== Number(s.cijena);
+export async function updateStavka(id: string, s: StavkaInput) {
   const now = new Date().toISOString();
   const { error } = await supabase
     .from('stavke')
-    .update({ ...s, updated_at: now, ...(cijenaPromijenjena ? { cijena_promijenjena_at: now } : {}) })
+    .update({ ...s, updated_at: now })
     .eq('id', id);
   if (error) fail(error);
-  if (cijenaPromijenjena) {
-    const { error: logError } = await supabase.from('stavke_cijene_log').insert({ stavka_id: id, stara_cijena: staraCijena, nova_cijena: s.cijena });
-    if (logError) fail(logError);
-  }
 }
 
 export async function deleteStavka(id: string) {

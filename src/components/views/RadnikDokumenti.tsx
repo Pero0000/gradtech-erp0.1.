@@ -1,10 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { formatHrDate } from '@/lib/localization';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FileText, Plus, Trash2, Paperclip } from 'lucide-react';
 import type { RadnikDokument, RadnikDokumentVrsta } from '@/types';
-import { addRadnikDokument, deleteRadnikDokument, fetchRadnikDokumenti } from '@/lib/api';
+import { addRadnikDokument, addRadnikDokumentKategorija, deleteRadnikDokument, fetchRadnikDokumenti, fetchRadnikDokumentKategorije } from '@/lib/api';
+import { useAuth } from '@/auth/useAuth';
 import { todayISO } from '@/lib/rokovi';
 import { TextInput, Select } from '@/components/ui/Field';
-import { dokumentVrste } from '@/lib/radnikDokumenti';
+import { dokumentVrste, osnovneDokumentKategorije, type RadnikDokumentKategorija } from '@/lib/radnikDokumenti';
+import { DocumentChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
+import { useRequestScope } from '@/lib/useRequestScope';
 
 const errText = (e: unknown) => (e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : 'Greška');
 
@@ -17,43 +21,102 @@ function status(d: RadnikDokument) {
   return { label: 'Vrijedi', cls: 'bg-emerald-50 text-emerald-700' };
 }
 
-const date = (v: string | null) => (v ? new Date(`${v}T00:00:00`).toLocaleDateString('hr-HR') : '—');
+const date = (v: string | null) => (v ? formatHrDate(new Date(`${v}T00:00:00`)) : '—');
 
-export function RadnikDokumenti({ radnikId }: { radnikId: string }) {
+export function RadnikDokumenti({ radnikId, onChange }: { radnikId: string; onChange?: () => void }) {
+  const { canAccess } = useAuth();
+  const canEdit = canAccess('radnici', 'edit');
   const [items, setItems] = useState<RadnikDokument[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ vrsta: 'lijecnicki' as RadnikDokumentVrsta, naziv: '', datum_od: '', datum_do: '' });
+  const [historyRestoring, setHistoryRestoring] = useState(false);
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const [form, setForm] = useState({ vrsta: 'lijecnicki' as RadnikDokumentVrsta, datum_od: '', datum_do: '' });
+  const [categories, setCategories] = useState<RadnikDokumentKategorija[]>(osnovneDokumentKategorije);
+  const [categoryDraft, setCategoryDraft] = useState('');
+  const [savingCategory, setSavingCategory] = useState(false);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [categoriesReady, setCategoriesReady] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const requestScope = useRequestScope();
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const isCurrent = requestScope.start();
+    if (!isCurrent()) return;
+    setError(null);
     try {
-      setItems(await fetchRadnikDokumenti(radnikId));
+      const documents = await fetchRadnikDokumenti(radnikId);
+      if (isCurrent()) setItems(documents);
     } catch (e) {
-      setError(`${errText(e)} — pokreni migraciju 20261015310000_radnici_cijene_dokumenti.sql.`);
+      if (isCurrent()) setError(errText(e));
     }
-  };
+  }, [radnikId, requestScope]);
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => requestScope.invalidate();
+  }, [load, requestScope]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCategoriesReady(false);
+    void fetchRadnikDokumentKategorije().then((custom) => {
+      if (cancelled) return;
+      setCategories([...osnovneDokumentKategorije, ...custom]);
+      setCategoriesReady(true);
+    }).catch((reason: unknown) => {
+      if (!cancelled) setCategoryError(errText(reason));
+    });
+    return () => { cancelled = true; };
   }, [radnikId]);
 
+  const addCategory = async () => {
+    if (!canEdit || saving || savingCategory || historyRestoring) return;
+    const naziv = categoryDraft.trim();
+    if (!naziv) {
+      setCategoryError('Upišite naziv nove kategorije.');
+      return;
+    }
+    if (categories.some((category) => category.naziv.toLocaleLowerCase('hr-HR') === naziv.toLocaleLowerCase('hr-HR'))) {
+      setCategoryError('Kategorija dokumenta s tim nazivom već postoji.');
+      return;
+    }
+    setSavingCategory(true);
+    setCategoryError(null);
+    try {
+      const category = await addRadnikDokumentKategorija(naziv);
+      setCategories((current) => [...current, category]);
+      setForm((current) => ({ ...current, vrsta: category.vrsta }));
+      setCategoryDraft('');
+    } catch (reason) {
+      setCategoryError(errText(reason));
+    } finally {
+      setSavingCategory(false);
+    }
+  };
+
   const add = async () => {
-    const naziv = form.naziv.trim() || dokumentVrste[form.vrsta];
+    if (!canEdit || saving || historyRestoring) return;
+    const category = categories.find((item) => item.vrsta === form.vrsta);
+    if (!category) {
+      setError('Odaberite kategoriju dokumenta.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       await addRadnikDokument(
         radnikId,
-        { vrsta: form.vrsta, naziv, datum_od: form.datum_od || null, datum_do: form.datum_do || null, napomena: null },
+        { vrsta: form.vrsta, naziv: category.naziv, datum_od: form.datum_od || null, datum_do: form.datum_do || null, napomena: null },
         file,
       );
-      setForm({ vrsta: form.vrsta, naziv: '', datum_od: '', datum_do: '' });
+      setForm({ vrsta: form.vrsta, datum_od: '', datum_do: '' });
       setFile(null);
       if (fileRef.current) fileRef.current.value = '';
       await load();
+      setHistoryVersion((value) => value + 1);
+      onChange?.();
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -62,17 +125,30 @@ export function RadnikDokumenti({ radnikId }: { radnikId: string }) {
   };
 
   const remove = async (d: RadnikDokument) => {
+    if (!canEdit || saving || historyRestoring) return;
     if (!window.confirm(`Obrisati "${d.naziv}"?`)) return;
+    setSaving(true);
     try {
       await deleteRadnikDokument(d);
       await load();
+      setHistoryVersion((value) => value + 1);
+      onChange?.();
     } catch (e) {
       setError(errText(e));
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
     <div>
+      <DocumentChangeHistoryPanel table="radnici_dokumenti" parentId={radnikId} module="radnici" refreshVersion={historyVersion} disabled={saving || savingCategory} onRestoringChange={setHistoryRestoring} onRestore={async () => {
+        setForm({ vrsta: 'lijecnicki', datum_od: '', datum_do: '' });
+        setFile(null);
+        if (fileRef.current) fileRef.current.value = '';
+        await load();
+        onChange?.();
+      }} />
       <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-slate-700">
         <FileText className="h-4 w-4 text-slate-400" /> Dokumenti i rokovi ({items.length})
       </p>
@@ -87,22 +163,32 @@ export function RadnikDokumenti({ radnikId }: { radnikId: string }) {
                 <p className="truncate font-medium text-slate-800">
                   {d.url ? <a href={d.url} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline">{d.naziv}</a> : d.naziv}
                 </p>
-                <p className="text-xs text-slate-500">{dokumentVrste[d.vrsta] ?? d.vrsta} · {date(d.datum_od)} – {date(d.datum_do)}</p>
+                <p className="text-xs text-slate-500">{dokumentVrste[d.vrsta] ?? d.naziv} · {date(d.datum_od)} – {date(d.datum_do)}</p>
               </div>
               {st && <span className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${st.cls}`}>{st.label}</span>}
-              <button type="button" onClick={() => void remove(d)} className="flex-shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600" aria-label="Obriši">
+              {canEdit && <button type="button" disabled={saving || historyRestoring} onClick={() => void remove(d)} className="flex-shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600" aria-label="Obriši">
                 <Trash2 className="h-4 w-4" />
-              </button>
+              </button>}
             </div>
           );
         })}
       </div>
-      <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+      {canEdit && <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
         <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
-          <Select value={form.vrsta} onChange={(e) => setForm({ ...form, vrsta: e.target.value as RadnikDokumentVrsta })}>
-            {Object.entries(dokumentVrste).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </Select>
-          <TextInput value={form.naziv} onChange={(e) => setForm({ ...form, naziv: e.target.value })} placeholder="Naziv (neobavezno)" />
+          <label className="block min-w-0 text-xs text-slate-500">Kategorija dokumenta
+            <Select value={form.vrsta} onChange={(e) => {
+              const category = categories.find((item) => item.vrsta === e.target.value);
+              if (category) setForm({ ...form, vrsta: category.vrsta });
+            }} disabled={saving}>
+              {categories.map((category) => <option key={category.vrsta} value={category.vrsta}>{category.naziv}</option>)}
+            </Select>
+          </label>
+          <div className="flex min-w-0 items-end gap-2">
+            <TextInput value={categoryDraft} onChange={(e) => setCategoryDraft(e.target.value)} placeholder="Nova kategorija" aria-label="Naziv nove kategorije dokumenta" />
+            <button type="button" onClick={() => void addCategory()} disabled={historyRestoring || savingCategory || saving || !categoriesReady} className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              {savingCategory ? 'Dodavanje…' : 'Dodaj kategoriju'}
+            </button>
+          </div>
           <label className="block min-w-0 text-xs text-slate-500">Početak
             <TextInput type="date" value={form.datum_od} onChange={(e) => setForm({ ...form, datum_od: e.target.value })} />
           </label>
@@ -110,16 +196,18 @@ export function RadnikDokumenti({ radnikId }: { radnikId: string }) {
             <TextInput type="date" value={form.datum_do} onChange={(e) => setForm({ ...form, datum_do: e.target.value })} />
           </label>
         </div>
+        <p className="text-xs text-slate-500">Kategorija je ujedno naziv dokumenta. Nove kategorije dostupne su svim djelatnicima tvrtke.</p>
+        {categoryError && <p role="alert" className="text-xs text-red-700">{categoryError}</p>}
         <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
           <input ref={fileRef} type="file" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
           <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex min-w-0 max-w-full items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
             <Paperclip className="h-3.5 w-3.5 flex-shrink-0" /> <span className="min-w-0 truncate">{file ? file.name : 'Priloži datoteku'}</span>
           </button>
-          <button type="button" onClick={() => void add()} disabled={saving} className="inline-flex items-center justify-center gap-1 rounded-lg bg-sky-600 xl:ml-auto px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50">
+          <button type="button" onClick={() => void add()} disabled={historyRestoring || saving || savingCategory} className="inline-flex items-center justify-center gap-1 rounded-lg bg-sky-600 xl:ml-auto px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50">
             <Plus className="h-3.5 w-3.5" /> {saving ? 'Spremanje…' : 'Dodaj'}
           </button>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }

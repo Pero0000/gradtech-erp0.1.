@@ -1,3 +1,4 @@
+import { formatHrDate } from '@/lib/localization';
 import { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Plus, RefreshCw } from 'lucide-react';
 import {
@@ -122,7 +123,7 @@ export function MobileVehicleIssuesTab() {
                   </span>
                 </div>
                 <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{entry.opis}</p>
-                <p className="mt-1 text-xs text-slate-500">{vehicleName(entry.vozilo_id)} · {new Date(`${entry.datum}T00:00:00`).toLocaleDateString('hr-HR')}</p>
+                <p className="mt-1 text-xs text-slate-500">{vehicleName(entry.vozilo_id)} · {formatHrDate(new Date(`${entry.datum}T00:00:00`))}</p>
               </article>
             ))}
           </div>

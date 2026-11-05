@@ -40,8 +40,31 @@ export interface PonudaStavka {
 
 export type PonudaStavkaInput = Omit<PonudaStavka, 'id' | 'ponuda_id'>;
 
+export interface PonudaChangeHistory {
+  id: string;
+  sequence: string;
+  before_ponuda: Record<string, unknown>;
+  after_ponuda: Record<string, unknown>;
+  before_stavke: PonudaStavka[];
+  after_stavke: PonudaStavka[];
+  actor_name: string;
+  created_at: string;
+  expires_at: string;
+  reversed_at: string | null;
+  reverses_id: string | null;
+  can_restore: boolean;
+  blocked_reason: string | null;
+}
+
 function fail(error: { message?: string } | null): never {
   throw new Error(`${error?.message ?? 'Greška'} — pokreni migraciju 20261015400000_ponude.sql u Supabaseu.`);
+}
+
+function offerHistoryError(error: { code?: string; message?: string }) {
+  if (['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
+    return new Error('Nedostaje migracija 20261110250000_ponude_povijest_izmjena.sql. Primijenite je prije spremanja i povrata izmjena ponuda.');
+  }
+  return error;
 }
 
 export const ponudaBroj = (p: Pick<Ponuda, 'redni_broj' | 'godina'>) => `${p.redni_broj}/${p.godina}`;
@@ -85,30 +108,51 @@ export async function fetchSvePonudeStavke(): Promise<PonudaStavka[]> {
   return (data ?? []) as PonudaStavka[];
 }
 
-export async function createPonuda(p: PonudaInput): Promise<Ponuda> {
-  const godina = new Date(p.datum).getFullYear();
-  const { data: redni_broj, error: e1 } = await supabase.rpc('next_company_number', { p_kind: 'ponuda', p_year: godina });
-  if (e1) fail(e1);
-  const { data, error } = await supabase.from('ponude').insert({ ...p, godina, redni_broj }).select().single();
-  if (error) fail(error);
+export async function createPonuda(p: PonudaInput, stavke: PonudaStavkaInput[] = []): Promise<Ponuda> {
+  const { data, error } = await supabase.rpc('create_ponuda_with_stavke', {
+    p_data: p, p_lines: stavke,
+  });
+  if (error) throw offerHistoryError(error);
   return data as Ponuda;
 }
 
+export async function savePonudaWithHistory(
+  id: string,
+  p: Partial<PonudaInput> & { gradiliste_id?: string | null },
+  stavke?: PonudaStavkaInput[],
+): Promise<void> {
+  const { error } = await supabase.rpc('save_ponuda_with_history', {
+    p_record_id: id, p_data: p, p_lines: stavke ?? null,
+  });
+  if (error) throw offerHistoryError(error);
+}
+
 export async function updatePonuda(id: string, p: Partial<PonudaInput> & { gradiliste_id?: string | null }) {
-  const { error } = await supabase.from('ponude').update({ ...p, updated_at: new Date().toISOString() }).eq('id', id);
-  if (error) fail(error);
+  await savePonudaWithHistory(id, p);
 }
 
 export async function deletePonuda(id: string) {
-  const { error } = await supabase.from('ponude').delete().eq('id', id);
-  if (error) fail(error);
+  const { error } = await supabase.rpc('delete_ponuda_with_history', { p_record_id: id });
+  if (error && ['42883', 'PGRST202'].includes(error.code ?? '')) {
+    throw new Error('Nedostaje migracija 20261110220000_ponude_povrat_brisanja.sql. Primijenite je prije brisanja i vraćanja ponuda.');
+  }
+  if (error) throw error;
 }
 
 // Stavke se spremaju zamjenom cijelog popisa; redoslijed prati redni broj u ponudi
 export async function replacePonudaStavke(ponudaId: string, stavke: PonudaStavkaInput[]) {
-  const { error: delError } = await supabase.from('ponude_stavke').delete().eq('ponuda_id', ponudaId);
-  if (delError) fail(delError);
-  if (stavke.length === 0) return;
-  const { error } = await supabase.from('ponude_stavke').insert(stavke.map((s, i) => ({ ...s, ponuda_id: ponudaId, redoslijed: i })));
-  if (error) fail(error);
+  await savePonudaWithHistory(ponudaId, {}, stavke);
+}
+
+export async function fetchPonudaChangeHistory(offerId: string, beforeSequence?: string): Promise<PonudaChangeHistory[]> {
+  const { data, error } = await supabase.rpc('get_ponuda_change_history', {
+    p_record_id: offerId, p_before_sequence: beforeSequence ?? null,
+  });
+  if (error) throw offerHistoryError(error);
+  return (data ?? []) as PonudaChangeHistory[];
+}
+
+export async function restorePonudaChange(historyId: string): Promise<void> {
+  const { error } = await supabase.rpc('restore_ponuda_change', { p_history_id: historyId });
+  if (error) throw offerHistoryError(error);
 }

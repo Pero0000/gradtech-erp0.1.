@@ -152,6 +152,10 @@ export function RadnikDokumenti({ radnikId, onChange }: { radnikId: string; onCh
       <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-slate-700">
         <FileText className="h-4 w-4 text-slate-400" /> Dokumenti i rokovi ({items.length})
       </p>
+      <p className="mb-3 text-xs text-slate-500">
+        Za spremnost za rad potrebni su važeći liječnički pregled, zaštita na radu i osposobljavanje.
+        Stari atesti ostaju u evidenciji, ali ne zamjenjuju osposobljavanje.
+      </p>
       {error && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       <div className="mb-3 space-y-1.5">
         {items.length === 0 && <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">Nema dokumenata.</p>}

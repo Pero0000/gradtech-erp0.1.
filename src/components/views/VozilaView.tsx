@@ -53,6 +53,7 @@ type SortKey = 'vozilo' | 'tip' | 'status' | 'kilometraza' | 'godina' | 'mjesta'
 const emptyForm = {
   registracija: '',
   broj_sasije: '',
+  gorivo_pin: '',
   marka: '',
   model: '',
   tip: 'Teretno' as VoziloTip,
@@ -145,6 +146,7 @@ export function VozilaView() {
     setForm({
       registracija: v.registracija,
       broj_sasije: v.broj_sasije ?? '',
+      gorivo_pin: v.gorivo_pin ?? '',
       marka: v.marka,
       model: v.model ?? '',
       tip: tipovi.find((item) => item.trim().toLowerCase() === v.tip.trim().toLowerCase()) ?? v.tip,
@@ -197,6 +199,10 @@ export function VozilaView() {
   };
 
   const save = async () => {
+    if (form.gorivo_pin.trim() && !/^[0-9]+$/.test(form.gorivo_pin.trim())) {
+      setError('PIN za gorivo smije sadržavati samo znamenke.');
+      return;
+    }
     if (historyRestoring) {
       setError('U tijeku je vraćanje promjene. Pričekajte završetak prije spremanja.');
       return;
@@ -216,6 +222,7 @@ export function VozilaView() {
       const payload = {
         registracija: form.registracija.trim(),
         broj_sasije: form.broj_sasije.trim() || null,
+        gorivo_pin: form.gorivo_pin.trim() || null,
         marka: form.marka.trim(),
         model: form.model.trim() || null,
         tip: form.tip,
@@ -673,7 +680,7 @@ export function VozilaView() {
               {form.tip.trim().toLowerCase() !== 'teretno' && (
                 <p role="status" className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  Djelatnici kategorije „Radnik” mogu evidentirati gorivo samo za teretna vozila.
+                  Dopuštenje za unos goriva određuje se po kategoriji djelatnika u postavkama djelatnika.
                 </p>
               )}
             </Field>
@@ -718,6 +725,17 @@ export function VozilaView() {
               onChange={(e) => setForm({ ...form, broj_mjesta: e.target.value })}
               placeholder="2"
             />
+          </Field>
+          <Field label="PIN za gorivo">
+            <TextInput
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              value={form.gorivo_pin}
+              onChange={(event) => setForm({ ...form, gorivo_pin: event.target.value })}
+              placeholder="Unesite PIN"
+            />
+            <p className="mt-1 text-xs text-slate-500">U mobilnom izborniku za točenje prikazuje se uz vozilo samo broj, bez oznake.</p>
           </Field>
           <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
             <Field label="Nosivost (kg)">

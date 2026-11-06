@@ -57,10 +57,16 @@ function elements(node) {
   return [node, ...elements(node.props.children)];
 }
 
-function fuelForm(mobile, liters) {
+function fuelForm(mobile, liters, pin = null) {
   const writes = [];
-  const worker = { id: 'worker', ime: 'Test', prezime: 'Worker', uloga: 'radnik' };
-  const vehicle = { id: 'vehicle', tip: 'teretno', kilometraza: 100000 };
+  const worker = {
+    id: 'worker', ime: 'Test', prezime: 'Worker', uloga: 'radnik',
+    dozvoljeni_tipovi_vozila: ['teretno'],
+  };
+  const vehicle = {
+    id: 'vehicle', tip: 'teretno', kilometraza: 100000,
+    marka: 'Test', model: 'Auto', registracija: 'TEST-1', gorivo_pin: pin,
+  };
   const fixtures = {
     entries: [], workers: [worker], loading: false, datum: '2026-11-04',
     litara: liters, kilometraza: '100000', tocioId: 'worker', voziloId: 'vehicle',
@@ -105,6 +111,16 @@ function fuelForm(mobile, liters) {
   const tree = mobile ? module.MobileFuelTab() : module.VoziloGorivo({ vozilo: vehicle, canEdit: true });
   const nodes = elements(tree);
   return { writes, nodes };
+}
+
+for (const pin of ['0012', null]) {
+  test(`mobile fuel vehicle option shows ${pin === null ? 'no PIN suffix when unset' : 'the exact PIN without an explanation'}`, () => {
+    const { nodes } = fuelForm(true, '42,5', pin);
+    const option = nodes.find((node) => node.type === 'option' && node.props.value === 'vehicle');
+    const text = option.props.children.join('');
+    assert.equal(text, `Test Auto · TEST-1${pin ? ` · ${pin}` : ''}`);
+    assert.doesNotMatch(text, /pin|gorivo/i);
+  });
 }
 
 for (const mobile of [false, true]) {

@@ -80,12 +80,13 @@ const SIGNED_STORAGE_URL_REFRESH_MARGIN_MS = 60_000;
 const signedStorageUrlCache = new Map<string, SignedStorageUrlCacheEntry>();
 const pendingSignedStorageUrls = new Map<string, Promise<string>>();
 
-async function getSignedStorageUrl(bucketName: string, path: string, expiresIn = 3600): Promise<string> {
+async function getSignedStorageUrl(bucketName: string, path: string, expiresIn = 3600, forceRefresh = false): Promise<string> {
   const key = JSON.stringify([bucketName, path, expiresIn]);
   const now = Date.now();
   const cached = signedStorageUrlCache.get(key);
-  if (cached && cached.expiresAt > now + SIGNED_STORAGE_URL_REFRESH_MARGIN_MS) return cached.url;
-  if (cached) signedStorageUrlCache.delete(key);
+  if (forceRefresh && cached) signedStorageUrlCache.delete(key);
+  if (!forceRefresh && cached && cached.expiresAt > now + SIGNED_STORAGE_URL_REFRESH_MARGIN_MS) return cached.url;
+  if (!forceRefresh && cached) signedStorageUrlCache.delete(key);
 
   const pending = pendingSignedStorageUrls.get(key);
   if (pending) return pending;
@@ -113,8 +114,8 @@ async function getSignedStorageUrl(bucketName: string, path: string, expiresIn =
   }
 }
 
-export async function getPrivateFileUrl(path: string, expiresIn = 3600): Promise<string> {
-  return getSignedStorageUrl('nalozi-foto', path, expiresIn);
+export async function getPrivateFileUrl(path: string, expiresIn = 3600, forceRefresh = false): Promise<string> {
+  return getSignedStorageUrl('nalozi-foto', path, expiresIn, forceRefresh);
 }
 
 function throwActionableDbError(error: { message: string; code?: string }, entityName: string) {
@@ -380,7 +381,7 @@ export async function fetchRadnikKategorije(): Promise<string[]> {
     }
     throw error;
   }
-  return (data ?? []).map((item) => item.naziv);
+  return ((data ?? []) as Array<{ naziv: string }>).map((item) => item.naziv);
 }
 
 export async function addRadnikKategorija(naziv: string): Promise<string> {
@@ -399,6 +400,54 @@ export async function addRadnikKategorija(naziv: string): Promise<string> {
     throw error;
   }
   return data.naziv;
+}
+
+export interface RadnikKategorijaGorivo {
+  naziv: string;
+  dozvoljeni_tipovi_vozila: string[] | null;
+}
+
+export async function fetchRadnikKategorijeGorivo(): Promise<RadnikKategorijaGorivo[]> {
+  const { data, error } = await supabase
+    .from('radnik_kategorije')
+    .select('naziv, dozvoljeni_tipovi_vozila')
+    .order('naziv');
+  if (error) {
+    if (['42703', 'PGRST204', 'PGRST205'].includes(error.code ?? '')) {
+      throw new Error('Nedostaje migracija 20261110390000_radnik_gorivo_tipovi_vozila.sql. Primijenite je u Supabase SQL editoru.');
+    }
+    throw error;
+  }
+  return (data ?? []) as RadnikKategorijaGorivo[];
+}
+
+export async function fetchRadnikGorivoVehicleTypes(): Promise<string[]> {
+  const { data, error } = await supabase.rpc('get_radnik_gorivo_vehicle_types');
+  if (error) {
+    if (['42883', 'PGRST202'].includes(error.code ?? '')) {
+      throw new Error('Nedostaje migracija 20261110390000_radnik_gorivo_tipovi_vozila.sql. Primijenite je u Supabase SQL editoru.');
+    }
+    throw error;
+  }
+  return ((data ?? []) as Array<{ naziv: string }>).map((item) => item.naziv);
+}
+
+export async function updateRadnikKategorijaGorivoTypes(
+  naziv: string,
+  dozvoljeniTipoviVozila: string[] | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('radnik_kategorije')
+    .update({ dozvoljeni_tipovi_vozila: dozvoljeniTipoviVozila })
+    .eq('naziv', naziv)
+    .select('naziv')
+    .single();
+  if (error) {
+    if (['42703', 'PGRST204', 'PGRST205'].includes(error.code ?? '')) {
+      throw new Error('Nedostaje migracija 20261110390000_radnik_gorivo_tipovi_vozila.sql. Primijenite je u Supabase SQL editoru.');
+    }
+    throw error;
+  }
 }
 
 export async function createRadnik(r: Omit<Radnik, 'id' | 'created_at' | 'updated_at'>) {
@@ -1164,18 +1213,30 @@ export async function restoreFuelChange(historyId: string): Promise<void> {
 }
 
 export interface MobileVoziloGorivoOptions {
-  vozila: Array<{ id: string; marka: string; model: string | null; registracija: string; tip: Vozilo['tip']; kilometraza: number }>;
-  radnici: Array<{ id: string; ime: string; prezime: string; uloga: string }>;
+  vozila: Array<{ id: string; marka: string; model: string | null; registracija: string; tip: Vozilo['tip']; kilometraza: number; gorivo_pin: string | null }>;
+  radnici: VozilaGorivoWorker[];
+}
+
+export interface VozilaGorivoWorker extends Pick<Radnik, 'id' | 'ime' | 'prezime' | 'uloga'> {
+  dozvoljeni_tipovi_vozila: string[] | null;
 }
 
 function vozilaGorivoError(error: { message?: string; code?: string }) {
   const rawMessage = String(error?.message ?? '');
   const message = rawMessage.toLowerCase();
+  if (error.code === '42804'
+    && message.includes('structure of query does not match function result type')
+    && message.includes('column 6')) {
+    return new Error('Popis vozila goriva ima neusklađen tip kilometraže. Primijenite migraciju 20261110380000_fix_mobile_fuel_vehicle_mileage_type.sql u Supabase SQL editoru.');
+  }
   const missingDatabaseObject = ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '');
-  if (missingDatabaseObject && (
-    message.includes('vozila_gorivo') || message.includes('get_mobile_vozila_gorivo')
-    || message.includes('get_vozila_gorivo_workers') || message.includes('add_mobile_vozila_gorivo')
-  )) {
+  if (missingDatabaseObject && message.includes('get_vozila_gorivo_workers')) {
+    return new Error('Nedostaje ili nije osvježena funkcija za popis djelatnika. Primijenite migraciju 20261110390000_radnik_gorivo_tipovi_vozila.sql i osvježite PostgREST shemu u Supabaseu.');
+  }
+  if (missingDatabaseObject && message.includes('get_mobile_vozila_gorivo_vehicles')) {
+    return new Error('Nedostaje ili nije osvježena funkcija za popis vozila. Primijenite migraciju 20261110390000_radnik_gorivo_tipovi_vozila.sql i osvježite PostgREST shemu.');
+  }
+  if (missingDatabaseObject && (message.includes('vozila_gorivo') || message.includes('add_mobile_vozila_gorivo'))) {
     return new Error('Nedostaje migracija 20261109100000_vozila_gorivo.sql. Primijenite je u Supabase SQL editoru.');
   }
   if (message.includes('poslovođ')) {
@@ -1184,14 +1245,17 @@ function vozilaGorivoError(error: { message?: string; code?: string }) {
   return error;
 }
 
-export async function fetchVozilaGorivoWorkers(): Promise<Array<Pick<Radnik, 'id' | 'ime' | 'prezime' | 'uloga'>>> {
+export async function fetchVozilaGorivoWorkers(): Promise<VozilaGorivoWorker[]> {
   const { data, error } = await supabase.rpc('get_vozila_gorivo_workers');
   if (error) throw vozilaGorivoError(error);
-  const workerRows = (data ?? []) as Array<{ uloga?: unknown }>;
-  if (workerRows.some((worker) => typeof worker.uloga !== 'string')) {
-    throw new Error('Nedostaje migracija 20261109120000_radnik_kategorije_gorivo.sql. Primijenite je u Supabase SQL editoru.');
+  const workerRows = (data ?? []) as Array<{ uloga?: unknown; dozvoljeni_tipovi_vozila?: unknown }>;
+  if (workerRows.some((worker) => typeof worker.uloga !== 'string'
+    || (worker.dozvoljeni_tipovi_vozila !== null
+      && (!Array.isArray(worker.dozvoljeni_tipovi_vozila)
+        || worker.dozvoljeni_tipovi_vozila.some((vehicleType) => typeof vehicleType !== 'string'))))) {
+    throw new Error('Nedostaje migracija 20261110390000_radnik_gorivo_tipovi_vozila.sql. Primijenite je u Supabase SQL editoru.');
   }
-  return (data ?? []) as Array<Pick<Radnik, 'id' | 'ime' | 'prezime' | 'uloga'>>;
+  return (data ?? []) as VozilaGorivoWorker[];
 }
 
 export async function fetchVoziloGorivo(voziloId: string): Promise<VoziloGorivo[]> {
@@ -1271,25 +1335,24 @@ export async function resolveVoziloGorivoAnomalija(id: string) {
   if (error) throw error;
 }
 
-export async function fetchMobileVoziloGorivoOptions(): Promise<MobileVoziloGorivoOptions> {
-  const [vehicles, workers] = await Promise.all([
-    supabase.rpc('get_mobile_vozila_gorivo_vehicles'),
-    supabase.rpc('get_vozila_gorivo_workers'),
-  ]);
-  if (vehicles.error) throw vozilaGorivoError(vehicles.error);
-  if (workers.error) throw vozilaGorivoError(workers.error);
-  const vehicleRows = (vehicles.data ?? []) as Array<{ tip?: unknown; kilometraza?: unknown }>;
-  const workerRows = (workers.data ?? []) as Array<{ uloga?: unknown }>;
-  if (vehicleRows.some((vehicle) => typeof vehicle.tip !== 'string' || !vehicle.tip.trim())
-    || workerRows.some((worker) => typeof worker.uloga !== 'string')) {
-    throw new Error('Nedostaje migracija 20261109120000_radnik_kategorije_gorivo.sql. Primijenite je u Supabase SQL editoru.');
+export async function fetchMobileVoziloGorivoOptions(workerId?: string): Promise<MobileVoziloGorivoOptions> {
+  const radnici = await fetchVozilaGorivoWorkers();
+  const selectedWorker = radnici.find((worker) => worker.id === workerId) ?? radnici[0];
+  if (!selectedWorker) return { vozila: [], radnici };
+  const { data: vehicles, error: vehicleError } = await supabase.rpc('get_mobile_vozila_gorivo_vehicles', {
+    p_radnik_id: selectedWorker.id,
+  });
+  if (vehicleError) throw vozilaGorivoError(vehicleError);
+  const vehicleRows = (vehicles ?? []) as Array<{ tip?: unknown; kilometraza?: unknown }>;
+  if (vehicleRows.some((vehicle) => typeof vehicle.tip !== 'string' || !vehicle.tip.trim())) {
+    throw new Error('Nedostaje migracija 20261110390000_radnik_gorivo_tipovi_vozila.sql. Primijenite je u Supabase SQL editoru.');
   }
   if (vehicleRows.some((vehicle) => typeof vehicle.kilometraza !== 'number')) {
-    throw new Error('Nedostaje migracija 20261109150000_vozila_gorivo_kilometraza.sql. Primijenite je u Supabase SQL editoru.');
+    throw new Error('Nedostaje migracija 20261110380000_fix_mobile_fuel_vehicle_mileage_type.sql. Primijenite je u Supabase SQL editoru.');
   }
   return {
-    vozila: vehicles.data ?? [],
-    radnici: workers.data ?? [],
+    vozila: vehicles ?? [],
+    radnici,
   } as MobileVoziloGorivoOptions;
 }
 
@@ -2701,7 +2764,7 @@ export async function createRadniNalog(input: {
   radnik_ids: string[];
   zakljucen?: boolean;
   bez_troska?: boolean;
-}) {
+}, options: { deferOpenItemTransfer?: boolean } = {}) {
   const { data, error } = await supabase
     .from('radni_nalozi')
     .insert({
@@ -2772,7 +2835,7 @@ export async function createRadniNalog(input: {
       .is('nalog_id', null);
     if (siteTasksError) throw siteTasksError;
   }
-  await prenesiOtvoreneStavke(data.id, input.gradiliste_id);
+  if (!options.deferOpenItemTransfer) await prenesiOtvoreneStavke(data.id, input.gradiliste_id);
   return data;
 }
 
@@ -3188,7 +3251,7 @@ async function syncKmGrupe(datum: string) {
   return summary;
 }
 
-// Neriješen materijal i alat s ranijih naloga (otvorenih ili završenih) istog gradilišta prenosi se na novi nalog.
+// Neriješeni materijal i alat s ranijih naloga istog gradilišta kopiraju se na novi nalog.
 export async function prenesiOtvoreneStavke(nalogId: string, gradilisteId: string | null) {
   if (!gradilisteId) return;
   const { data: stari, error: oldOrdersError } = await supabase
@@ -3208,14 +3271,43 @@ export async function prenesiOtvoreneStavke(nalogId: string, gradilisteId: strin
     .eq('preneseno', false);
   if (error) throw error;
   if (!stavke || stavke.length === 0) return;
-  const { error: insError } = await supabase
+  const copyItems = async (
+    items: { id: string; tip: string; naziv: string; oprema_id: string | null }[],
+    sourceColumn: 'izvor_materijal_id' | 'izvor_alat_id',
+  ) => {
+    if (items.length === 0) return;
+    const { error: copyMaterialsError } = await supabase
+      .from('radni_nalozi_stavke')
+      .upsert(items.map((item) => ({
+        nalog_id: nalogId,
+        tip: item.tip,
+        naziv: item.naziv,
+        oprema_id: item.oprema_id,
+        [sourceColumn]: item.id,
+      })), { onConflict: `nalog_id,${sourceColumn}`, ignoreDuplicates: true });
+    if (copyMaterialsError) {
+      if (copyMaterialsError.code === '42703' || copyMaterialsError.code === 'PGRST204' || copyMaterialsError.code === 'PGRST205') {
+        throw new Error('Pokreni migraciju 20261110370000_kopirani_zadaci_izvor.sql u Supabase SQL editoru.');
+      }
+      throw copyMaterialsError;
+    }
+  };
+  const sourceItems = stavke as { id: string; tip: string; naziv: string; oprema_id: string | null }[];
+  await copyItems(sourceItems.filter((item) => item.tip === 'materijal'), 'izvor_materijal_id');
+  await copyItems(sourceItems.filter((item) => item.tip === 'alat'), 'izvor_alat_id');
+  const transferable = (stavke as { id: string; tip: string; naziv: string; oprema_id: string | null }[])
+    .filter((item) => item.tip !== 'materijal' && item.tip !== 'alat');
+  if (transferable.length === 0) return;
+  const { error: insertError } = await supabase
     .from('radni_nalozi_stavke')
-    .insert(stavke.map((s: { id: string; tip: string; naziv: string; oprema_id: string | null }) => ({ nalog_id: nalogId, tip: s.tip, naziv: s.naziv, oprema_id: s.oprema_id, izvor_id: s.id })));
-  if (insError) throw insError;
+    .insert(transferable.map((item) => ({
+      nalog_id: nalogId, tip: item.tip, naziv: item.naziv, oprema_id: item.oprema_id, izvor_id: item.id,
+    })));
+  if (insertError) throw insertError;
   const { error: markTransferredError } = await supabase
     .from('radni_nalozi_stavke')
     .update({ preneseno: true })
-    .in('id', stavke.map((s: { id: string }) => s.id));
+    .in('id', transferable.map((item) => item.id));
   if (markTransferredError) throw markTransferredError;
 }
 
@@ -3697,13 +3789,13 @@ export interface NalogFoto {
   thumbnailUrl: string;
 }
 
-export async function fetchNalogFoto(nalogId: string): Promise<NalogFoto[]> {
+export async function fetchNalogFoto(nalogId: string, refreshUrls = false): Promise<NalogFoto[]> {
   const { data, error } = await supabase.from('radni_nalozi_foto').select('*').eq('nalog_id', nalogId).order('created_at');
   if (error) throw error;
   return Promise.all((data ?? []).map(async (foto: NalogFoto) => {
     const [url, thumbnailUrl] = await Promise.all([
-      getPrivateFileUrl(foto.putanja),
-      getPrivateFileUrl(foto.thumbnail_path ?? foto.putanja),
+      getPrivateFileUrl(foto.putanja, 3600, refreshUrls),
+      getPrivateFileUrl(foto.thumbnail_path ?? foto.putanja, 3600, refreshUrls),
     ]);
     return { ...foto, url, thumbnailUrl };
   }));
@@ -3770,12 +3862,14 @@ async function removeUploadedPhotoFiles(paths: (string | null | undefined)[]) {
 export async function uploadNalogFoto(nalogId: string, file: File, copyToGradiliste = true): Promise<string | null> {
   const compressed = await compressPhotoForUpload(file);
   const basePath = `${nalogId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const putanja = `${basePath}.webp`;
-  const thumbnailPath = `${basePath}-thumbnail.webp`;
+  const imageExtension = compressed.image.type === 'image/webp' ? 'webp' : 'jpg';
+  const thumbnailExtension = compressed.thumbnail.type === 'image/webp' ? 'webp' : 'jpg';
+  const putanja = `${basePath}.${imageExtension}`;
+  const thumbnailPath = `${basePath}-thumbnail.${thumbnailExtension}`;
   const bucket = supabase.storage.from('nalozi-foto');
-  const { error: imageError } = await bucket.upload(putanja, compressed.image, { contentType: 'image/webp' });
+  const { error: imageError } = await bucket.upload(putanja, compressed.image, { contentType: compressed.image.type });
   if (imageError) throw imageError;
-  const { error: thumbnailError } = await bucket.upload(thumbnailPath, compressed.thumbnail, { contentType: 'image/webp' });
+  const { error: thumbnailError } = await bucket.upload(thumbnailPath, compressed.thumbnail, { contentType: compressed.thumbnail.type });
   if (thumbnailError) {
     try {
       await removeUploadedPhotoFiles([putanja]);
@@ -3935,6 +4029,8 @@ export interface GradilisteStavka {
   gotovo: boolean;
   uzeto?: boolean;
   izvor_id?: string | null;
+  izvor_materijal_id?: string | null;
+  izvor_alat_id?: string | null;
   oprema_id?: string | null;
   sati?: number | null;
   created_at?: string;
@@ -3949,7 +4045,7 @@ export async function fetchGradilisteStavke(gradilisteId: string): Promise<Gradi
 export async function setNalogStavke(nalogId: string, gradilisteId: string | null, stavkaIds: string[]) {
   const { data: currentRows, error: currentError } = await supabase
     .from('radni_nalozi_stavke')
-    .select('id, izvor_id, gotovo')
+    .select('id, izvor_id, izvor_materijal_id, izvor_alat_id, gotovo')
     .eq('nalog_id', nalogId)
     .eq('preneseno', false);
   if (currentError) throw currentError;
@@ -3959,8 +4055,19 @@ export async function setNalogStavke(nalogId: string, gradilisteId: string | nul
   const availableById = new Map(availableRows.map((item) => [item.id, item]));
   const selectedIds = new Set(stavkaIds.filter((id) => availableById.has(id)));
 
-  for (const item of (currentRows ?? []) as { id: string; izvor_id: string | null; gotovo: boolean }[]) {
+  for (const item of (currentRows ?? []) as {
+    id: string;
+    izvor_id: string | null;
+    izvor_materijal_id: string | null;
+    izvor_alat_id: string | null;
+    gotovo: boolean;
+  }[]) {
     if (selectedIds.has(item.id) || item.gotovo) continue;
+    if (item.izvor_materijal_id || item.izvor_alat_id) {
+      const { error: deleteError } = await supabase.from('radni_nalozi_stavke').delete().eq('id', item.id);
+      if (deleteError) throw deleteError;
+      continue;
+    }
     if (item.izvor_id) {
       const { error: deleteError } = await supabase.from('radni_nalozi_stavke').delete().eq('id', item.id);
       if (deleteError) throw deleteError;
@@ -3975,6 +4082,26 @@ export async function setNalogStavke(nalogId: string, gradilisteId: string | nul
   for (const item of availableRows) {
     if (!selectedIds.has(item.id) || item.nalog_id === nalogId) continue;
     if (item.nalog_id) {
+      if (item.tip === 'materijal' || item.tip === 'alat') {
+        const sourceColumn = item.tip === 'materijal' ? 'izvor_materijal_id' : 'izvor_alat_id';
+        const { error: copyError } = await supabase
+          .from('radni_nalozi_stavke')
+          .upsert({
+            nalog_id: nalogId,
+            gradiliste_id: gradilisteId,
+            tip: item.tip,
+            naziv: item.naziv,
+            oprema_id: item.oprema_id ?? null,
+            [sourceColumn]: item.id,
+          }, { onConflict: `nalog_id,${sourceColumn}`, ignoreDuplicates: true });
+        if (copyError) {
+          if (copyError.code === '42703' || copyError.code === 'PGRST204' || copyError.code === 'PGRST205') {
+            throw new Error('Pokreni migraciju 20261110370000_kopirani_zadaci_izvor.sql u Supabase SQL editoru.');
+          }
+          throw copyError;
+        }
+        continue;
+      }
       const { error: copyError } = await supabase.from('radni_nalozi_stavke').insert({
         nalog_id: nalogId,
         tip: item.tip,
@@ -4030,15 +4157,17 @@ export async function uploadGradilisteDokument(gradilisteId: string, file: File,
   const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
   const uniquePath = `gradiliste/${gradilisteId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const baseName = safeName.replace(/\.[^.]+$/, '');
-  const putanja = optimized ? `${uniquePath}-${baseName}.webp` : `${uniquePath}-${safeName}`;
-  const thumbnailPath = optimized ? `${uniquePath}-${baseName}-thumbnail.webp` : null;
+  const imageExtension = optimized?.image.type === 'image/webp' ? 'webp' : 'jpg';
+  const thumbnailExtension = optimized?.thumbnail.type === 'image/webp' ? 'webp' : 'jpg';
+  const putanja = optimized ? `${uniquePath}-${baseName}.${imageExtension}` : `${uniquePath}-${safeName}`;
+  const thumbnailPath = optimized ? `${uniquePath}-${baseName}-thumbnail.${thumbnailExtension}` : null;
   const bucket = supabase.storage.from('nalozi-foto');
   const { error: upError } = await bucket.upload(putanja, optimized?.image ?? file, {
-    contentType: optimized ? 'image/webp' : file.type || undefined,
+    contentType: optimized?.image.type || file.type || undefined,
   });
   if (upError) throw upError;
   if (optimized && thumbnailPath) {
-    const { error: thumbnailError } = await bucket.upload(thumbnailPath, optimized.thumbnail, { contentType: 'image/webp' });
+    const { error: thumbnailError } = await bucket.upload(thumbnailPath, optimized.thumbnail, { contentType: optimized.thumbnail.type });
     if (thumbnailError) {
       try {
         await removeUploadedPhotoFiles([putanja]);
@@ -4097,7 +4226,7 @@ export async function createNalogFromRaspored(
     bez_troska?: boolean;
   },
 ) {
-  const nalog = await createRadniNalog(input);
+  const nalog = await createRadniNalog(input, { deferOpenItemTransfer: true });
   const { error } = await supabase.from('dnevni_raspored_gradilista').update({ nalog_id: nalog.id }).eq('id', assignmentId);
   if (error) {
     try {
@@ -4201,6 +4330,34 @@ export async function setNalogZadaci(nalogId: string, gradilisteId: string | nul
   if (!gradilisteId || zadatakIds.length === 0) return;
   const { error } = await supabase.from('gradiliste_zadaci').update({ nalog_id: nalogId }).eq('gradiliste_id', gradilisteId).eq('gotovo', false).in('id', zadatakIds);
   if (error) throw error;
+}
+
+export async function copyOpenNalogZadaci(
+  nalogId: string,
+  gradilisteId: string,
+  tasks: GradilisteZadatak[],
+) {
+  const copies = tasks
+    .filter((task) => !task.gotovo && task.gradiliste_id === gradilisteId && Boolean(task.nalog_id) && task.nalog_id !== nalogId)
+    .map((task) => ({
+      nalog_id: nalogId,
+      gradiliste_id: gradilisteId,
+      izvor_zadatak_id: task.id,
+      naziv: task.naziv,
+      rok: task.rok ?? null,
+      kooperant_id: task.kooperant_id ?? null,
+      ...vrstaPolje(task.vrsta === 'dodatni' ? 'dodatni' : 'zadatak'),
+    }));
+  if (copies.length === 0) return;
+  const { error } = await supabase
+    .from('gradiliste_zadaci')
+    .upsert(copies, { onConflict: 'nalog_id,izvor_zadatak_id', ignoreDuplicates: true });
+  if (error) {
+    if (error.code === '42703' || error.code === 'PGRST204' || error.code === 'PGRST205') {
+      throw new Error('Pokreni migraciju 20261110370000_kopirani_zadaci_izvor.sql u Supabase SQL editoru.');
+    }
+    throw error;
+  }
 }
 
 // Stupac "vrsta" šalje se samo za dodatne radove, da radni zadaci rade i prije migracije 20261021160000.

@@ -99,6 +99,66 @@ test('standard medical category retains its original key and supplies its name',
   assert.equal(writes[0][1].naziv, 'Liječnički pregled');
 });
 
+test('training replaces legacy attestations in the document picker and saves its own key', async () => {
+  const { elements, writes } = form(true, 'osposobljavanje');
+  const options = elements.filter((node) => node.type === 'option');
+  assert.ok(options.some((node) => node.props.value === 'osposobljavanje' && node.props.children === 'Osposobljavanje'));
+  assert.ok(!options.some((node) => node.props.value === 'atest'));
+  assert.equal(definitions.dokumentVrste.atest, 'Atest');
+  elements.find((node) => node.type === 'button' && Array.isArray(node.props.children) && node.props.children.includes('Dodaj')).props.onClick();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(writes[0][1].vrsta, 'osposobljavanje');
+  assert.equal(writes[0][1].naziv, 'Osposobljavanje');
+});
+
+function readiness(documents, status = 'aktivan') {
+  const module = load('../src/components/views/RadnikDetalj.tsx', {
+    'react/jsx-runtime': jsxRuntime,
+    react: { useState: (value) => [value, () => {}], useEffect() {}, useMemo: (fn) => fn() },
+    'lucide-react': { Activity() {}, BadgeCheck() {}, FileText() {}, Wallet() {} },
+    '@/lib/localization': { formatHrDate: () => 'datum' },
+    '@/lib/api': {},
+    '@/lib/obracunSati': {
+      hrPraznici: () => new Set(),
+      mjesecRaspon: () => ({ od: '2026-11-01', do: '2026-11-30' }),
+      computeObracun: () => ({ iznosi: { ukupno: 0 } }),
+      pravaRadnika: () => ({}),
+    },
+    '@/lib/rokovi': { todayISO: () => '2026-11-04' },
+    '@/lib/radnikDokumenti': definitions,
+    '@/components/ui/Modal': { Modal() {} },
+    './HistoryDialog': { HistoryButton() {}, HistoryDialog() {} },
+    '@/components/views/RadnikDokumenti': { RadnikDokumenti() {} },
+    '@/components/ui/Badge': { Badge() {} },
+  }, { documents });
+  return nodes(module.RadnikDetalj({
+    radnik: { id: 'worker', ime: 'Ana', prezime: 'Test', uloga: 'Radnik', status, cijena_sata: 0 },
+    open: true, onClose() {}, onEdit() {},
+  }));
+}
+
+for (const [name, training, status, expected] of [
+  ['legacy attestation cannot replace missing training', { vrsta: 'atest', datum_do: '2027-01-01' }, 'aktivan', 'Nije spreman za rad'],
+  ['expired training blocks readiness', { vrsta: 'osposobljavanje', datum_do: '2026-11-03' }, 'aktivan', 'Nije spreman za rad'],
+  ['valid training permits readiness', { vrsta: 'osposobljavanje', datum_do: '2027-01-01' }, 'aktivan', 'Spreman za rad'],
+  ['training remains valid on expiry day', { vrsta: 'osposobljavanje', datum_do: '2026-11-04' }, 'aktivan', 'Spreman za rad'],
+  ['training without expiry preserves existing document behavior', { vrsta: 'osposobljavanje', datum_do: null }, 'aktivan', 'Spreman za rad'],
+  ['inactive workers are not ready despite valid training', { vrsta: 'osposobljavanje', datum_do: '2027-01-01' }, 'neaktivan', 'Neaktivan'],
+]) {
+  test(name, () => {
+    const documents = [
+      { radnik_id: 'worker', vrsta: 'lijecnicki', datum_do: '2027-01-01' },
+      { radnik_id: 'worker', vrsta: 'zastita_na_radu', datum_do: '2027-01-01' },
+      { radnik_id: 'worker', ...training },
+    ];
+    const elements = readiness(documents, status);
+    const badge = elements.find((node) => node.type.name === 'Badge');
+    assert.equal(badge.props.children, expected);
+    assert.ok(elements.some((node) => node.props.children === 'Osposobljavanje'));
+    assert.ok(!elements.some((node) => node.props.children === 'Atest'));
+  });
+}
+
 test('read-only users see no document or category write controls', () => {
   const { elements } = form(false);
   assert.ok(!elements.some((node) => node.type === 'button'));

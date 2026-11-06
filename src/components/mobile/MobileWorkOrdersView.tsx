@@ -167,6 +167,8 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [photoLoadError, setPhotoLoadError] = useState<string | null>(null);
+  const [refreshingPhotos, setRefreshingPhotos] = useState(false);
   const [newMaterial, setNewMaterial] = useState('');
   const [newTool, setNewTool] = useState('');
   const [newTask, setNewTask] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
@@ -273,6 +275,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
       setLoading(true);
       setError(null);
       setNotice(null);
+      setPhotoLoadError(null);
       setPrep([]);
     }
     try {
@@ -288,16 +291,20 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         throw nalogError;
       }
 
-      const [zadaci, stavke, dokumenti, foto, linkedIds, ekipa, alati, strojevi] = await Promise.all([
+      const photoRequest = fetchNalogFoto(order.id).then(
+        (foto) => ({ foto, error: null as unknown }),
+        (reason: unknown) => ({ foto: [] as NalogFoto[], error: reason }),
+      );
+      const [zadaci, stavke, dokumenti, linkedIds, ekipa, alati, strojevi] = await Promise.all([
         fetchNalogZadaci(order.id),
         fetchNalogStavke(order.id),
         fetchNalogDokumenti(order.id),
-        fetchNalogFoto(order.id),
         fetchNalogGradilisteDokumentIds(order.id),
         fetchMobileNalogTeam(order.id),
         fetchOprema('alat'),
         fetchOprema('stroj'),
       ]);
+      const { foto, error: photoError } = await photoRequest;
       const siteDocs = nalog.gradiliste_id ? await fetchGradilisteDokumenti(nalog.gradiliste_id) : [];
       const selectedSiteDocs = siteDocs.filter((document) => linkedIds.includes(document.id));
 
@@ -313,6 +320,9 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         foto,
         ekipa,
       });
+      setPhotoLoadError(photoError
+        ? errorMessage(photoError, 'Fotografije naloga nije moguće učitati.')
+        : null);
       const savedPotvrde = (nalog.mobile_potvrde as string[] | null) ?? [];
       const timeConfirmed = savedPotvrde.includes('vrijeme');
       // Dok vrijeme nije potvrđeno pretpostavka je uvijek 06:00–16:00; ručne izmjene se čuvaju između osvježavanja.
@@ -339,6 +349,20 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
       if (showLoading) setLoading(false);
     }
   }, []);
+
+  const refreshPhotos = async () => {
+    if (!selected) return;
+    setRefreshingPhotos(true);
+    try {
+      const foto = await fetchNalogFoto(selected.id, true);
+      setDetails((current) => current ? { ...current, foto } : current);
+      setPhotoLoadError(null);
+    } catch (reason) {
+      setPhotoLoadError(errorMessage(reason, 'Fotografije naloga nije moguće učitati.'));
+    } finally {
+      setRefreshingPhotos(false);
+    }
+  };
 
   useEffect(() => {
     if (!selectedId) {
@@ -480,9 +504,14 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
       try {
         await uploadNalogFoto(next.nalogId, next.file, false);
         removeQueuedPhoto(next.id);
-        const foto = await fetchNalogFoto(next.nalogId).catch(() => null);
-        if (foto && selectedIdRef.current === next.nalogId) {
-          setDetails((current) => current ? { ...current, foto } : current);
+        try {
+          const foto = await fetchNalogFoto(next.nalogId, true);
+          if (selectedIdRef.current === next.nalogId) {
+            setDetails((current) => current ? { ...current, foto } : current);
+            setPhotoLoadError(null);
+          }
+        } catch (reason) {
+          setPhotoLoadError(errorMessage(reason, 'Fotografija je poslana, ali popis fotografija nije moguće osvježiti.'));
         }
       } catch (reason) {
         setPhotoQueue((current) => current.map((photo) => photo.id === next.id
@@ -1012,7 +1041,16 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                     <WorkOrderPanel title="Fotografije izvedenog rada" icon={<Camera className="h-5 w-5" />} tone="rose" summary={`${details.foto.length} fotografija`}>
                       {details.foto.length > 0 && (
                         <div className="grid min-w-0 grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 xl:grid-cols-2 2xl:grid-cols-3">
-                          {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" className="block min-w-0 overflow-hidden rounded-lg"><img loading="lazy" src={photo.thumbnailUrl} alt={photo.naziv ?? 'Fotografija naloga'} className="aspect-square w-full object-cover" /></a>)}
+                          {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" className="block min-w-0 overflow-hidden rounded-lg"><img loading="lazy" src={photo.thumbnailUrl} alt={photo.naziv ?? 'Fotografija naloga'} onError={() => setPhotoLoadError('Neke fotografije nije moguće prikazati. Pokušaj ih ponovno učitati ili provjeri internetsku vezu.')} className="aspect-square w-full object-cover" /></a>)}
+                        </div>
+                      )}
+                      {photoLoadError && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          <span>{photoLoadError}</span>
+                          <button type="button" onClick={() => void refreshPhotos()} disabled={refreshingPhotos} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-white px-3 font-semibold disabled:opacity-50">
+                            <RefreshCw className={`h-4 w-4 ${refreshingPhotos ? 'animate-spin' : ''}`} />
+                            Ponovno učitaj
+                          </button>
                         </div>
                       )}
                       {selectedPhotoQueue.length > 0 && (

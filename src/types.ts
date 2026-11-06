@@ -236,6 +236,7 @@ export interface DnevniRasporedRadnik {
                                                                         id: string;
                                                                           registracija: string;
                                                                           broj_sasije?: string | null;
+                                                                          gorivo_pin?: string | null;
                                                                             marka: string;
                                                                               model: string | null;
                                                                                 tip: VoziloTip;
@@ -473,6 +474,7 @@ zadatak_id?: string | null;
   kooperant_id?: string | null;
   kooperanti?: Pick<Kooperant, 'id' | 'naziv'> | null;
   nalog_id?: string | null;
+  izvor_zadatak_id?: string | null;
   /** Prije migracije 20261021160000 stupac ne postoji pa se tretira kao 'zadatak'. */
   vrsta?: ZadatakVrsta;
   created_at: string;

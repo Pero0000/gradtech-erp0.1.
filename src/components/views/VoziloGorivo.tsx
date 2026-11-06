@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Fuel, Pencil, Plus, Trash2 } from 'lucide-react';
-import type { Radnik, Vozilo, VoziloGorivo } from '@/types';
+import type { Vozilo, VoziloGorivo } from '@/types';
 import {
   addVoziloGorivo,
   deleteVoziloGorivo,
@@ -10,6 +10,7 @@ import {
   updateVoziloGorivo,
   updateVozilaGorivoAnomalyThreshold,
   type VoziloGorivoInput,
+  type VozilaGorivoWorker,
 } from '@/lib/api';
 import { todayISO } from '@/lib/rokovi';
 import { parseDecimalInput, formatHrDate } from '@/lib/localization';
@@ -80,7 +81,7 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
   onChange?: () => void;
 }) {
   const [entries, setEntries] = useState<VoziloGorivo[]>([]);
-  const [workers, setWorkers] = useState<Array<Pick<Radnik, 'id' | 'ime' | 'prezime' | 'uloga'>>>([]);
+  const [workers, setWorkers] = useState<VozilaGorivoWorker[]>([]);
   const [editing, setEditing] = useState<VoziloGorivo | null>(null);
   const [datum, setDatum] = useState(todayISO());
   const [litara, setLitara] = useState('');
@@ -132,7 +133,8 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
   }, [consumptions]);
   const anomalyCount = consumptions.filter((item) => item.anomaly !== null).length;
   const eligibleWorkers = workers.filter((worker) =>
-    vozilo.tip.trim().toLowerCase() === 'teretno' || worker.uloga.trim().toLowerCase() !== 'radnik');
+    worker.dozvoljeni_tipovi_vozila === null
+    || worker.dozvoljeni_tipovi_vozila.some((tip) => tip.trim().toLowerCase() === vozilo.tip.trim().toLowerCase()));
 
   const reset = () => {
     setEditing(null);
@@ -302,14 +304,14 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
             <Select value={tocioId} onChange={(event) => setTocioId(event.target.value)}>
               <option value="">Odaberi djelatnika</option>
               {tocioId && !eligibleWorkers.some((worker) => worker.id === tocioId) && (
-                <option value={tocioId} disabled>Odabrani djelatnik više ne ispunjava uvjet</option>
+                <option value={tocioId} disabled>Odabrani djelatnik više nema dopuštenje za ovaj tip vozila</option>
               )}
               {eligibleWorkers.map((worker) => <option key={worker.id} value={worker.id}>{worker.ime} {worker.prezime}</option>)}
             </Select>
           </label>
         </div>
-        {vozilo.tip.trim().toLowerCase() !== 'teretno' && workers.some((worker) => worker.uloga.trim().toLowerCase() === 'radnik') && (
-          <p className="mt-2 text-xs text-amber-800">Djelatnici kategorije „radnik” mogu evidentirati gorivo samo za teretna vozila.</p>
+        {eligibleWorkers.length === 0 && workers.length > 0 && (
+          <p className="mt-2 text-xs text-amber-800">Nijedna kategorija djelatnika trenutno nema dopuštenje za unos goriva za ovaj tip vozila.</p>
         )}
         {error && <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 p-2 text-sm text-red-700">{error}</p>}
         <div className="mt-3 flex flex-wrap gap-2">

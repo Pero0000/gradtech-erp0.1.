@@ -14,4 +14,12 @@ export interface RadnikDokumentKategorija {
 }
 
 export const osnovneDokumentKategorije: RadnikDokumentKategorija[] =
-  (Object.keys(dokumentVrste) as RadnikDokumentVrsta[]).map((vrsta) => ({ vrsta, naziv: dokumentVrste[vrsta] }));
+  (Object.keys(dokumentVrste) as RadnikDokumentVrsta[])
+    .filter((vrsta) => vrsta !== 'atest')
+    .map((vrsta) => ({ vrsta, naziv: dokumentVrste[vrsta] }));
+
+export const obavezniRadnikDokumenti = [
+  { type: 'lijecnicki', label: dokumentVrste.lijecnicki },
+  { type: 'zastita_na_radu', label: dokumentVrste.zastita_na_radu },
+  { type: 'osposobljavanje', label: dokumentVrste.osposobljavanje },
+] satisfies Array<{ type: RadnikDokumentVrsta; label: string }>;

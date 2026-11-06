@@ -18,6 +18,7 @@ import { Modal } from '@/components/ui/Modal';
 import { HistoryButton, HistoryDialog } from './HistoryDialog';
 import { RadnikDokumenti } from '@/components/views/RadnikDokumenti';
 import { Badge } from '@/components/ui/Badge';
+import { obavezniRadnikDokumenti } from '@/lib/radnikDokumenti';
 
 type Tab = 'pregled' | 'place' | 'dokumenti' | 'aktivnost';
 const tabs: { key: Tab; label: string; icon: typeof Activity }[] = [
@@ -29,11 +30,7 @@ const tabs: { key: Tab; label: string; icon: typeof Activity }[] = [
 const euro = (value: number) => value.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' });
 const dateLabel = (value: string) => formatHrDate(new Date(`${value.slice(0, 10)}T00:00:00`));
 const monthRange = (today: string) => mjesecRaspon(today.slice(0, 7));
-const mandatoryDocs: { type: RadnikDokumentVrsta; label: string }[] = [
-  { type: 'lijecnicki', label: 'Liječnički pregled' },
-  { type: 'zastita_na_radu', label: 'Zaštita na radu' },
-  { type: 'atest', label: 'Atest' },
-];
+const mandatoryDocs = obavezniRadnikDokumenti;
 
 function daysLeft(datum: string, today: string) {
   return Math.round((new Date(`${datum.slice(0, 10)}T00:00:00`).getTime() - new Date(`${today}T00:00:00`).getTime()) / 86_400_000);

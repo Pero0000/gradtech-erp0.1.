@@ -56,6 +56,25 @@ function apiSetup(result) {
   return { api, calls };
 }
 
+function taskCopyApiSetup(result) {
+  const calls = [];
+  const api = load('../src/lib/api.ts', {
+    './supabase': {
+      supabase: {
+        from: (table) => ({
+          upsert: async (rows, options) => {
+            calls.push({ table, rows, options });
+            return result;
+          },
+        }),
+      },
+    },
+    './postavke': {}, './obracunSati': {}, './vehicleKmCosts': {}, './company': {},
+    './pagination': {}, './rokovi': {}, './imageCompression': {},
+  });
+  return { api, calls };
+}
+
 test('history RPC uses vehicle scope and lossless sequence pagination', async () => {
   const { api, calls } = apiSetup({ data: [], error: null });
   await api.fetchFuelChangeHistory('vehicle');
@@ -64,6 +83,123 @@ test('history RPC uses vehicle scope and lossless sequence pagination', async ()
     ['get_fuel_change_history', { p_vehicle_id: 'vehicle', p_before_sequence: null }],
     ['get_fuel_change_history', { p_vehicle_id: 'vehicle', p_before_sequence: '9007199254740993' }],
   ]);
+});
+
+test('mobile fuel option RPC errors identify the migration needed for each dropdown', async () => {
+  for (const [missingFunction, expectedMigration] of [
+    ['get_vozila_gorivo_workers', '20261110390000_radnik_gorivo_tipovi_vozila.sql'],
+    ['get_mobile_vozila_gorivo_vehicles', '20261110390000_radnik_gorivo_tipovi_vozila.sql'],
+  ]) {
+    const api = load('../src/lib/api.ts', {
+      './supabase': {
+        supabase: {
+          rpc: async (name) => name === missingFunction
+            ? {
+              data: null,
+              error: { code: 'PGRST202', message: `Could not find function public.${name} in the schema cache` },
+            }
+            : {
+              data: name === 'get_vozila_gorivo_workers'
+                ? [{ id: 'worker', ime: 'Ana', prezime: 'Test', uloga: 'Radnik', dozvoljeni_tipovi_vozila: ['Teretno'] }]
+                : null,
+              error: null,
+            },
+        },
+      },
+      './postavke': {}, './obracunSati': {}, './vehicleKmCosts': {}, './company': {},
+      './pagination': {}, './rokovi': {}, './imageCompression': {},
+    });
+    await assert.rejects(api.fetchMobileVoziloGorivoOptions(), new RegExp(expectedMigration));
+  }
+});
+
+test('mobile fuel vehicle options are requested for the selected worker category', async () => {
+  const calls = [];
+  const api = load('../src/lib/api.ts', {
+    './supabase': {
+      supabase: {
+        rpc: async (name, args) => {
+          calls.push([name, args]);
+          if (name === 'get_vozila_gorivo_workers') {
+            return {
+              data: [
+                { id: 'worker-1', ime: 'Ana', prezime: 'Test', uloga: 'Radnik', dozvoljeni_tipovi_vozila: ['Teretno'] },
+                { id: 'worker-2', ime: 'Ivo', prezime: 'Test', uloga: 'Poslovođa', dozvoljeni_tipovi_vozila: null },
+              ],
+              error: null,
+            };
+          }
+          return {
+            data: [{ id: 'vehicle-1', marka: 'Test', model: null, registracija: 'TEST-1', tip: 'Radno', kilometraza: 1200 }],
+            error: null,
+          };
+        },
+      },
+    },
+    './postavke': {}, './obracunSati': {}, './vehicleKmCosts': {}, './company': {},
+    './pagination': {}, './rokovi': {}, './imageCompression': {},
+  });
+  const options = await api.fetchMobileVoziloGorivoOptions('worker-2');
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ['get_vozila_gorivo_workers', null],
+    ['get_mobile_vozila_gorivo_vehicles', { p_radnik_id: 'worker-2' }],
+  ]);
+  assert.equal(options.vozila[0].tip, 'Radno');
+  assert.equal(options.radnici[1].dozvoljeni_tipovi_vozila, null);
+});
+
+test('mobile fuel vehicle result type errors identify the corrective migration', async () => {
+  const api = load('../src/lib/api.ts', {
+    './supabase': {
+      supabase: {
+        rpc: async () => ({
+          data: null,
+          error: {
+            code: '42804',
+            message: 'structure of query does not match function result type: returned type numeric does not match expected type integer in column 6',
+          },
+        }),
+      },
+    },
+    './postavke': {}, './obracunSati': {}, './vehicleKmCosts': {}, './company': {},
+    './pagination': {}, './rokovi': {}, './imageCompression': {},
+  });
+  await assert.rejects(api.fetchMobileVoziloGorivoOptions(), /20261110380000_fix_mobile_fuel_vehicle_mileage_type\.sql/);
+});
+
+test('copying open tasks to another work order preserves source and copies task details', async () => {
+  const { api, calls } = taskCopyApiSetup({ error: null });
+  await api.copyOpenNalogZadaci('target-order', 'site', [
+    {
+      id: 'source-task', nalog_id: 'source-order', gradiliste_id: 'site', naziv: 'Nedovršeni rad',
+      gotovo: false, rok: '2026-11-12', kooperant_id: 'contractor', vrsta: 'dodatni',
+    },
+    {
+      id: 'completed-task', nalog_id: 'source-order', gradiliste_id: 'site', naziv: 'Gotov rad',
+      gotovo: true, rok: null, kooperant_id: null, vrsta: 'zadatak',
+    },
+    {
+      id: 'already-target-task', nalog_id: 'target-order', gradiliste_id: 'site', naziv: 'Već na cilju',
+      gotovo: false, rok: null, kooperant_id: null, vrsta: 'zadatak',
+    },
+    {
+      id: 'other-site-task', nalog_id: 'source-order', gradiliste_id: 'other-site', naziv: 'Drugo gradilište',
+      gotovo: false, rok: null, kooperant_id: null, vrsta: 'zadatak',
+    },
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{
+    table: 'gradiliste_zadaci',
+    rows: [{
+      nalog_id: 'target-order',
+      gradiliste_id: 'site',
+      izvor_zadatak_id: 'source-task',
+      naziv: 'Nedovršeni rad',
+      rok: '2026-11-12',
+      kooperant_id: 'contractor',
+      vrsta: 'dodatni',
+    }],
+    options: { onConflict: 'nalog_id,izvor_zadatak_id', ignoreDuplicates: true },
+  }]);
 });
 
 test('restore RPC sends only the history identifier, never client supplied snapshots', async () => {
@@ -123,9 +259,13 @@ test('private storage URLs are reused, deduplicated and refreshed before expiry'
   assert.notEqual(refreshed, first);
   assert.equal(calls.length, 2);
 
+  const forced = await api.getPrivateFileUrl('company/photo.webp', 120, true);
+  assert.notEqual(forced, refreshed);
+  assert.equal(calls.length, 3);
+
   const otherBucketUrl = await api.getKooperantDokumentUrl('company/document.pdf', 120);
   assert.match(otherBucketUrl, /kooperant-dokumenti/);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
 });
 
 test('cooperator invoice recovery RPCs use atomic package identifiers and explicit migration errors', async () => {

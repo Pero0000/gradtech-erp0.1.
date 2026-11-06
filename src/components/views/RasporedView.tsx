@@ -11,6 +11,7 @@ import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import type { GradilisteStavka } from '@/lib/api';
 import {
   setNalogZadaci,
+  copyOpenNalogZadaci,
   addNalogZadatak,
   deleteGradilisteZadatak,
   fetchNalogZadaci,
@@ -284,7 +285,7 @@ export function RasporedView() {
   const formGradilisteId = nalogForm?.gradiliste_id ?? '';
   const formNalogId = nalogForm?.nalogId;
   const [zadatakNalozi, setZadatakNalozi] = useState<Record<string, string>>({});
-  // Otvoreni zadaci vidljivi su i kad ih drži drugi (nezavršeni) nalog, da se mogu prebaciti na ovaj.
+  // Otvoreni zadaci s drugih naloga mogu se kopirati na novi nalog.
   const visibleZadaci = nalogZadaci.filter((z) => !z.gotovo);
   const visibleStavke = nalogStavke.filter((item) => !item.gotovo && !item.uzeto);
 
@@ -317,6 +318,17 @@ export function RasporedView() {
       .then(async (list) => {
         if (cancelled) return;
         setNalogZadaciList(list);
+        setNalogForm((current) => current && current.fresh
+          && current.nalogId === formNalogId
+          && current.gradiliste_id === formGradilisteId
+          ? {
+            ...current,
+            zadatak_ids: [...new Set([
+              ...current.zadatak_ids,
+              ...list.filter((task) => !task.gotovo && task.nalog_id && task.nalog_id !== current.nalogId).map((task) => task.id),
+            ])],
+          }
+          : current);
         const otherIds = [...new Set(list.map((z) => z.nalog_id).filter((id): id is string => Boolean(id) && id !== formNalogId))];
         const brojevi = await fetchNalogBrojevi(otherIds).catch(() => ({} as Record<string, string>));
         if (!cancelled) setZadatakNalozi(brojevi);
@@ -341,9 +353,15 @@ export function RasporedView() {
       .then((list) => {
         if (cancelled) return;
         setNalogStavke(list);
-        setNalogForm((current) => current && current.gradiliste_id === formGradilisteId
-          ? { ...current, stavka_ids: list.filter((item) => !item.gotovo && !item.uzeto && item.nalog_id === current.nalogId).map((item) => item.id) }
-          : current);
+        setNalogForm((current) => {
+          if (!current || current.gradiliste_id !== formGradilisteId) return current;
+          const eligible = list.filter((item) => !item.gotovo && !item.uzeto && (
+            item.nalog_id === current.nalogId
+            || (current.fresh && (item.tip === 'materijal' || item.tip === 'alat')
+              && Boolean(item.nalog_id) && item.nalog_id !== current.nalogId)
+          ));
+          return { ...current, stavka_ids: eligible.map((item) => item.id) };
+        });
       })
       .catch(() => {
         if (!cancelled) setNalogStavke([]);
@@ -727,14 +745,13 @@ export function RasporedView() {
         bez_troska: target.bez_troska,
       });
       await loadDay(selectedDate);
-      await openExistingNalog(assignmentId, created.id);
-      setNalogForm((form) => (form ? { ...form, fresh: true } : form));
+      await openExistingNalog(assignmentId, created.id, true);
     } catch (e) {
       setError(errMsg(e, 'Greška pri kreiranju naloga'));
     }
   };
 
-  const openExistingNalog = async (assignmentId: string, nalogId: string) => {
+  const openExistingNalog = async (assignmentId: string, nalogId: string, fresh = false) => {
     setError(null);
     try {
       const nalog = (await fetchRadniNalozi()).find((n) => n.id === nalogId);
@@ -752,6 +769,7 @@ export function RasporedView() {
         : await fetchNalogZadaci(nalogId).catch(() => [] as GradilisteZadatak[])
       ).filter((z) => !z.gotovo && z.nalog_id === nalogId);
       setNalogForm({
+        ...(fresh ? { fresh: true } : {}),
         nalogId,
         zakljucen_at: nalog.zakljucen_at ?? null,
         bez_troska: Boolean(nalog.bez_troska),
@@ -834,9 +852,19 @@ export function RasporedView() {
         zakljucen: lock === 'unlock' ? false : undefined,
       };
       if (nalogForm.nalogId) await updateRadniNalog(nalogForm.nalogId, payload);
-      const validIds = visibleZadaci.filter((z) => nalogForm.zadatak_ids.includes(z.id)).map((z) => z.id);
+      const selectedTasks = visibleZadaci.filter((z) => nalogForm.zadatak_ids.includes(z.id));
       try {
-        await setNalogZadaci(nalogId, nalogForm.gradiliste_id || null, validIds);
+        const tasksToKeepOrAssign = selectedTasks
+          .filter((task) => !task.nalog_id || task.nalog_id === nalogId)
+          .map((task) => task.id);
+        await setNalogZadaci(nalogId, nalogForm.gradiliste_id || null, tasksToKeepOrAssign);
+        if (nalogForm.gradiliste_id) {
+          await copyOpenNalogZadaci(
+            nalogId,
+            nalogForm.gradiliste_id,
+            selectedTasks.filter((task) => Boolean(task.nalog_id) && task.nalog_id !== nalogId),
+          );
+        }
         // Odznačeni zadatak bez gradilišta nema kamo vratiti pa se briše.
         for (const z of nalogZadaci) {
           if (!z.gotovo && !z.gradiliste_id && z.nalog_id === nalogId && !nalogForm.zadatak_ids.includes(z.id)) {
@@ -853,8 +881,11 @@ export function RasporedView() {
         setNoviZadatak(prazniNoviZadaci);
       } catch (reason) {
         const message = errMsg(reason, 'Zadaci nisu spremljeni.');
-        setError(message.includes('migracij') ? message : `${message} Pokreni migracije 20261015220000_zadaci_nalog_veza.sql i 20261019110000_zadaci_bez_gradilista.sql.`);
-        if (lock === 'lock') throw new Error(message);
+        const migrationHint = message.includes('migracij') || /izvorni zadatak.*(riješen|dostupan)/i.test(message)
+          ? ''
+          : ' Pokreni migracije 20261015220000_zadaci_nalog_veza.sql i 20261019110000_zadaci_bez_gradilista.sql.';
+        setError(`${message}${migrationHint}`);
+        throw new Error(message);
       }
       await saveNalogStavke(
         nalogId,
@@ -1820,6 +1851,11 @@ export function RasporedView() {
             </Field>
             </div>
             <div className="space-y-4">
+            {nalogForm.fresh && nalogForm.gradiliste_id && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Neriješeni radni zadaci, dodatni radovi, materijal i alat s drugih naloga istog gradilišta automatski su označeni za kopiranje. Izvorne stavke ostaju na svojim nalozima.
+              </p>
+            )}
             {ZADATAK_SEKCIJE_NALOGA.map((sekcija) => {
               const lista = visibleZadaci.filter((z) => zadatakVrsta(z) === sekcija.vrsta);
               const noviUSekciji = nalogForm.novi_zadaci.map((z, index) => ({ ...z, index })).filter((z) => z.vrsta === sekcija.vrsta);
@@ -1847,8 +1883,8 @@ export function RasporedView() {
                       />
                       <span className="flex-1 text-sm text-slate-700">{z.naziv}</span>
                       {z.nalog_id && z.nalog_id !== formNalogId && (
-                        <span className="text-xs text-amber-700" title="Označavanjem se zadatak prebacuje na ovaj nalog">
-                          Na nalogu {zadatakNalozi[z.nalog_id] ?? 'drugom'}
+                        <span className="text-xs text-amber-700" title="Označavanjem se kopira zadatak na ovaj nalog; izvorni zadatak ostaje na postojećem nalogu">
+                          Kopirati s naloga {zadatakNalozi[z.nalog_id] ?? 'drugog'}
                         </span>
                       )}
                       {z.rok && <span className="text-xs text-slate-400">{formatHrDate(new Date(z.rok + 'T00:00:00'))}</span>}
@@ -1930,7 +1966,13 @@ export function RasporedView() {
                       />
                       <span className="flex-1 text-sm text-slate-700">{item.naziv}</span>
                       <span className="text-xs text-slate-400">{item.tip === 'materijal' ? 'Materijal' : item.tip === 'stroj' ? 'Stroj' : 'Alat'}</span>
-                      {item.nalog_id && item.nalog_id !== formNalogId && <span className="text-xs text-sky-700">Prethodni nalog</span>}
+                      {item.nalog_id && item.nalog_id !== formNalogId && (
+                        <span className="text-xs text-sky-700">
+                          {item.tip === 'materijal' || item.tip === 'alat'
+                            ? 'Kopirati s prethodnog naloga'
+                            : 'Prethodni nalog'}
+                        </span>
+                      )}
                       {!item.nalog_id && <span className="text-xs text-slate-400">Gradilište</span>}
                     </label>
                   ))}

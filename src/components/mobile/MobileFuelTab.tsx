@@ -10,8 +10,20 @@ import type { VoziloGorivo } from '@/types';
 import { todayISO } from '@/lib/rokovi';
 import { parseDecimalInput, formatHrDate } from '@/lib/localization';
 
-const errorText = (reason: unknown) =>
-  reason instanceof Error ? reason.message : 'Greška pri spremanju točenja goriva.';
+const errorText = (reason: unknown, fallback: string) => {
+  if (reason instanceof Error) return reason.message;
+  if (typeof reason === 'object' && reason !== null && 'message' in reason) {
+    const error = reason as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    const parts = [
+      typeof error.message === 'string' ? error.message : null,
+      typeof error.details === 'string' ? `Detalji: ${error.details}` : null,
+      typeof error.hint === 'string' ? `Savjet: ${error.hint}` : null,
+      typeof error.code === 'string' ? `Kod: ${error.code}` : null,
+    ].filter(Boolean);
+    if (parts.length > 0) return parts.join(' ');
+  }
+  return fallback;
+};
 
 export function MobileFuelTab() {
   const [options, setOptions] = useState<MobileVoziloGorivoOptions>({ vozila: [], radnici: [] });
@@ -26,24 +38,25 @@ export function MobileFuelTab() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = async (workerId = tocioId) => {
     setLoading(true);
     setError(null);
     try {
       const [nextOptions, nextEntries] = await Promise.all([
-        fetchMobileVoziloGorivoOptions(),
+        fetchMobileVoziloGorivoOptions(workerId || undefined),
         fetchMobileVoziloGorivo(),
       ]);
       setOptions(nextOptions);
       setEntries(nextEntries);
-      const firstWorker = nextOptions.radnici[0];
-      const firstVehicle = nextOptions.vozila.find((vehicle) =>
-        firstWorker?.uloga.trim().toLowerCase() !== 'radnik' || vehicle.tip.trim().toLowerCase() === 'teretno');
-      setVoziloId((current) => current || firstVehicle?.id || '');
-      setKilometraza((current) => current || String(firstVehicle?.kilometraza ?? ''));
-      setTocioId((current) => current || firstWorker?.id || '');
+      const selectedWorker = nextOptions.radnici.find((worker) => worker.id === workerId) ?? nextOptions.radnici[0];
+      const selectedVehicle = nextOptions.vozila.find((vehicle) => vehicle.id === voziloId) ?? nextOptions.vozila[0];
+      setTocioId(selectedWorker?.id ?? '');
+      setVoziloId(selectedVehicle?.id ?? '');
+      setKilometraza((current) => selectedVehicle?.id === voziloId && current
+        ? current
+        : String(selectedVehicle?.kilometraza ?? ''));
     } catch (reason) {
-      setError(errorText(reason));
+      setError(errorText(reason, 'Popis vozila i djelatnika nije moguće učitati.'));
     } finally {
       setLoading(false);
     }
@@ -51,6 +64,8 @@ export function MobileFuelTab() {
 
   useEffect(() => {
     void load();
+    // Load the mobile options once when the tab mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const save = async () => {
@@ -78,17 +93,17 @@ export function MobileFuelTab() {
       try {
         const [nextEntries, nextOptions] = await Promise.all([
           fetchMobileVoziloGorivo(),
-          fetchMobileVoziloGorivoOptions(),
+          fetchMobileVoziloGorivoOptions(tocioId),
         ]);
         setEntries(nextEntries);
         setOptions(nextOptions);
         const updatedVehicle = nextOptions.vozila.find((vehicle) => vehicle.id === voziloId);
         if (updatedVehicle) setKilometraza(String(updatedVehicle.kilometraza));
       } catch (reason) {
-        setError(`Točenje je spremljeno, ali prikaz nije osvježen: ${errorText(reason)}`);
+        setError(`Točenje je spremljeno, ali prikaz nije osvježen: ${errorText(reason, 'Podatke nije moguće osvježiti.')}`);
       }
     } catch (reason) {
-      setError(errorText(reason));
+      setError(errorText(reason, 'Točenje goriva nije moguće spremiti.'));
     } finally {
       setSaving(false);
     }
@@ -101,7 +116,9 @@ export function MobileFuelTab() {
   const selectedWorker = options.radnici.find((worker) => worker.id === tocioId);
   const selectedVehicle = options.vozila.find((vehicle) => vehicle.id === voziloId);
   const availableVehicles = options.vozila.filter((vehicle) =>
-    selectedWorker?.uloga.trim().toLowerCase() !== 'radnik' || vehicle.tip.trim().toLowerCase() === 'teretno');
+    !selectedWorker
+    || selectedWorker.dozvoljeni_tipovi_vozila === null
+    || selectedWorker.dozvoljeni_tipovi_vozila.some((tip) => tip.trim().toLowerCase() === vehicle.tip.trim().toLowerCase()));
 
   return (
     <div className="space-y-3">
@@ -113,32 +130,34 @@ export function MobileFuelTab() {
             <label className="block text-sm font-medium text-slate-700">Tko je točio
               <select value={tocioId} onChange={(event) => {
                 const nextWorkerId = event.target.value;
-                const nextWorker = options.radnici.find((worker) => worker.id === nextWorkerId);
-                const nextVehicles = options.vozila.filter((vehicle) =>
-                  nextWorker?.uloga.trim().toLowerCase() !== 'radnik' || vehicle.tip.trim().toLowerCase() === 'teretno');
                 setTocioId(nextWorkerId);
-                const nextVehicle = nextVehicles.find((vehicle) => vehicle.id === voziloId) ?? nextVehicles[0];
-                setVoziloId(nextVehicle?.id ?? '');
-                if (nextVehicle) setKilometraza(String(nextVehicle.kilometraza));
+                void load(nextWorkerId);
               }} className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base">
                 <option value="">Odaberi djelatnika</option>
                 {options.radnici.map((worker) => <option key={worker.id} value={worker.id}>{worker.ime} {worker.prezime}</option>)}
               </select>
             </label>
-            {selectedWorker?.uloga.trim().toLowerCase() === 'radnik' && (
-              <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">Kategorija „radnik” može evidentirati gorivo samo za teretna vozila.</p>
+            {selectedWorker?.dozvoljeni_tipovi_vozila && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+                Za kategoriju „{selectedWorker.uloga}” dopušteno je: {selectedWorker.dozvoljeni_tipovi_vozila.join(', ')}.
+              </p>
             )}
             <label className="block text-sm font-medium text-slate-700">Vozilo
-              <select value={voziloId} onChange={(event) => {
+              <select value={voziloId} disabled={loading} onChange={(event) => {
                 const nextVehicleId = event.target.value;
                 const nextVehicle = options.vozila.find((vehicle) => vehicle.id === nextVehicleId);
                 setVoziloId(nextVehicleId);
                 setKilometraza(String(nextVehicle?.kilometraza ?? ''));
               }} className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base">
                 <option value="">Odaberi vozilo</option>
-                {availableVehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.marka} {vehicle.model ?? ''} · {vehicle.registracija}</option>)}
+                {availableVehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.marka} {vehicle.model ?? ''} · {vehicle.registracija}{vehicle.gorivo_pin ? ` · ${vehicle.gorivo_pin}` : ''}</option>)}
               </select>
             </label>
+            {selectedWorker && availableVehicles.length === 0 && (
+              <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+                Nema vozila dopuštenog za kategoriju „{selectedWorker.uloga}”.
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <label className="block text-sm font-medium text-slate-700">Datum
                 <input lang="hr-HR" type="date" value={datum} onChange={(event) => setDatum(event.target.value)} className="mt-1 min-h-12 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-2 text-sm" />
@@ -159,6 +178,12 @@ export function MobileFuelTab() {
               )}
             </label>
             {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+            {error && (
+              <button type="button" onClick={() => void load()} disabled={loading || saving} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-sm font-semibold text-red-800 disabled:opacity-50">
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                Ponovno učitaj popise
+              </button>
+            )}
             {notice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
             <button type="button" onClick={() => void save()} disabled={saving || !availableVehicles.length || !options.radnici.length} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 text-sm font-bold text-white disabled:opacity-50">
               {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}

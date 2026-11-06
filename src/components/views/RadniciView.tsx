@@ -1,11 +1,18 @@
 import { formatHrDate } from '@/lib/localization';
 import { useState, useEffect, useMemo } from 'react';
-import { Users, Plus, Pencil, Trash2, Phone, Mail, HardHat, ArrowDown, ArrowUp, ArrowUpDown, AlertTriangle } from 'lucide-react';
-import type { Radnik, RadnikStatus, BonusTip, RadnikPovijest, RadnikDokument, RadnikDokumentVrsta } from '@/types';
+import { Users, Plus, Pencil, Trash2, Phone, Mail, HardHat, ArrowDown, ArrowUp, ArrowUpDown, AlertTriangle, Save } from 'lucide-react';
+import type { Radnik, RadnikStatus, BonusTip, RadnikPovijest, RadnikDokument } from '@/types';
 import { RadnikDokumenti } from '@/components/views/RadnikDokumenti';
 import { ResourceChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
 import { ResourceDeletionHistory } from '@/components/views/ResourceDeletionHistory';
-import { fetchRadnici, createRadnik, updateRadnik, deleteRadnik, fetchRadnikPovijest, addRadnikPovijest, fetchSviRadnikDokumenti, fetchRadnikKategorije, addRadnikKategorija } from '@/lib/api';
+import {
+  fetchRadnici, createRadnik, updateRadnik, deleteRadnik, fetchRadnikPovijest,
+  addRadnikPovijest, fetchSviRadnikDokumenti, addRadnikKategorija,
+  fetchRadnikKategorijeGorivo, fetchRadnikGorivoVehicleTypes, updateRadnikKategorijaGorivoTypes,
+  type RadnikKategorijaGorivo,
+} from '@/lib/api';
+import { useAuth } from '@/auth/useAuth';
+import { obavezniRadnikDokumenti } from '@/lib/radnikDokumenti';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Field, TextInput, Select } from '@/components/ui/Field';
@@ -53,14 +60,7 @@ const emptyForm = {
 
 type SortKey = 'ime';
 
-const requiredDocumentTypes: RadnikDokumentVrsta[] = ['lijecnicki', 'zastita_na_radu', 'atest'];
-const requiredDocumentLabels: Record<RadnikDokumentVrsta, string> = {
-  lijecnicki: 'Liječnički pregled',
-  zastita_na_radu: 'Zaštita na radu',
-  atest: 'Atest',
-  osposobljavanje: 'Osposobljavanje',
-  ostalo: 'Ostalo',
-};
+const requiredDocumentTypes = obavezniRadnikDokumenti.map(({ type }) => type);
 const documentSummary = (documents: RadnikDokument[], today: string) => {
   const states = requiredDocumentTypes.map((type) => {
     const latest = documents.filter((item) => item.vrsta === type)
@@ -74,7 +74,7 @@ const documentSummary = (documents: RadnikDokument[], today: string) => {
   return {
     label,
     tone: states.includes('red') ? 'red' : states.includes('orange') ? 'orange' : 'green',
-    detail: requiredDocumentTypes.map((type, index) => `${requiredDocumentLabels[type]}: ${states[index] === 'red' ? 'isteklo ili nedostaje' : states[index] === 'orange' ? 'uskoro istječe' : 'važi'}`).join(' · '),
+    detail: obavezniRadnikDokumenti.map(({ label }, index) => `${label}: ${states[index] === 'red' ? 'isteklo ili nedostaje' : states[index] === 'orange' ? 'uskoro istječe' : 'važi'}`).join(' · '),
   };
 };
 const documentTone: Record<string, string> = {
@@ -99,6 +99,8 @@ const bonusText = (b: Radnik['bonusi'] | undefined) =>
   (b ?? []).filter((x) => x.naziv || x.iznos).map((x) => `${x.naziv || '?'}: ${x.iznos} € (${x.tip})`).join('; ');
 
 export function RadniciView() {
+  const { canAccess } = useAuth();
+  const canEdit = canAccess('radnici', 'edit');
   const [items, setItems] = useState<Radnik[]>([]);
   const [documents, setDocuments] = useState<RadnikDokument[]>([]);
   const [povijest, setPovijest] = useState<RadnikPovijest[]>([]);
@@ -121,19 +123,35 @@ export function RadniciView() {
   const [novaKategorija, setNovaKategorija] = useState('');
   const [kategorijaSaving, setKategorijaSaving] = useState(false);
   const [kategorijaError, setKategorijaError] = useState<string | null>(null);
+  const [kategorijeGorivo, setKategorijeGorivo] = useState<RadnikKategorijaGorivo[]>([]);
+  const [tipoviVozila, setTipoviVozila] = useState<string[]>([]);
+  const [odabranaGorivoKategorija, setOdabranaGorivoKategorija] = useState('');
+  const [gorivoOgranicenjeAktivno, setGorivoOgranicenjeAktivno] = useState(false);
+  const [gorivoTipoviDraft, setGorivoTipoviDraft] = useState<string[]>([]);
+  const [gorivoPostavkeSaving, setGorivoPostavkeSaving] = useState(false);
+  const [gorivoPostavkeError, setGorivoPostavkeError] = useState<string | null>(null);
+  const [gorivoPostavkeNotice, setGorivoPostavkeNotice] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [workers, workerDocuments, workerCategories] = await Promise.all([
+      const [workers, workerDocuments, fuelCategories, vehicleTypes] = await Promise.all([
         fetchRadnici(),
         fetchSviRadnikDokumenti(),
-        fetchRadnikKategorije(),
+        fetchRadnikKategorijeGorivo(),
+        fetchRadnikGorivoVehicleTypes(),
       ]);
       setItems(workers);
       setDocuments(workerDocuments);
-      setKategorije(workerCategories);
+      setKategorijeGorivo(fuelCategories);
+      setTipoviVozila(vehicleTypes);
+      setKategorije(fuelCategories.map((category) => category.naziv));
+      const selectedCategory = fuelCategories.find((category) => category.naziv === odabranaGorivoKategorija)
+        ?? fuelCategories[0];
+      setOdabranaGorivoKategorija(selectedCategory?.naziv ?? '');
+      setGorivoOgranicenjeAktivno(Boolean(selectedCategory?.dozvoljeni_tipovi_vozila));
+      setGorivoTipoviDraft(selectedCategory?.dozvoljeni_tipovi_vozila ?? vehicleTypes);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
     } finally {
@@ -143,7 +161,43 @@ export function RadniciView() {
 
   useEffect(() => {
     load();
+    // Load the staff list and category settings once when the view mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const selectFuelCategory = (name: string) => {
+    const category = kategorijeGorivo.find((item) => item.naziv === name);
+    setOdabranaGorivoKategorija(name);
+    setGorivoOgranicenjeAktivno(Boolean(category?.dozvoljeni_tipovi_vozila));
+    setGorivoTipoviDraft(category?.dozvoljeni_tipovi_vozila ?? tipoviVozila);
+    setGorivoPostavkeError(null);
+    setGorivoPostavkeNotice(null);
+  };
+
+  const saveFuelCategory = async () => {
+    if (!odabranaGorivoKategorija) return;
+    if (gorivoOgranicenjeAktivno && gorivoTipoviDraft.length === 0) {
+      setGorivoPostavkeError('Odaberite barem jedan tip vozila ili isključite ograničenje.');
+      return;
+    }
+    setGorivoPostavkeSaving(true);
+    setGorivoPostavkeError(null);
+    setGorivoPostavkeNotice(null);
+    try {
+      const allowedTypes = gorivoOgranicenjeAktivno ? gorivoTipoviDraft : null;
+      await updateRadnikKategorijaGorivoTypes(odabranaGorivoKategorija, allowedTypes);
+      setKategorijeGorivo((current) => current.map((category) => (
+        category.naziv === odabranaGorivoKategorija
+          ? { ...category, dozvoljeni_tipovi_vozila: allowedTypes }
+          : category
+      )));
+      setGorivoPostavkeNotice('Dopušteni tipovi vozila su spremljeni.');
+    } catch (reason) {
+      setGorivoPostavkeError(reason instanceof Error ? reason.message : 'Greška pri spremanju postavki goriva.');
+    } finally {
+      setGorivoPostavkeSaving(false);
+    }
+  };
 
   const editingId = editing?.id;
   useEffect(() => {
@@ -260,6 +314,10 @@ export function RadniciView() {
     try {
       const created = await addRadnikKategorija(novaKategorija);
       setKategorije((current) => [...current, created].sort((a, b) => a.localeCompare(b, 'hr')));
+      setKategorijeGorivo((current) => [...current, { naziv: created, dozvoljeni_tipovi_vozila: null }]);
+      setOdabranaGorivoKategorija(created);
+      setGorivoOgranicenjeAktivno(false);
+      setGorivoTipoviDraft(tipoviVozila);
       setForm((current) => ({ ...current, uloga: created }));
       setNovaKategorija('');
     } catch (reason) {
@@ -359,6 +417,85 @@ export function RadniciView() {
           {error}
         </div>
       )}
+      <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3">
+          <h2 className="font-semibold text-slate-900">Dopušteni tipovi vozila za gorivo</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Ograničenja se primjenjuju na mobilni i uredski unos goriva.
+          </p>
+        </div>
+        {kategorijeGorivo.length === 0 ? (
+          <p className="text-sm text-slate-500">Nema kategorija djelatnika.</p>
+        ) : (
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-slate-700">
+              Kategorija
+              <Select
+                value={odabranaGorivoKategorija}
+                onChange={(event) => selectFuelCategory(event.target.value)}
+                className="mt-1 w-full sm:max-w-md"
+              >
+                {kategorijeGorivo.map((category) => (
+                  <option key={category.naziv} value={category.naziv}>{category.naziv}</option>
+                ))}
+              </Select>
+            </label>
+            <label className="flex items-start gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={gorivoOgranicenjeAktivno}
+                disabled={!canEdit || tipoviVozila.length === 0}
+                onChange={(event) => {
+                  setGorivoOgranicenjeAktivno(event.target.checked);
+                  setGorivoPostavkeError(null);
+                  setGorivoPostavkeNotice(null);
+                }}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300"
+              />
+              Ograničiti ovu kategoriju na odabrane tipove vozila
+            </label>
+            {gorivoOgranicenjeAktivno ? (
+              tipoviVozila.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {tipoviVozila.map((tip) => (
+                    <label key={tip} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={gorivoTipoviDraft.some((selected) => selected.trim().toLowerCase() === tip.trim().toLowerCase())}
+                        disabled={!canEdit}
+                        onChange={(event) => setGorivoTipoviDraft((current) => event.target.checked
+                          ? [...current, tip]
+                          : current.filter((selected) => selected.trim().toLowerCase() !== tip.trim().toLowerCase()))}
+                        className="h-4 w-4 rounded border-slate-300"
+                      />
+                      {tip}
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-amber-700">Najprije dodajte tip vozila u modulu Vozila.</p>
+              )
+            ) : (
+              <p className="text-sm text-slate-500">Bez ograničenja: kategorija može odabrati sve tipove vozila.</p>
+            )}
+            {gorivoPostavkeError && <p role="alert" className="text-sm text-red-700">{gorivoPostavkeError}</p>}
+            {gorivoPostavkeNotice && <p role="status" className="text-sm text-emerald-700">{gorivoPostavkeNotice}</p>}
+            {canEdit ? (
+              <button
+                type="button"
+                onClick={() => void saveFuelCategory()}
+                disabled={gorivoPostavkeSaving || (gorivoOgranicenjeAktivno && gorivoTipoviDraft.length === 0)}
+                className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+              >
+                <Save className="h-4 w-4" />
+                {gorivoPostavkeSaving ? 'Spremanje…' : 'Spremi ograničenje'}
+              </button>
+            ) : (
+              <p className="text-xs text-slate-500">Za promjenu je potrebna dozvola za uređivanje djelatnika.</p>
+            )}
+          </div>
+        )}
+      </section>
       <RadnikDetalj
         radnik={selectedRadnik}
         open={selectedRadnik !== null}
@@ -531,10 +668,10 @@ export function RadniciView() {
               </div>
             </div>
             {kategorijaError && <p role="alert" className="mt-2 text-sm text-red-700">{kategorijaError}</p>}
-            {form.uloga.trim().toLowerCase() === 'radnik' && (
+            {kategorijeGorivo.find((category) => category.naziv.trim().toLowerCase() === form.uloga.trim().toLowerCase())?.dozvoljeni_tipovi_vozila && (
               <p role="status" className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                Kategorija „radnik” može evidentirati gorivo samo za teretna vozila. Ostale kategorije mogu za sva vozila.
+                Dopušteni tipovi za gorivo: {kategorijeGorivo.find((category) => category.naziv.trim().toLowerCase() === form.uloga.trim().toLowerCase())?.dozvoljeni_tipovi_vozila?.join(', ')}.
               </p>
             )}
           </Field>

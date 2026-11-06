@@ -1,7 +1,7 @@
 import { formatHrDate } from '@/lib/localization';
 import { useState, useEffect, useCallback } from 'react';
 import { useRequestScope } from '@/lib/useRequestScope';
-import { ClipboardList, Plus, Pencil, Trash2, Users, Calendar, AlertCircle, Printer, Bell, History } from 'lucide-react';
+import { ClipboardList, Plus, Pencil, Trash2, Users, Calendar, AlertCircle, Printer, Bell, History, Ban } from 'lucide-react';
 import type { RadniNalog, Gradiliste, Radnik, NalogStatus, NalogPrioritet, Rok } from '@/types';
 import {
   fetchRokoviNaloga,
@@ -94,6 +94,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
   const [saving, setSaving] = useState(false);
   const [historyRestoring, setHistoryRestoring] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<RadniNalog | null>(null);
   const [deletionVersion, setDeletionVersion] = useState(0);
   const [period, setPeriod] = useState<Period>(focusNalogId ? 'svi' : 'danas');
   const [showHistory, setShowHistory] = useState(false);
@@ -294,6 +295,30 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri brisanju');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancelOrder = async () => {
+    if (!cancelTarget || historyRestoring || saving) return;
+    const order = cancelTarget;
+    setSaving(true);
+    setError(null);
+    try {
+      await updateRadniNalog(order.id, {
+        gradiliste_id: order.gradiliste_id ?? null,
+        naslov: order.naslov,
+        opis: order.opis ?? null,
+        status: 'otkazan',
+        prioritet: order.prioritet,
+        rok: order.rok ?? null,
+        radnik_ids: (order.radnici ?? []).map((worker) => worker.id),
+      });
+      setCancelTarget(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Nije moguće odustati od naloga.');
     } finally {
       setSaving(false);
     }
@@ -590,12 +615,28 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                     )}
                     <button
                       onClick={() => openEdit(n)}
+                      title="Uredi radni nalog"
+                      aria-label="Uredi radni nalog"
                       className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-sky-600 transition-colors"
                     >
                       <Pencil className="h-4 w-4" />
                     </button>
+                    {n.status !== 'zavrsen' && n.status !== 'otkazan' && (
+                      <button
+                        type="button"
+                        onClick={() => setCancelTarget(n)}
+                        disabled={saving || historyRestoring}
+                        title="Odustani od naloga"
+                        aria-label="Odustani od naloga"
+                        className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-amber-50 hover:text-amber-700 disabled:opacity-50"
+                      >
+                        <Ban className="h-4 w-4" />
+                      </button>
+                    )}
                     <button
                       onClick={() => setDeleteId(n.id)}
+                      title="Izbriši radni nalog"
+                      aria-label="Izbriši radni nalog"
                       className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600 transition-colors"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -865,6 +906,14 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
         </div>
       </Modal>
 
+      <ConfirmDialog
+        open={cancelTarget !== null}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={handleCancelOrder}
+        title="Odustati od radnog naloga?"
+        message={`Nalog ${cancelTarget?.broj ?? ''} bit će označen kao otkazan. Nalog i povezani podaci neće biti izbrisani.`}
+        confirmLabel="Otkazati nalog"
+      />
       <ConfirmDialog
         open={deleteId !== null}
         onClose={() => setDeleteId(null)}

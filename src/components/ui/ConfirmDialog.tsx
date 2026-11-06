@@ -4,9 +4,10 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   title: string;
   message: string;
+  confirmLabel?: string;
 }
 
-export function ConfirmDialog({ open, onClose, onConfirm, title, message }: ConfirmDialogProps) {
+export function ConfirmDialog({ open, onClose, onConfirm, title, message, confirmLabel = 'Izbriši' }: ConfirmDialogProps) {
   if (!open) return null;
 
   return (
@@ -31,7 +32,7 @@ export function ConfirmDialog({ open, onClose, onConfirm, title, message }: Conf
             }}
             className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors"
           >
-            Izbriši
+            {confirmLabel}
           </button>
         </div>
       </div>

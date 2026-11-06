@@ -9,18 +9,25 @@ const { outputText } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 });
 
-function setup(rows) {
+function setup(rows, mutations = []) {
   const supabase = {
     from: () => {
       let payload;
+      let options;
       let operation = 'select';
       const filters = [];
       const query = {
         select: () => query,
         order: () => query,
         update: (value) => { operation = 'update'; payload = value; return query; },
-        insert: () => { assert.fail('Completed items must not be copied'); },
-        delete: () => { assert.fail('Completed items must not be deleted'); },
+        insert: (value) => { operation = 'insert'; payload = value; return query; },
+        upsert: (value, valueOptions) => {
+          operation = 'upsert';
+          payload = value;
+          options = valueOptions;
+          return query;
+        },
+        delete: () => { operation = 'delete'; return query; },
         eq: (key, value) => { filters.push((row) => row[key] === value); return query; },
         is: (key, value) => { filters.push((row) => row[key] === value); return query; },
         not: (key, operator, value) => {
@@ -32,6 +39,9 @@ function setup(rows) {
         then: (resolve, reject) => {
           const selected = rows.filter((row) => filters.every((filter) => filter(row)));
           if (operation === 'update') selected.forEach((row) => Object.assign(row, payload));
+          if (operation === 'insert' || operation === 'upsert' || operation === 'delete') {
+            mutations.push({ operation, payload, options });
+          }
           return Promise.resolve({ data: selected, error: null }).then(resolve, reject);
         },
       };
@@ -94,3 +104,33 @@ for (const tip of ['materijal', 'alat']) {
     assert.equal(rows[2].nalog_id, 'current');
   });
 }
+
+test('saving an open tool from another order copies it without transferring the source', async () => {
+  const rows = [{
+    id: 'source-tool',
+    tip: 'alat',
+    nalog_id: 'source-order',
+    gradiliste_id: 'site',
+    naziv: 'Bušilica',
+    gotovo: false,
+    uzeto: false,
+    preneseno: false,
+    oprema_id: 'equipment',
+  }];
+  const before = structuredClone(rows);
+  const mutations = [];
+  await setup(rows, mutations).setNalogStavke('target-order', 'site', ['source-tool']);
+  assert.deepEqual(rows, before);
+  assert.deepEqual(JSON.parse(JSON.stringify(mutations)), [{
+    operation: 'upsert',
+    payload: {
+      nalog_id: 'target-order',
+      gradiliste_id: 'site',
+      tip: 'alat',
+      naziv: 'Bušilica',
+      oprema_id: 'equipment',
+      izvor_alat_id: 'source-tool',
+    },
+    options: { onConflict: 'nalog_id,izvor_alat_id', ignoreDuplicates: true },
+  }]);
+});

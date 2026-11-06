@@ -3273,6 +3273,130 @@ test('recovery SQL compiles and passes transactional, permission and retention c
       await db.exec('RESET ROLE');
       assert.equal((await db.query('SELECT count(*)::int count FROM private.resource_deletions WHERE active')).rows[0].count,0);
     });
+    await t.test('completing a source task removes linked open-order copies with recoverable history', async () => {
+      await db.exec('ALTER TABLE public.radni_nalozi_stavke ADD COLUMN IF NOT EXISTS uzeto boolean NOT NULL DEFAULT false');
+      await db.exec(sqlFile('migrations/20261110370000_kopirani_zadaci_izvor.sql'));
+      await db.exec(sqlFile('migrations/20261110370000_kopirani_zadaci_izvor.sql'));
+      const company='00000000-0000-0000-0000-000000000001';
+      const site='00000000-0000-0000-0000-000000001701';
+      const sourceOrder='00000000-0000-0000-0000-000000001702';
+      const targetOrder='00000000-0000-0000-0000-000000001703';
+      const secondTargetOrder='00000000-0000-0000-0000-000000001707';
+      const source='00000000-0000-0000-0000-000000001704';
+      const firstCopy='00000000-0000-0000-0000-000000001705';
+      const secondCopy='00000000-0000-0000-0000-000000001706';
+      await db.query("SELECT set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000002',false)");
+      await db.query("INSERT INTO public.gradilista(id,company_id,naziv) VALUES ($1,$2,'Kopirani zadaci')",[site,company]);
+      await db.query(`INSERT INTO public.radni_nalozi(id,company_id,broj,naslov,gradiliste_id)
+        VALUES ($1,$4,'RN-SOURCE','Izvorni nalog',$5),($2,$4,'RN-COPY','Novi nalog',$5),
+          ($3,$4,'RN-COPY-2','Drugi novi nalog',$5)`,
+      [sourceOrder,targetOrder,secondTargetOrder,company,site]);
+      await db.query(`INSERT INTO public.gradiliste_zadaci(id,company_id,gradiliste_id,nalog_id,naziv,gotovo,vrsta)
+        VALUES ($1,$2,$3,$4,'Izvorni dodatni rad',false,'dodatni')`,[source,company,site,sourceOrder]);
+      await db.query(`INSERT INTO public.gradiliste_zadaci(id,company_id,gradiliste_id,nalog_id,naziv,gotovo,vrsta,izvor_zadatak_id)
+        VALUES ($1,$2,$3,$4,'Kopija dodatnog rada',false,'dodatni',$5),
+          ($6,$2,$3,$7,'Druga kopija dodatnog rada',false,'dodatni',$5)`,
+      [firstCopy,company,site,targetOrder,source,secondCopy,secondTargetOrder]);
+
+      await db.query('UPDATE public.gradiliste_zadaci SET gotovo=true,gotovo_at=now() WHERE id=$1',[source]);
+      assert.equal((await db.query('SELECT count(*)::int count FROM public.gradiliste_zadaci WHERE id = ANY($1::uuid[])',
+        [[firstCopy,secondCopy]])).rows[0].count,0);
+      assert.equal((await db.query('SELECT gotovo FROM public.gradiliste_zadaci WHERE id=$1',[source])).rows[0].gotovo,true);
+      const deletions=(await db.query(`SELECT id,record_id FROM private.resource_deletions
+        WHERE table_name='gradiliste_zadaci' AND record_id=ANY($1::uuid[]) AND NOT active ORDER BY record_id`,
+      [[firstCopy,secondCopy]])).rows;
+      assert.equal(deletions.length,2);
+      for (const deletion of deletions) {
+        assert.equal((await db.query('SELECT private.resource_deletion_allowed($1) allowed',[deletion.id])).rows[0].allowed,true);
+        await db.query('SELECT public.restore_resource_deletion($1)',[deletion.id]);
+      }
+      assert.equal((await db.query('SELECT count(*)::int count FROM public.gradiliste_zadaci WHERE id = ANY($1::uuid[])',
+        [[firstCopy,secondCopy]])).rows[0].count,2,'Recovery may restore copies even though their source is now complete');
+      await assert.rejects(db.query(`INSERT INTO public.gradiliste_zadaci(company_id,gradiliste_id,nalog_id,naziv,izvor_zadatak_id)
+        VALUES ($1,$2,$3,'Zakašnjela kopija',$4)`,[company,site,targetOrder,source]),/izvorni zadatak nije dostupan|već riješen/i);
+      assert.equal((await db.query('SELECT count(*)::int count FROM private.resource_deletions WHERE active')).rows[0].count,0);
+    });
+    await t.test('completing source material removes linked copies and allows bundle recovery', async () => {
+      await db.exec(sqlFile('migrations/20261026074000_material_tool_checkbox_completion.sql'));
+      const company='00000000-0000-0000-0000-000000000001';
+      const site='00000000-0000-0000-0000-000000001711';
+      const sourceOrder='00000000-0000-0000-0000-000000001712';
+      const copyOrder='00000000-0000-0000-0000-000000001713';
+      const nextOrder='00000000-0000-0000-0000-000000001714';
+      const source='00000000-0000-0000-0000-000000001715';
+      const copy='00000000-0000-0000-0000-000000001716';
+      const nextCopy='00000000-0000-0000-0000-000000001717';
+      await db.query("SELECT set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000002',false)");
+      await db.query("INSERT INTO public.gradilista(id,company_id,naziv) VALUES ($1,$2,'Materijal kopiran')",[site,company]);
+      await db.query(`INSERT INTO public.radni_nalozi(id,company_id,broj,naslov,gradiliste_id)
+        VALUES ($1,$4,'RN-MAT-SOURCE','Izvorni nalog',$5),($2,$4,'RN-MAT-COPY','Kopija naloga',$5),
+          ($3,$4,'RN-MAT-NEXT','Sljedeći nalog',$5)`,
+      [sourceOrder,copyOrder,nextOrder,company,site]);
+      await db.query(`INSERT INTO public.radni_nalozi_stavke(id,company_id,gradiliste_id,nalog_id,tip,naziv,gotovo,uzeto,preneseno)
+        VALUES ($1,$2,$3,$4,'materijal','Boja',false,false,false)`,
+      [source,company,site,sourceOrder]);
+      await db.query(`INSERT INTO public.radni_nalozi_stavke(id,company_id,gradiliste_id,nalog_id,tip,naziv,gotovo,uzeto,preneseno,izvor_materijal_id)
+        VALUES ($1,$2,$3,$4,'materijal','Boja',false,false,false,$5),
+          ($6,$2,$3,$7,'materijal','Boja',false,false,false,$1)`,
+      [copy,company,site,copyOrder,source,nextCopy,nextOrder]);
+
+      await db.query('UPDATE public.radni_nalozi_stavke SET uzeto=true WHERE id=$1',[source]);
+      assert.equal((await db.query('SELECT gotovo,uzeto FROM public.radni_nalozi_stavke WHERE id=$1',[source])).rows[0].gotovo,true);
+      assert.equal((await db.query('SELECT count(*)::int count FROM public.radni_nalozi_stavke WHERE id = ANY($1::uuid[])',
+        [[copy,nextCopy]])).rows[0].count,0);
+      const deletion=(await db.query(`SELECT id FROM private.resource_deletions
+        WHERE table_name='radni_nalozi_stavke' AND module='radni_nalozi' AND NOT active
+          AND record_id=ANY($1::uuid[])`,[[copy,nextCopy]])).rows[0];
+      assert.ok(deletion);
+      assert.equal((await db.query('SELECT count(*)::int count FROM private.resource_deletion_rows WHERE deletion_id=$1',
+        [deletion.id])).rows[0].count,2);
+      assert.equal((await db.query('SELECT private.resource_deletion_allowed($1) allowed',
+        [deletion.id])).rows[0].allowed,true);
+      await db.query('SELECT public.restore_resource_deletion($1)',[deletion.id]);
+      assert.equal((await db.query('SELECT count(*)::int count FROM public.radni_nalozi_stavke WHERE id = ANY($1::uuid[])',
+        [[copy,nextCopy]])).rows[0].count,2);
+      assert.equal((await db.query('SELECT gotovo FROM public.radni_nalozi_stavke WHERE id=$1',[source])).rows[0].gotovo,true);
+    });
+    await t.test('completing source tool removes linked copies and allows bundle recovery', async () => {
+      const company='00000000-0000-0000-0000-000000000001';
+      const site='00000000-0000-0000-0000-000000001721';
+      const sourceOrder='00000000-0000-0000-0000-000000001722';
+      const copyOrder='00000000-0000-0000-0000-000000001723';
+      const nextOrder='00000000-0000-0000-0000-000000001724';
+      const source='00000000-0000-0000-0000-000000001725';
+      const copy='00000000-0000-0000-0000-000000001726';
+      const nextCopy='00000000-0000-0000-0000-000000001727';
+      await db.query("SELECT set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000002',false)");
+      await db.query("INSERT INTO public.gradilista(id,company_id,naziv) VALUES ($1,$2,'Alat kopiran')",[site,company]);
+      await db.query(`INSERT INTO public.radni_nalozi(id,company_id,broj,naslov,gradiliste_id)
+        VALUES ($1,$4,'RN-TOOL-SOURCE','Izvorni nalog',$5),($2,$4,'RN-TOOL-COPY','Kopija naloga',$5),
+          ($3,$4,'RN-TOOL-NEXT','Sljedeći nalog',$5)`,
+      [sourceOrder,copyOrder,nextOrder,company,site]);
+      await db.query(`INSERT INTO public.radni_nalozi_stavke(id,company_id,gradiliste_id,nalog_id,tip,naziv,gotovo,uzeto,preneseno)
+        VALUES ($1,$2,$3,$4,'alat','Bušilica',false,false,false)`,
+      [source,company,site,sourceOrder]);
+      await db.query(`INSERT INTO public.radni_nalozi_stavke(id,company_id,gradiliste_id,nalog_id,tip,naziv,gotovo,uzeto,preneseno,izvor_alat_id)
+        VALUES ($1,$2,$3,$4,'alat','Bušilica',false,false,false,$5),
+          ($6,$2,$3,$7,'alat','Bušilica',false,false,false,$1)`,
+      [copy,company,site,copyOrder,source,nextCopy,nextOrder]);
+
+      await db.query('UPDATE public.radni_nalozi_stavke SET gotovo=true WHERE id=$1',[source]);
+      assert.equal((await db.query('SELECT gotovo,uzeto FROM public.radni_nalozi_stavke WHERE id=$1',[source])).rows[0].gotovo,true);
+      assert.equal((await db.query('SELECT count(*)::int count FROM public.radni_nalozi_stavke WHERE id = ANY($1::uuid[])',
+        [[copy,nextCopy]])).rows[0].count,0);
+      const deletion=(await db.query(`SELECT id FROM private.resource_deletions
+        WHERE table_name='radni_nalozi_stavke' AND module='radni_nalozi' AND NOT active
+          AND record_id=ANY($1::uuid[])`,[[copy,nextCopy]])).rows[0];
+      assert.ok(deletion);
+      assert.equal((await db.query('SELECT count(*)::int count FROM private.resource_deletion_rows WHERE deletion_id=$1',
+        [deletion.id])).rows[0].count,2);
+      assert.equal((await db.query('SELECT private.resource_deletion_allowed($1) allowed',
+        [deletion.id])).rows[0].allowed,true);
+      await db.query('SELECT public.restore_resource_deletion($1)',[deletion.id]);
+      assert.equal((await db.query('SELECT count(*)::int count FROM public.radni_nalozi_stavke WHERE id = ANY($1::uuid[])',
+        [[copy,nextCopy]])).rows[0].count,2);
+      assert.equal((await db.query('SELECT gotovo FROM public.radni_nalozi_stavke WHERE id=$1',[source])).rows[0].gotovo,true);
+    });
     await t.test('order header history restores title description priority and deadline with exact audit and latest-first conflict checks', async () => {
       await db.exec(`ALTER TABLE public.radni_nalozi ADD COLUMN opis text,ADD COLUMN prioritet text DEFAULT 'srednji',
         ADD COLUMN rok date,ADD COLUMN updated_at timestamptz DEFAULT now()`);

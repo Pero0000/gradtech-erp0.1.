@@ -22,7 +22,7 @@ export function PozoviKorisnika({ companyId, allowAdmin = false, onInvited }: {
     setError('');
     try {
       await manageCompany({ action: 'invite', company_id: companyId, email, is_admin: allowAdmin && admin });
-      setMessage(`Pozivnica je poslana na ${email}.`);
+      setMessage(`Pozivnica je poslana na ${email}. Korisnik treba otvoriti poveznicu iz e-maila i dvaput upisati novu lozinku prije prve prijave.`);
       setEmail('');
       onInvited?.();
     } catch (reason) {

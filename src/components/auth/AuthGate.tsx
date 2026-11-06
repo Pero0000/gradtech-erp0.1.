@@ -3,6 +3,21 @@ import { Building2, LogOut } from 'lucide-react';
 import { useAuth } from '@/auth/useAuth';
 import { supabase } from '@/lib/supabase';
 
+function authErrorText(reason: unknown, fallback: string) {
+  if (!(reason instanceof Error)) return fallback;
+  const code = 'code' in reason ? reason.code : null;
+  if (code === 'invalid_credentials' || /invalid login credentials/i.test(reason.message)) {
+    return 'E-mail ili lozinka nisu ispravni. Ako se prijavljujete prvi put, najprije otvorite pozivnicu iz e-maila i postavite lozinku. Za postojeći račun koristite „Zaboravljena lozinka?”.';
+  }
+  if (code === 'email_not_confirmed' || /email not confirmed/i.test(reason.message)) {
+    return 'E-mail još nije potvrđen. Otvorite poveznicu iz pozivnice i dovršite postavljanje računa.';
+  }
+  if (code === 'otp_expired' || /expired|invalid.*token/i.test(reason.message)) {
+    return 'Poveznica nije valjana ili je istekla. Za postojeći račun zatražite novu poveznicu putem „Zaboravljena lozinka?”, a za prvu prijavu obratite se administratoru.';
+  }
+  return reason.message;
+}
+
 function PasswordRecoveryForm({ onSave }: { onSave: (password: string) => Promise<void> }) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -11,7 +26,12 @@ function PasswordRecoveryForm({ onSave }: { onSave: (password: string) => Promis
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (busy) return;
     setError(null);
+    if (password.length < 8) {
+      setError('Lozinka mora sadržavati najmanje 8 znakova.');
+      return;
+    }
     if (password !== confirmPassword) {
       setError('Lozinke se ne podudaraju.');
       return;
@@ -20,7 +40,7 @@ function PasswordRecoveryForm({ onSave }: { onSave: (password: string) => Promis
     try {
       await onSave(password);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Lozinku nije moguće promijeniti.');
+      setError(authErrorText(reason, 'Lozinku nije moguće promijeniti.'));
     } finally {
       setBusy(false);
     }
@@ -30,6 +50,7 @@ function PasswordRecoveryForm({ onSave }: { onSave: (password: string) => Promis
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-8">
       <form onSubmit={submit} className="min-w-0 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-8">
         <h1 className="text-xl font-bold text-slate-900">Postavljanje nove lozinke</h1>
+        <p className="mt-2 text-sm text-slate-600">Odaberite lozinku od najmanje 8 znakova i ponovite je radi provjere. Nakon spremanja koristite svoj e-mail i ovu lozinku za prijavu.</p>
         <label className="mt-5 block text-sm font-medium text-slate-700">
           Nova lozinka
           <input type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100" />
@@ -55,6 +76,7 @@ function AuthForm() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (busy) return;
     setBusy(true);
     setMessage(null);
     setError(null);
@@ -70,7 +92,7 @@ function AuthForm() {
         setMessage('Ako račun postoji, poslana je poveznica za postavljanje nove lozinke.');
       }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Prijava nije uspjela.');
+      setError(authErrorText(reason, 'Prijava nije uspjela.'));
     } finally {
       setBusy(false);
     }
@@ -84,6 +106,13 @@ function AuthForm() {
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-600 text-white"><Building2 className="h-6 w-6" /></div>
           <div><h1 className="text-xl font-bold text-slate-900">GradTech</h1><p className="text-sm text-slate-500">{title}</p></div>
         </div>
+        {mode === 'login' && (
+          <div className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900">
+            <p className="font-semibold">Prvi put koristite aplikaciju?</p>
+            <p className="mt-1">Administrator vam mora poslati pozivnicu. Otvorite poveznicu iz e-maila i dvaput upišite novu lozinku. Sam upis e-maila i lozinke na ovom obrascu ne otvara račun.</p>
+            <p className="mt-1">Ako pozivnica nije stigla, provjerite neželjenu poštu i javite se administratoru.</p>
+          </div>
+        )}
         <label className="mb-4 block text-sm font-medium text-slate-700">
           E-mail
           <input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100" />

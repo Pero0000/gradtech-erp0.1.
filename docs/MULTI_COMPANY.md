@@ -93,6 +93,71 @@ Ne pokretati stare migracije ponovno nakon nove sheme.
    povezuje s njihovim zapisima u modulu **Radnici**. Novi obični korisnik nema
    prava na module dok mu ih administrator ne dodijeli.
 
+### Prva prijava djelatnika
+
+1. Administrator šalje pozivnicu kroz **Korisnici i prava → Pošalji pozivnicu**.
+2. Djelatnik otvara poveznicu iz primljenog e-maila (provjeriti i neželjenu poštu).
+3. U aplikaciji postavlja lozinku od najmanje 8 znakova i ponavlja je radi provjere.
+4. Za sljedeće prijave koristi pozvani e-mail i spremljenu lozinku.
+
+Običan obrazac prijave ne registrira korisnika. Pogreška „Invalid login
+credentials” znači neispravne pristupne podatke, a ne problem s odobrenjem ili
+pravima modula. Klijent prikazuje hrvatsku poruku s uputama za prvi pristup i
+oporavak lozinke, bez otkrivanja postoji li uneseni račun. Za postojeći račun
+zaboravljena lozinka šalje novu poveznicu; taj postupak ne stvara novi račun.
+
+### GradTech pozivnica i Gmail pošiljatelj
+
+Pripremljen je [HTML predložak pozivnice](../supabase/templates/invite-user.html)
+s kontaktom `ivan.pericak@gmail.com`. Datoteka sama ne mijenja Supabase postavke.
+U Supabase Dashboardu otvoriti **Authentication → Email Templates → Invite user**
+(u novijem sučelju pod **Authentication → Emails**), postaviti predmet
+**Dobro došli u GradTech – prihvatite pozivnicu**, zalijepiti cijeli HTML i spremiti.
+Predložak sadrži hrvatski pregledni tekst poruke, tamno zaglavlje GradTech,
+plavi gumb i odvojene upute za prvi pristup. Promjena SMTP pošiljatelja ne
+mijenja sadržaj e-maila: ažurirani HTML treba posebno spremiti u **Invite user**.
+Zadržati `{{ .ConfirmationURL }}`: Supabase njime generira službenu poveznicu
+pozivnice. Ne zamijeniti ga običnim URL-om aplikacije.
+
+Za slanje s Gmail računa:
+
+1. Na Google računu `ivan.pericak@gmail.com` uključiti potvrdu u dva koraka.
+2. U [Google App Passwords](https://myaccount.google.com/apppasswords) stvoriti
+   zasebnu lozinku za aplikaciju, naziva npr. **GradTech Supabase**. Ako opcija
+   nije dostupna, račun ili njegova sigurnosna pravila možda je ne podržavaju;
+   koristiti drugog SMTP pružatelja, ne isključivati zaštitu računa.
+3. U Supabase **Authentication → SMTP Settings** uključiti custom SMTP:
+
+   | Polje | Vrijednost |
+   |---|---|
+   | Sender email | `ivan.pericak@gmail.com` |
+   | Sender name | `GradTech` |
+   | Host | `smtp.gmail.com` |
+   | Port | `587` (STARTTLS) |
+   | Username | `ivan.pericak@gmail.com` |
+   | Password | Googleova lozinka za aplikaciju |
+
+   Lozinku upisati samo u zaštićene SMTP postavke Supabase Dashboarda.
+   Ne koristiti glavnu Google lozinku i ne spremati vjerodajnice u repozitorij,
+   `.env`, SQL migraciju ili chat. Promjena glavne Google lozinke poništava
+   lozinke za aplikacije pa treba ažurirati i SMTP postavke.
+4. Provjeriti **Authentication → URL Configuration**: Site URL i dopuštene
+   Redirect URLs moraju odgovarati stvarnoj aplikaciji; `APP_URL` u Supabase
+   Secrets mora biti ispravno postavljen za postojeću funkciju pozivnica.
+5. Poslati pozivnicu na novu testnu adresu preko **Korisnici i prava**. Provjeriti
+   pošiljatelja, izgled poruke, otvaranje poveznice, dvostruki unos lozinke i
+   naknadnu prijavu. Zasebno provjeriti **Zaboravljena lozinka?**.
+
+SMTP postavke vrijede za sve Supabase Auth poruke (uključujući oporavak lozinke),
+a ovaj HTML samo za pozivnice. Ne mijenjaju slanje push obavijesti.
+Gmail je privremeno rješenje za manji broj poruka, s Googleovim i Supabaseovim
+ograničenjima slanja; za veći obujam koristiti namjenski transakcijski SMTP.
+Odgovori na pozivnicu stižu u navedeni Gmail sandučić. Lozinka za aplikaciju
+ne mijenja uobičajenu prijavu u Gmail.
+
+Izvori: [Supabase custom SMTP](https://supabase.com/docs/guides/auth/auth-smtp)
+i [Googleove lozinke za aplikacije](https://support.google.com/accounts/answer/185833).
+
 Postojeći račun ne može se pozivnicom premjestiti u drugu tvrtku. Ista e-mail
 adresa koristi jedan račun u jednoj tvrtki. Za ponovnu dostavu već kreirane Auth
 pozivnice koristiti Supabase Auth postupak ponovnog slanja; ne brisati korisnika

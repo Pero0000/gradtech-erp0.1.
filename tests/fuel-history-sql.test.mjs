@@ -3397,6 +3397,211 @@ test('recovery SQL compiles and passes transactional, permission and retention c
         [[copy,nextCopy]])).rows[0].count,2);
       assert.equal((await db.query('SELECT gotovo FROM public.radni_nalozi_stavke WHERE id=$1',[source])).rows[0].gotovo,true);
     });
+    await t.test('linked task, additional work, material and tool completion synchronizes in both directions without deleting copies', async () => {
+      await db.exec(sqlFile('migrations/20261110260000_nalog_stavke_povijest_izmjena.sql'));
+      await db.exec(sqlFile('migrations/20261110410000_obostrano_rjesavanje_kopiranih_stavki.sql'));
+      const company='00000000-0000-0000-0000-000000000001';
+      const actor='00000000-0000-0000-0000-000000000002';
+      const mobileActor='00000000-0000-0000-0000-000000000006';
+      const uuid=(n)=>`00000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
+      await db.query("SELECT set_config('request.jwt.claim.sub',$1,false)",[actor]);
+      for (const [kindIndex,kind] of ['zadatak','dodatni','materijal','alat'].entries()) {
+        const base=1800+kindIndex*30;
+        const site=uuid(base);
+        const orders=Array.from({length:6},(_,i)=>uuid(base+1+i));
+        const ids=Array.from({length:7},(_,i)=>uuid(base+10+i));
+        const tasks=['zadatak','dodatni'].includes(kind);
+        const table=tasks?'gradiliste_zadaci':'radni_nalozi_stavke';
+        const sourceField=tasks?'izvor_zadatak_id':kind==='materijal'?'izvor_materijal_id':'izvor_alat_id';
+        await db.query('INSERT INTO public.gradilista(id,company_id,naziv) VALUES ($1,$2,$3)',[site,company,`Obostrano ${kind}`]);
+        for (const [i,order] of orders.entries()) {
+          await db.query(`INSERT INTO public.radni_nalozi(id,company_id,broj,naslov,gradiliste_id,status)
+            VALUES ($1,$2,$3,'Povezani nalog',$4,'otvoren')`,[order,company,`RN-SYNC-${kind}-${i}`,site]);
+        }
+        // Root -> first copy -> closed bridge -> deep copy; sibling and cancelled copy -> root.
+        const parents=[null,ids[0],ids[0],ids[4],ids[1],ids[0],null];
+        const orderIndexes=[0,1,2,3,4,5,0];
+        for (const i of [0,1,2,4,3,5,6]) {
+          const id=ids[i];
+          await db.query(tasks
+            ? `INSERT INTO public.${table}(id,company_id,gradiliste_id,nalog_id,naziv,gotovo,vrsta,rok,${sourceField})
+                VALUES ($1,$2,$3,$4,$5,false,$6,'2026-11-20',$7)`
+            : `INSERT INTO public.${table}(id,company_id,gradiliste_id,nalog_id,naziv,gotovo,uzeto,preneseno,tip,${sourceField})
+                VALUES ($1,$2,$3,$4,$5,false,false,false,$6,$7)`,
+          [id,company,site,orders[orderIndexes[i]],i===6?'Isti naziv':`Stavka ${i}`,kind,parents[i]]);
+        }
+        await db.query("UPDATE public.radni_nalozi SET status='zavrsen' WHERE id=$1",[orders[4]]);
+        await db.query("UPDATE public.radni_nalozi SET status='otkazan' WHERE id=$1",[orders[5]]);
+        const snapshots=async()=>(await db.query(`SELECT to_jsonb(row) data FROM public.${table} row
+          WHERE id=ANY($1::uuid[]) ORDER BY id`,[ids])).rows.map(row=>row.data);
+        const initial=await snapshots();
+        const active=[ids[0],ids[1],ids[2],ids[3]];
+        const assertStatus=async(completed,baseline=initial)=>{
+          const rows=await snapshots();
+          assert.equal(rows.length,7,'Every record remains on its own order');
+          for (const row of rows) {
+            const expected=active.includes(row.id)?completed:false;
+            assert.equal(row.gotovo,expected,`${kind} ${row.id}`);
+            if (tasks) {
+              assert.equal(row.gotovo_at!==null,expected);
+              const deadlines=(await db.query('SELECT status FROM public.rokovi WHERE zadatak_id=$1',[row.id])).rows;
+              assert.equal(deadlines.length,1);
+              assert.equal(deadlines[0].status,expected?'zavrsen':'otvoren');
+            } else assert.equal(row.uzeto,expected);
+            const before=baseline.find(item=>item.id===row.id);
+            const withoutStatus=(value)=>Object.fromEntries(Object.entries(value)
+              .filter(([key])=>!['gotovo','gotovo_at','uzeto','updated_at'].includes(key)));
+            assert.deepEqual(withoutStatus(row),withoutStatus(before),'Names, links, orders and other data stay independent');
+          }
+          for (const untouched of [ids[4],ids[5],ids[6]]) {
+            assert.deepEqual(rows.find(row=>row.id===untouched),baseline.find(row=>row.id===untouched),
+              'Finished/cancelled orders and unrelated records must remain exactly unchanged');
+          }
+        };
+        const change=async(id,value)=>db.query(tasks
+          ? `UPDATE public.${table} SET gotovo=$2,gotovo_at=CASE WHEN $2 THEN now() END WHERE id=$1`
+          : `UPDATE public.${table} SET ${kind==='materijal'?'uzeto':'gotovo'}=$2 WHERE id=$1`,[id,value]);
+        await change(ids[3],true);
+        await assertStatus(true);
+        if (tasks) {
+          const history=(await db.query('SELECT * FROM public.get_task_change_history($1)',[ids[3]])).rows[0];
+          assert.equal(history.can_restore,true,'Initiating task history remains recoverable');
+          await db.query('SELECT public.restore_task_change($1)',[history.id]);
+        } else {
+          const history=(await db.query('SELECT * FROM public.get_work_order_item_change_history($1)',[orders[3]])).rows[0];
+          assert.equal(history.can_restore,true);
+          await db.query('SELECT public.restore_work_order_item_change($1)',[history.id]);
+        }
+        await assertStatus(false);
+        await change(ids[0],true);
+        await assertStatus(true);
+        await change(ids[2],false);
+        await assertStatus(false);
+        for (const closed of [ids[4],ids[5]]) {
+          await assert.rejects(change(closed,true),e=>e.code==='22023' && /završenog ili otkazanog naloga/.test(e.message));
+        }
+        await assertStatus(false);
+        if (!tasks) {
+          await db.exec('BEGIN');
+          try {
+            await db.query(`UPDATE public.${table} SET ${sourceField}=NULL,izvor_id=$2 WHERE id=$1`,[ids[1],ids[0]]);
+            const legacySnapshot=await snapshots();
+            await change(ids[3],true);
+            await assertStatus(true,legacySnapshot);
+            await change(ids[0],false);
+            await assertStatus(false,legacySnapshot);
+          } finally {
+            await db.exec('ROLLBACK');
+          }
+        }
+        await db.exec('BEGIN');
+        await change(ids[1],true);
+        await change(ids[2],false);
+        await db.exec('COMMIT');
+        await assertStatus(false);
+
+        // Even a corrupt legacy tenant link must not spread completion across companies.
+        await db.exec('BEGIN');
+        try {
+          const foreign=uuid(base+20);
+          await db.exec(`ALTER TABLE public.${table} DISABLE TRIGGER USER`);
+          await db.query(tasks
+            ? `INSERT INTO public.${table}(id,company_id,gradiliste_id,naziv,gotovo,vrsta,${sourceField})
+                VALUES ($1,'00000000-0000-0000-0000-000000000005',$2,'Druga tvrtka',false,$3,$4)`
+            : `INSERT INTO public.${table}(id,company_id,gradiliste_id,naziv,gotovo,uzeto,tip,${sourceField})
+                VALUES ($1,'00000000-0000-0000-0000-000000000005',$2,'Druga tvrtka',false,false,$3,$4)`,
+          [foreign,site,kind,ids[0]]);
+          await db.exec(`ALTER TABLE public.${table} ENABLE TRIGGER USER`);
+          const before=(await db.query(`SELECT to_jsonb(row) data FROM public.${table} row WHERE id=$1`,[foreign])).rows[0].data;
+          await change(ids[0],true);
+          await assertStatus(true);
+          assert.deepEqual((await db.query(`SELECT to_jsonb(row) data FROM public.${table} row WHERE id=$1`,[foreign])).rows[0].data,before);
+        } finally {
+          await db.exec('ROLLBACK');
+        }
+        await assertStatus(false);
+
+        // Type/site changes must not make a lineage link cross feature or site boundaries.
+        for (const assignment of [
+          tasks ? `vrsta='${kind==='zadatak'?'dodatni':'zadatak'}'` : `tip='${kind==='materijal'?'alat':'materijal'}'`,
+          `gradiliste_id=NULL`,
+        ]) {
+          await db.exec('BEGIN');
+          try {
+            await db.query(`UPDATE public.${table} SET ${assignment} WHERE id=$1`,[ids[1]]);
+            const family=(await db.query('SELECT id FROM private.copied_completion_family($1,$2) ORDER BY id',
+              [table,ids[0]])).rows.map(row=>row.id);
+            assert.deepEqual(family,[ids[0],ids[2],ids[5]]);
+            await change(ids[0],true);
+            const rows=await snapshots();
+            assert.equal(rows.find(row=>row.id===ids[2]).gotovo,true);
+            for (const id of [ids[1],ids[3],ids[4],ids[5],ids[6]]) {
+              assert.equal(rows.find(row=>row.id===id).gotovo,false,'Disconnected branches must not be modified');
+            }
+          } finally {
+            await db.exec('ROLLBACK');
+          }
+          await assertStatus(false);
+        }
+        await db.exec('BEGIN');
+        try {
+          await db.exec(`CREATE FUNCTION private.test_refuse_copied_completion() RETURNS trigger
+            LANGUAGE plpgsql AS $$ BEGIN IF NEW.id='${ids[2]}' THEN RETURN NULL; END IF; RETURN NEW; END; $$;
+            CREATE TRIGGER aaa_test_refuse_copied_completion BEFORE UPDATE ON public.${table}
+              FOR EACH ROW EXECUTE FUNCTION private.test_refuse_copied_completion();`);
+          await assert.rejects(change(ids[0],true),e=>e.code==='40001' && /nisu usklađeni/.test(e.message),
+            'A silently refused linked update must fail the whole transaction explicitly');
+        } finally {
+          await db.exec('ROLLBACK');
+        }
+        await assertStatus(false);
+
+        // A permitted mobile edit propagates through a definer trigger, but cannot grant root-row access.
+        await db.exec('BEGIN');
+        try {
+          await db.query('UPDATE public.app_profiles SET company_id=$1,is_admin=false WHERE id=$2',[company,mobileActor]);
+          await db.query('UPDATE public.app_user_permissions SET can_edit=false,can_view=false WHERE user_id=$1',[mobileActor]);
+          await db.exec(`ALTER TABLE public.${table} ENABLE ROW LEVEL SECURITY;
+            GRANT SELECT,UPDATE ON public.${table} TO authenticated;
+            CREATE POLICY test_sync_allow ON public.${table} FOR ALL TO authenticated
+              USING (id='${ids[1]}' AND company_id=public.app_current_company_id())
+              WITH CHECK (id='${ids[1]}' AND company_id=public.app_current_company_id());
+            CREATE POLICY test_sync_read ON public.${table} AS RESTRICTIVE FOR SELECT TO authenticated
+              USING (id='${ids[1]}' AND company_id=public.app_current_company_id());
+            CREATE POLICY test_sync_write ON public.${table} AS RESTRICTIVE FOR UPDATE TO authenticated
+              USING (id='${ids[1]}' AND company_id=public.app_current_company_id())
+              WITH CHECK (id='${ids[1]}' AND company_id=public.app_current_company_id());
+            SELECT set_config('request.jwt.claim.sub','${mobileActor}',true);
+            SET LOCAL ROLE authenticated;`);
+          const edited=await db.query(`UPDATE public.${table} SET gotovo=true${tasks?',gotovo_at=now()':''} WHERE id=$1 RETURNING id`,[ids[1]]);
+          assert.equal(edited.rows.length,1);
+          assert.equal((await db.query(`UPDATE public.${table} SET gotovo=false WHERE id=$1 RETURNING id`,[ids[0]])).rows.length,0);
+          await db.exec('SAVEPOINT private_access');
+          await assert.rejects(db.query('SELECT private.copied_completion_family($1,$2)',[table,ids[0]]),e=>e.code==='42501');
+          await db.exec('ROLLBACK TO SAVEPOINT private_access');
+          await db.exec('RESET ROLE');
+          await assertStatus(true);
+        } finally {
+          await db.exec('ROLLBACK');
+        }
+        await assertStatus(false);
+        await db.query("SELECT set_config('request.jwt.claim.sub',$1,false)",[actor]);
+
+        // A cycle terminates through UNION, and remains bidirectional.
+        await db.query(`UPDATE public.${table} SET ${sourceField}=$2 WHERE id=$1`,[ids[0],ids[3]]);
+        const cyclicInitial=await snapshots();
+        await change(ids[1],true);
+        assert.equal((await db.query(`SELECT count(*)::int count FROM public.${table}
+          WHERE id=ANY($1::uuid[]) AND gotovo`,[active])).rows[0].count,4);
+        await change(ids[3],false);
+        assert.deepEqual(await snapshots(),cyclicInitial,'Reopening a cycle restores flags and leaves every link intact');
+        assert.equal((await db.query(`SELECT count(*)::int count FROM private.resource_deletions
+          WHERE table_name=$1 AND record_id=ANY($2::uuid[])`,[table,ids])).rows[0].count,0,
+        'Completion creates no deletion packages');
+      }
+      assert.equal((await db.query('SELECT count(*)::int count FROM private.copied_completion_context')).rows[0].count,0);
+      assert.equal((await db.query('SELECT count(*)::int count FROM private.resource_deletions WHERE active')).rows[0].count,0);
+    });
     await t.test('order header history restores title description priority and deadline with exact audit and latest-first conflict checks', async () => {
       await db.exec(`ALTER TABLE public.radni_nalozi ADD COLUMN opis text,ADD COLUMN prioritet text DEFAULT 'srednji',
         ADD COLUMN rok date,ADD COLUMN updated_at timestamptz DEFAULT now()`);

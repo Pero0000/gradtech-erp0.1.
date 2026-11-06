@@ -187,7 +187,7 @@ function AuditLog({ entries, onRestoreStatusChange, restoringStatusId }: {
   );
 }
 
-function ResolvedStavkeHistory({ items, onToggle }: { items: NalogStavka[]; onToggle: (item: NalogStavka) => void }) {
+function ResolvedStavkeHistory({ items, onToggle, disabled }: { items: NalogStavka[]; onToggle: (item: NalogStavka) => void; disabled: boolean }) {
   const [showHistory, setShowHistory] = useState(false);
   return (
     <div className="mt-2">
@@ -203,7 +203,7 @@ function ResolvedStavkeHistory({ items, onToggle }: { items: NalogStavka[]; onTo
         {items.length === 0 && <p className="text-xs text-slate-400">Povijest je prazna.</p>}
         {items.map((item) => (
           <label key={item.id} className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm">
-            <input type="checkbox" checked onChange={() => onToggle(item)} className="h-4 w-4 rounded border-slate-300 accent-emerald-600" />
+            <input type="checkbox" checked onChange={() => onToggle(item)} disabled={disabled} className="h-4 w-4 rounded border-slate-300 accent-emerald-600" />
             <span className="flex-1 text-emerald-800 line-through">{item.naziv}</span>
             <span className="text-xs text-emerald-700">Riješeno</span>
           </label>
@@ -213,7 +213,12 @@ function ResolvedStavkeHistory({ items, onToggle }: { items: NalogStavka[]; onTo
   );
 }
 
-function CompletedAdditionalWorkHistory({ items }: { items: GradilisteZadatak[] }) {
+function CompletedTaskHistory({ items, vrsta, onToggle, disabled }: {
+  items: GradilisteZadatak[];
+  vrsta: ZadatakVrsta;
+  onToggle: (item: GradilisteZadatak) => void;
+  disabled: boolean;
+}) {
   const [showHistory, setShowHistory] = useState(false);
   return (
     <div className="mt-2">
@@ -223,21 +228,22 @@ function CompletedAdditionalWorkHistory({ items }: { items: GradilisteZadatak[] 
         onClick={() => setShowHistory((open) => !open)}
         className="mb-2 border-b-2 border-transparent px-2.5 py-2 text-xs font-semibold text-slate-600 hover:border-sky-600 hover:text-sky-800"
       >
-        {showHistory ? 'Sakrij povijest' : `Povijest dodatnih radova (${items.length})`}
+        {showHistory ? 'Sakrij povijest' : `${vrsta === 'dodatni' ? 'Povijest dodatnih radova' : 'Povijest zadataka'} (${items.length})`}
       </button>
       {showHistory && (
         <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2">
-          {items.length === 0 && <p className="text-xs text-slate-400">Još nema završenih dodatnih radova.</p>}
+          {items.length === 0 && <p className="text-xs text-slate-400">{vrsta === 'dodatni' ? 'Još nema završenih dodatnih radova.' : 'Još nema završenih zadataka.'}</p>}
           {items.map((item) => {
             const completedAt = item.gotovo_at ? new Date(item.gotovo_at) : null;
             const completedAtLabel = completedAt && !Number.isNaN(completedAt.getTime())
               ? formatHrDateTime(completedAt)
               : null;
             return (
-              <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
-                <span className="font-medium text-emerald-800">{item.naziv}</span>
+              <label key={item.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm">
+                <input type="checkbox" checked onChange={() => onToggle(item)} disabled={disabled} className="h-4 w-4 rounded border-slate-300 accent-emerald-600" />
+                <span className="flex-1 font-medium text-emerald-800">{item.naziv}</span>
                 <span className="text-xs text-emerald-700">{completedAtLabel ? `Završeno ${completedAtLabel}` : 'Završeno'}</span>
-              </div>
+              </label>
             );
           })}
         </div>
@@ -261,6 +267,7 @@ function Checklist({
   onHoursChange,
   onHoursSave,
   onToggle,
+  completionDisabled,
   onRemove,
 }: {
   items: NalogStavka[];
@@ -272,6 +279,7 @@ function Checklist({
   onHoursChange?: (s: NalogStavka, value: string) => void;
   onHoursSave?: (s: NalogStavka) => void;
   onToggle: (s: NalogStavka) => void;
+  completionDisabled: boolean;
   onRemove: (id: string) => void;
 }) {
   const [text, setText] = useState('');
@@ -286,7 +294,7 @@ function Checklist({
       <div className="space-y-1.5">
         {items.map((s) => (
           <div key={s.id} className={`flex items-center gap-3 rounded-lg border px-3 py-1.5 text-sm ${s.gotovo ? 'border-emerald-200 bg-emerald-50' : 'border-slate-100'}`}>
-            <input type="checkbox" checked={s.gotovo} onChange={() => onToggle(s)} className="h-4 w-4 rounded border-slate-300" />
+            <input type="checkbox" checked={s.gotovo} onChange={() => onToggle(s)} disabled={completionDisabled} className="h-4 w-4 rounded border-slate-300" />
             <span className={`flex-1 ${s.gotovo ? 'text-emerald-800 line-through' : 'text-slate-800'}`}>{s.naziv}</span>
             {onHoursChange && (
               <label className="flex items-center gap-1 text-xs text-slate-500">
@@ -429,6 +437,8 @@ export function NalogIzvrsenje({
   const docRef = useRef<HTMLInputElement>(null);
   const [vremena, setVremena] = useState<NalogRadnikVrijeme[]>([]);
   const [zadaci, setZadaci] = useState<GradilisteZadatak[]>([]);
+  const [savingCompletion, setSavingCompletion] = useState(false);
+  const completionDisabled = savingCompletion || zavrsen || nalog.status === 'zavrsen' || nalog.status === 'otkazan';
   const [newZadatak, setNewZadatak] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
   const [foto, setFoto] = useState<NalogFoto[]>([]);
   const [selectedFotoId, setSelectedFotoId] = useState<string | null>(null);
@@ -739,8 +749,12 @@ export function NalogIzvrsenje({
   };
 
   const toggleZadatak = (z: GradilisteZadatak) => {
-    setZadaci((prev) => prev.map((x) => (x.id === z.id ? { ...x, gotovo: !z.gotovo } : x)));
-    void guard(() => updateGradilisteZadatak(z.id, { gotovo: !z.gotovo }), 'Greška pri spremanju zadatka.');
+    if (completionDisabled) return;
+    setSavingCompletion(true);
+    void guard(async () => {
+      await updateGradilisteZadatak(z.id, { gotovo: !z.gotovo });
+      setZadaci(await fetchNalogZadaci(nalog.id));
+    }, 'Greška pri spremanju zadatka.').finally(() => setSavingCompletion(false));
   };
 
   const removeZadatak = (id: string) =>
@@ -802,9 +816,13 @@ export function NalogIzvrsenje({
     void guard(() => updateNalogStavka(s.id, { sati: current?.sati ?? null }), 'Greška pri spremanju radnih sati stroja.');
   };
   const toggleStavka = (s: NalogStavka) => {
+    if (completionDisabled) return;
     const rijeseno = Boolean(s.gotovo || s.uzeto);
-    setStavke((prev) => prev.map((x) => (x.id === s.id ? { ...x, gotovo: !rijeseno, uzeto: !rijeseno } : x)));
-    void guard(() => updateNalogStavka(s.id, { gotovo: !rijeseno }), 'Greška pri spremanju stavke.');
+    setSavingCompletion(true);
+    void guard(async () => {
+      await updateNalogStavka(s.id, { gotovo: !rijeseno });
+      setStavke(await fetchNalogStavke(nalog.id));
+    }, 'Greška pri spremanju stavke.').finally(() => setSavingCompletion(false));
   };
   const removeStavka = (id: string) =>
     void guard(async () => {
@@ -926,9 +944,7 @@ export function NalogIzvrsenje({
       </div>
       {([['zadatak', 'Radni zadaci', 'Nema zadataka na ovom nalogu.', 'Novi radni zadatak'], ['dodatni', 'Dodatni radovi', 'Nema dodatnih radova na ovom nalogu.', 'Novi dodatni rad']] as const).map(([vrsta, naslov, prazno, placeholder]) => {
         const lista = zadaci.filter((z) => !z.gotovo && zadatakVrsta(z) === vrsta);
-        const zavrseniDodatniRadovi = vrsta === 'dodatni'
-          ? zadaci.filter((z) => z.gotovo && zadatakVrsta(z) === 'dodatni')
-          : [];
+        const zavrseniZadaci = zadaci.filter((z) => z.gotovo && zadatakVrsta(z) === vrsta);
         return (
       <div key={vrsta} className={`${hideZadaci ? 'hidden' : ''} ${modulePanelCls}`}>
         <SectionTitle icon={<ListChecks className="h-4 w-4" />}>
@@ -937,7 +953,7 @@ export function NalogIzvrsenje({
         <div className="space-y-1.5">
           {lista.map((z) => (
             <div key={z.id} className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-sm ${z.gotovo ? 'border-emerald-200 bg-emerald-50' : 'border-slate-100'}`}>
-              <input type="checkbox" checked={z.gotovo} onChange={() => toggleZadatak(z)} className="h-4 w-4 rounded border-slate-300" />
+              <input type="checkbox" checked={z.gotovo} onChange={() => toggleZadatak(z)} disabled={completionDisabled} className="h-4 w-4 rounded border-slate-300" />
               <span className={`flex-1 ${z.gotovo ? 'text-emerald-800 line-through' : 'text-slate-800'}`}>{z.naziv}</span>
               <button onClick={() => removeZadatak(z.id)} className="text-slate-300 hover:text-red-600" aria-label="Obriši">
                 <Trash2 className="h-3.5 w-3.5" />
@@ -946,7 +962,7 @@ export function NalogIzvrsenje({
           ))}
           {lista.length === 0 && <p className="text-xs text-slate-400">{prazno}</p>}
         </div>
-        {vrsta === 'dodatni' && <CompletedAdditionalWorkHistory items={zavrseniDodatniRadovi} />}
+        <CompletedTaskHistory items={zavrseniZadaci} vrsta={vrsta} onToggle={toggleZadatak} disabled={completionDisabled} />
         <div className="mt-2 flex gap-2">
           <input
             value={newZadatak[vrsta]}
@@ -1068,11 +1084,13 @@ export function NalogIzvrsenje({
             placeholder="npr. boja bijela 15 l"
             onAdd={(n) => addStavka('materijal', n)}
             onToggle={toggleStavka}
+            completionDisabled={completionDisabled}
             onRemove={removeStavka}
           />
           <ResolvedStavkeHistory
             items={stavke.filter((s) => s.tip === 'materijal' && (s.gotovo || s.uzeto))}
             onToggle={toggleStavka}
+            disabled={completionDisabled}
           />
         </div>
         <div className={visualSections ? 'rounded-lg bg-slate-50 p-3' : undefined}>
@@ -1086,11 +1104,13 @@ export function NalogIzvrsenje({
             equipment={alati}
             onAddEquipment={addAlatIzPopisa}
             onToggle={toggleStavka}
+            completionDisabled={completionDisabled}
             onRemove={removeStavka}
           />
           <ResolvedStavkeHistory
             items={stavke.filter((s) => s.tip === 'alat' && (s.gotovo || s.uzeto))}
             onToggle={toggleStavka}
+            disabled={completionDisabled}
           />
         </div>
         <div className={visualSections ? 'rounded-lg bg-slate-50 p-3' : undefined}>
@@ -1106,6 +1126,7 @@ export function NalogIzvrsenje({
             onHoursChange={changeSati}
             onHoursSave={saveSati}
             onToggle={toggleStavka}
+            completionDisabled={completionDisabled}
             onRemove={removeStavka}
           />
         </div>

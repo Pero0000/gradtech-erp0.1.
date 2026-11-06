@@ -572,6 +572,52 @@ U modulu **Rekapitulacija** tab **Stvarni troškovi i prihodi** prikazuje popis 
 
 Filtri obuhvaćaju pretragu, višestruki odabir gradilišta, status, regiju, investitora prema objektu, objekt, voditelja, razdoblje, kategoriju troška, status fakture, financijski rezultat, prisutnost evidencije i raspone troška, prihoda i razlike. Razdoblje je uključivo i primjenjuje se na datum troška, rada i izdavanja fakture. Kategorija filtrira samo troškove (kategorija plaća uključuje i radne sate), a status fakture samo prihode; razlika i marža tada prikazuju odabrani dio evidencije. Marža bez prihoda nije definirana. Zbrojevi i PDF/Excel izvoz prate iste filtre; ukupna marža računa se iz ukupne razlike i prihoda, ne kao prosjek marži gradilišta. Klik na naziv otvara postojeći detaljni pregled gradilišta. Nova migracija nije potrebna.
 
+## Kopiranje neriješenih zadataka na novi nalog
+
+Pri spremanju naloga iz dnevnog rasporeda odabrani neriješeni zadaci s drugih
+naloga kopiraju se uz vezu na izvorni zadatak. Svaki red skupnog unosa izričito
+šalje `vrsta` (`zadatak` ili `dodatni`), kako miješani popis ne bi pokušao
+spremiti `NULL` umjesto obavezne vrste. Izvorni zadatak ostaje na starom nalogu.
+Popravak zahtijeva novu verziju klijenta, bez dodatne SQL migracije.
+
+### Obostrano rješavanje povezanih stavki
+
+Migracija `20261110410000_obostrano_rjesavanje_kopiranih_stavki.sql` zamjenjuje
+automatsko brisanje kopija usklađivanjem oznaka. Označavanje zadatka, dodatnog rada,
+materijala ili alata kao riješenog na bilo kojem aktivnom nalogu označava i njegov
+izvor, druge kopije te kopije kopija. Uklanjanje oznake ponovno otvara sve povezane
+aktivne zapise. Kopije ostaju na svojim nalozima; nazivi, sati, izvještaji, prilozi
+i veze ne mijenjaju se. Materijal i alat usklađuju obje oznake, `gotovo` i `uzeto`.
+
+Veza se prati samo preko `izvor_zadatak_id`, `izvor_materijal_id` odnosno
+`izvor_alat_id` (za starije kopije materijala/alata i preko `izvor_id` ako nova
+izvorna veza nije upisana), unutar iste tvrtke, gradilišta i vrste stavke. Isti naziv nije
+dovoljan za povezivanje. Završeni i otkazani nalozi ostaju netaknuti, ali njihove
+veze i dalje povezuju aktivne kopije s obje strane lanca. Strojevi nisu uključeni.
+
+Promjene se evidentiraju postojećim auditom; rokovi zadataka usklađuju se u istoj
+transakciji. Povrat oznake kroz povijest aktivnog naloga također usklađuje povezane
+aktivne zapise, nakon završetka provjera izvornog paketa obnove. Ako druga osoba
+zaključava povezanu stavku ili nalog, spremanje se odbija bez djelomičnih promjena;
+potrebno je osvježiti nalog i pokušati ponovno.
+Samostalna promjena oznake na završenom ili otkazanom nalogu odbija se i u bazi,
+neovisno o tome dolazi li iz naloga ili pregleda gradilišta.
+
+U ERP-u se završeni radni zadaci i dodatni radovi mogu ponovno otvoriti uklanjanjem
+oznake u njihovoj povijesti. Nakon spremanja ponovno se učitavaju stavke odabranog
+naloga; portal djelatnika već ponovno učitava detalje. Drugi otvoreni ekrani nisu
+pretplaćeni na te promjene i treba ih osvježiti ili ponovno otvoriti. Pregled
+gradilišta učitava povezane stavke nakon spremanja, a njegov postojeći periodični
+pregled osvježava podatke i bez ponovnog otvaranja.
+
+Migraciju treba primijeniti nakon prethodnih migracija i objaviti novu verziju
+klijenta. Ona ne vraća kopije koje su ranije obrisane niti retroaktivno mijenja
+postojeće oznake; usklađivanje se pokreće pri sljedećoj promjeni oznake. Lokalni
+PostgreSQL testovi pokrivaju oba smjera za sve četiri vrste, lance i cikluse,
+zatvorene naloge, nepovezane zapise, granice tvrtke/vrste/gradilišta, RLS početne izmjene,
+povrat povijesti, rokove i atomsko odbijanje neuskladive izmjene. Istodobne sesije
+treba dodatno provjeriti na testnoj PostgreSQL instanci.
+
 ## Prijava i korisnička prava
 
 U **Korisnici i prava** popis modula za svakog korisnika početno je sklopljen. Klik na **Moduli i prava** otvara ili zatvara tablicu prava; sažetak prikazuje broj modula s pravom pregleda i uređivanja. Gumb **Spremi prava** ostaje dostupan i kada je popis sklopljen. Otvaranje i zatvaranje popisa ne mijenja dodijeljena prava.

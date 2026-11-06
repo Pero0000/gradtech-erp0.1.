@@ -55,12 +55,14 @@ function StavkeList({
   placeholder,
   onAdd,
   onToggle,
+  completionDisabled,
   onRemove,
 }: {
   items: GradilisteStavka[];
   placeholder: string;
   onAdd?: (naziv: string) => void;
   onToggle: (s: GradilisteStavka) => void;
+  completionDisabled: boolean;
   onRemove: (s: GradilisteStavka) => void;
 }) {
   const [text, setText] = useState('');
@@ -74,7 +76,7 @@ function StavkeList({
   const rijesene = items.filter((item) => item.gotovo || item.uzeto);
   const renderItem = (s: GradilisteStavka) => (
     <div key={s.id} className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs ${s.gotovo || s.uzeto ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
-      <input type="checkbox" checked={Boolean(s.gotovo || s.uzeto)} onChange={() => onToggle(s)} className="h-4 w-4 flex-shrink-0 accent-emerald-600" title="Označi kao riješeno" />
+      <input type="checkbox" checked={Boolean(s.gotovo || s.uzeto)} onChange={() => onToggle(s)} disabled={completionDisabled} className="h-4 w-4 flex-shrink-0 accent-emerald-600" title="Označi kao riješeno" />
       <span className={`min-w-0 flex-1 break-words ${s.gotovo || s.uzeto ? 'font-medium text-emerald-800 line-through decoration-emerald-400' : 'text-slate-800'}`}>{s.naziv}</span>
       {s.tip === 'stroj' && s.sati ? <span className="flex-shrink-0 text-[10px] text-slate-500">{s.sati} h</span> : null}
       <span className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] ${s.nalog_id ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700'}`}>
@@ -150,6 +152,7 @@ export function GradilisteMaterijalDokumenti({
   children: (sections: { documents: React.ReactNode; materials: React.ReactNode }) => React.ReactNode;
 }) {
   const [stavke, setStavke] = useState<GradilisteStavka[]>([]);
+  const [savingCompletion, setSavingCompletion] = useState(false);
   const [dokumenti, setDokumenti] = useState<GradilisteDokument[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -209,9 +212,13 @@ export function GradilisteMaterijalDokumenti({
     }, 'Greška pri dodavanju stavke.');
 
   const toggleStavka = (s: GradilisteStavka) => {
+    if (savingCompletion) return;
     const rijeseno = Boolean(s.gotovo || s.uzeto);
-    setStavke((prev) => prev.map((x) => (x.id === s.id ? { ...x, gotovo: !rijeseno, uzeto: !rijeseno } : x)));
-    void guard(() => updateNalogStavka(s.id, { gotovo: !rijeseno }), 'Greška pri spremanju stavke.');
+    setSavingCompletion(true);
+    void guard(async () => {
+      await updateNalogStavka(s.id, { gotovo: !rijeseno });
+      setStavke(await fetchGradilisteStavke(gradilisteId));
+    }, 'Greška pri spremanju stavke.').finally(() => setSavingCompletion(false));
   };
 
   const removeStavka = (s: GradilisteStavka) =>
@@ -257,10 +264,10 @@ export function GradilisteMaterijalDokumenti({
     <>
       <div className="grid min-w-0 gap-x-4 xl:grid-cols-2">
         <SectionBox title={`Materijal (${materijal.filter((s) => !s.gotovo && !s.uzeto).length} otvorenih)`} icon={<Package className="h-4 w-4" />} tone="amber">
-          <StavkeList items={materijal} placeholder="npr. boja bijela 15 l" onAdd={(n) => addStavka('materijal', n)} onToggle={toggleStavka} onRemove={removeStavka} />
+          <StavkeList items={materijal} placeholder="npr. boja bijela 15 l" onAdd={(n) => addStavka('materijal', n)} onToggle={toggleStavka} completionDisabled={savingCompletion} onRemove={removeStavka} />
         </SectionBox>
         <SectionBox title={`Alat (${alat.filter((s) => !s.gotovo && !s.uzeto).length} otvorenih)`} icon={<Hammer className="h-4 w-4" />} tone="sky">
-          <StavkeList items={alat} placeholder="npr. skela, brusilica" onAdd={(n) => addStavka('alat', n)} onToggle={toggleStavka} onRemove={removeStavka} />
+          <StavkeList items={alat} placeholder="npr. skela, brusilica" onAdd={(n) => addStavka('alat', n)} onToggle={toggleStavka} completionDisabled={savingCompletion} onRemove={removeStavka} />
         </SectionBox>
       </div>
       <p className="-mt-2 mb-1 text-[11px] text-slate-500">Materijal i alat s oznakom „čeka nalog” automatski ulaze u idući radni nalog ovog gradilišta.</p>

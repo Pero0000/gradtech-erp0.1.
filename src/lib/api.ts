@@ -4346,7 +4346,7 @@ export async function copyOpenNalogZadaci(
       naziv: task.naziv,
       rok: task.rok ?? null,
       kooperant_id: task.kooperant_id ?? null,
-      ...vrstaPolje(task.vrsta === 'dodatni' ? 'dodatni' : 'zadatak'),
+      vrsta: task.vrsta === 'dodatni' ? 'dodatni' : 'zadatak',
     }));
   if (copies.length === 0) return;
   const { error } = await supabase

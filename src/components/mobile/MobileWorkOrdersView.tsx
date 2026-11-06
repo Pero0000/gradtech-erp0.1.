@@ -9,6 +9,7 @@ import {
   addNalogAlatFromInventory,
   addNalogStrojFromInventory,
   updateNalogStavka,
+  updateGradilisteZadatak,
   addNalogZadatak,
   fetchGradilisteDokumenti,
   fetchMobileNalogTeam,
@@ -522,13 +523,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
   }, [photoQueue]);
 
   const toggleTask = async (task: GradilisteZadatak) => {
-    await runAction(async () => {
-      const { error: updateError } = await supabase
-        .from('gradiliste_zadaci')
-        .update({ gotovo: !task.gotovo, gotovo_at: !task.gotovo ? new Date().toISOString() : null })
-        .eq('id', task.id);
-      if (updateError) throw updateError;
-    });
+    await runAction(() => updateGradilisteZadatak(task.id, { gotovo: !task.gotovo }));
   };
 
   const addTask = async (vrsta: ZadatakVrsta) => {

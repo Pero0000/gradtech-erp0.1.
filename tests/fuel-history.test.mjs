@@ -175,6 +175,14 @@ test('copying open tasks to another work order preserves source and copies task 
       gotovo: false, rok: '2026-11-12', kooperant_id: 'contractor', vrsta: 'dodatni',
     },
     {
+      id: 'ordinary-task', nalog_id: 'source-order', gradiliste_id: 'site', naziv: 'Radni zadatak',
+      gotovo: false, rok: null, kooperant_id: null, vrsta: 'zadatak',
+    },
+    {
+      id: 'legacy-task', nalog_id: 'source-order', gradiliste_id: 'site', naziv: 'Stariji zadatak',
+      gotovo: false, rok: null, kooperant_id: null,
+    },
+    {
       id: 'completed-task', nalog_id: 'source-order', gradiliste_id: 'site', naziv: 'Gotov rad',
       gotovo: true, rok: null, kooperant_id: null, vrsta: 'zadatak',
     },
@@ -197,6 +205,22 @@ test('copying open tasks to another work order preserves source and copies task 
       rok: '2026-11-12',
       kooperant_id: 'contractor',
       vrsta: 'dodatni',
+    }, {
+      nalog_id: 'target-order',
+      gradiliste_id: 'site',
+      izvor_zadatak_id: 'ordinary-task',
+      naziv: 'Radni zadatak',
+      rok: null,
+      kooperant_id: null,
+      vrsta: 'zadatak',
+    }, {
+      nalog_id: 'target-order',
+      gradiliste_id: 'site',
+      izvor_zadatak_id: 'legacy-task',
+      naziv: 'Stariji zadatak',
+      rok: null,
+      kooperant_id: null,
+      vrsta: 'zadatak',
     }],
     options: { onConflict: 'nalog_id,izvor_zadatak_id', ignoreDuplicates: true },
   }]);

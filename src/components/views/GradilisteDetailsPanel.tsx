@@ -462,6 +462,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   }, [gradiliste.id, gradiliste.ugovorena_vrijednost, gradiliste.predvidena_marza]);
 
   const [zadaci, setZadaci] = useState<GradilisteZadatak[]>([]);
+  const [savingTaskCompletion, setSavingTaskCompletion] = useState(false);
   const [newZadatak, setNewZadatak] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
   const [newZadatakRok, setNewZadatakRok] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
   const [newZadatakKooperant, setNewZadatakKooperant] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
@@ -523,13 +524,16 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   };
 
   const toggleZadatak = async (z: GradilisteZadatak) => {
-    setZadaci((previous) => previous.map((item) => (item.id === z.id ? { ...item, gotovo: !z.gotovo } : item)));
+    if (savingTaskCompletion) return;
+    setSavingTaskCompletion(true);
     try {
       await updateGradilisteZadatak(z.id, { gotovo: !z.gotovo });
       await afterZadatakChange();
     } catch (reason) {
       setError(errText(reason, 'Greška pri spremanju zadatka.'));
       await loadZadaci();
+    } finally {
+      setSavingTaskCompletion(false);
     }
   };
 
@@ -1408,6 +1412,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                     type="checkbox"
                     checked={z.gotovo}
                     onChange={() => void toggleZadatak(z)}
+                    disabled={savingTaskCompletion}
                     className="h-4 w-4 flex-shrink-0 accent-emerald-600"
                     title={z.gotovo ? 'Vrati među zadatke za rješavanje' : 'Označi kao riješeno'}
                   />

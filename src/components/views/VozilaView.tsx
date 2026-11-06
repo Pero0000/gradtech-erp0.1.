@@ -16,6 +16,7 @@ import { VoziloFleetDetalji } from '@/components/views/VoziloFleetDetalji';
 import { ResourceChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
 import { ResourceDeletionHistory } from '@/components/views/ResourceDeletionHistory';
 import { todayISO } from '@/lib/rokovi';
+import { FuelCategorySettings } from '@/components/views/FuelCategorySettings';
 
 type VehicleDisplayStatus = VoziloStatus | 'na_gradilistu';
 
@@ -400,6 +401,8 @@ export function VozilaView() {
         </button>
         </div>
       </div>
+
+      <FuelCategorySettings />
 
       {error && (
         <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">

@@ -41,11 +41,14 @@ import { zadatakVrsta } from '@/types';
 import { WorkerDocumentsTab, WorkerScheduleTab, WorkerTimeTab, type WorkerPortalTab } from '@/components/mobile/WorkerPortalTabs';
 import { MobileFuelTab } from '@/components/mobile/MobileFuelTab';
 import { MobileVehicleIssuesTab } from '@/components/mobile/MobileVehicleIssuesTab';
+import { PersonalCarTab } from '@/components/mobile/PersonalCarTab';
+import { fetchPersonalCarAccess } from '@/lib/personalCar';
 
 const portalTabs: Array<{ id: WorkerPortalTab; label: string; title: string; icon: React.ReactNode }> = [
   { id: 'nalozi', label: 'Nalozi', title: 'Moji radni nalozi', icon: <ClipboardCheck className="h-5 w-5" /> },
   { id: 'raspored', label: 'Raspored', title: 'Raspored ekipa i vozila', icon: <Truck className="h-5 w-5" /> },
   { id: 'gorivo', label: 'Gorivo', title: 'Točenje goriva', icon: <Fuel className="h-5 w-5" /> },
+  { id: 'osobni_auto', label: 'Osobni auto', title: 'Osobni auto', icon: <Truck className="h-5 w-5" /> },
   { id: 'obavijesti', label: 'Kvarovi', title: 'Prijava problema s vozilom', icon: <AlertTriangle className="h-5 w-5" /> },
   { id: 'vrijeme', label: 'Vrijeme', title: 'Moje radno vrijeme', icon: <Clock3 className="h-5 w-5" /> },
   { id: 'dokumenti', label: 'Dokumenti', title: 'Moji dokumenti', icon: <FileText className="h-5 w-5" /> },
@@ -178,6 +181,9 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
   const [photoQueue, setPhotoQueue] = useState<PhotoUpload[]>([]);
   const [portalTab, setPortalTab] = useState<WorkerPortalTab>('nalozi');
   const [portalVrijeme, setPortalVrijeme] = useState(false);
+  const [personalCarAccess, setPersonalCarAccess] = useState(false);
+  const [personalCarAccessError, setPersonalCarAccessError] = useState<string | null>(null);
+  const [personalCarAccessRetry, setPersonalCarAccessRetry] = useState(0);
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
 
@@ -225,8 +231,23 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     };
   }, [profile?.radnik_id]);
 
+  useEffect(() => {
+    let active = true;
+    setPersonalCarAccess(false);
+    setPersonalCarAccessError(null);
+    setPortalTab((tab) => tab === 'osobni_auto' ? 'nalozi' : tab);
+    if (!profile?.radnik_id) return;
+    void fetchPersonalCarAccess()
+      .then((allowed) => { if (active) setPersonalCarAccess(allowed); })
+      .catch((reason: unknown) => {
+        if (active) setPersonalCarAccessError(errorMessage(reason, 'Pristup osobnom autu nije moguće provjeriti.'));
+      });
+    return () => { active = false; };
+  }, [profile?.id, profile?.radnik_id, company?.id, personalCarAccessRetry]);
+
   const visiblePortalTabs = portalTabs.filter((tab) =>
     (tab.id !== 'vrijeme' || portalVrijeme)
+    && (tab.id !== 'osobni_auto' || personalCarAccess)
     && (tab.id !== 'gorivo' || Boolean(profile?.radnik_id))
     && (tab.id !== 'obavijesti' || Boolean(profile?.radnik_id)));
 
@@ -1312,6 +1333,10 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                 Račun još nije povezan s djelatnikom. Zamoli administratora da ga poveže u „Korisnici i prava”.
               </p>
             )}
+            {personalCarAccessError && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              <p>{personalCarAccessError}</p>
+              <button type="button" className="mt-1 font-semibold underline" onClick={() => setPersonalCarAccessRetry((current) => current + 1)}>Ponovi provjeru pristupa</button>
+            </div>}
             <nav aria-label="Portal djelatnika" className="flex min-w-0 flex-wrap gap-1 rounded-2xl bg-white p-1 shadow-sm">
               {visiblePortalTabs.map((tab) => (
                 <button
@@ -1329,6 +1354,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
             <h2 className="px-1 pt-2 text-lg font-bold text-slate-900">{portalTabs.find((tab) => tab.id === portalTab)?.title}</h2>
             {portalTab === 'raspored' && <WorkerScheduleTab radnikId={profile?.radnik_id ?? null} />}
             {portalTab === 'gorivo' && <MobileFuelTab />}
+            {portalTab === 'osobni_auto' && personalCarAccess && <PersonalCarTab key={`${company?.id}:${profile?.id}`} />}
             {portalTab === 'obavijesti' && <MobileVehicleIssuesTab />}
             {portalTab === 'vrijeme' && portalVrijeme && <WorkerTimeTab />}
             {portalTab === 'dokumenti' && (profile?.radnik_id

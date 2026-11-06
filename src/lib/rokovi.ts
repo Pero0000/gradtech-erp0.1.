@@ -8,6 +8,16 @@ export function todayISO() {
 // Upozorenje: kasni (prošao krajnji rok ili otvoreni rok), danas, ili uskoro (do 3 dana)
 export type DeadlineAlert = { level: 'overdue' | 'today' | 'soon'; label: string; datum: string; days: number };
 
+export function currentRokDeadline(rok: Rok, today = todayISO()): { datum: string; label: string } {
+  const start = rok.datum_pocetka;
+  const end = rok.datum_zavrsetka ?? rok.datum;
+  const initial = start && start !== end && start >= today ? start : null;
+  return {
+    datum: initial ?? end,
+    label: `${rok.naziv} · ${initial ? 'Početni rok' : 'Krajnji rok'}`,
+  };
+}
+
 function daysBetween(from: string, to: string) {
   return Math.round((new Date(`${to}T00:00:00`).getTime() - new Date(`${from}T00:00:00`).getTime()) / 86400000);
 }
@@ -18,7 +28,8 @@ export function deadlineAlert(g: Gradiliste, rokovi: Rok[]): DeadlineAlert | nul
   const items: { datum: string; label: string }[] = [];
   if (g.datum_pocetka && g.status !== 'aktivno') items.push({ datum: g.datum_pocetka, label: 'Početak gradilišta' });
   if (g.datum_zavrsetka) items.push({ datum: g.datum_zavrsetka, label: 'Kraj gradilišta' });
-  rokovi.filter((r) => r.gradiliste_id === g.id && r.status !== 'zavrsen').forEach((r) => items.push({ datum: r.datum, label: r.naziv }));
+  rokovi.filter((r) => r.gradiliste_id === g.id && r.status !== 'zavrsen')
+    .forEach((r) => items.push(currentRokDeadline(r, today)));
   const withDays = items.map((i) => ({ ...i, days: daysBetween(today, i.datum) }));
   const overdue = withDays.filter((i) => i.days < 0 && i.label !== 'Početak gradilišta').sort((a, b) => a.days - b.days)[0];
   if (overdue) return { level: 'overdue', ...overdue };
@@ -35,7 +46,7 @@ export function nextDeadline(g: Gradiliste, rokovi: Rok[]): { datum: string; lab
   if (g.datum_zavrsetka) candidates.push({ datum: g.datum_zavrsetka, label: 'Kraj gradilišta' });
   rokovi
     .filter((r) => r.gradiliste_id === g.id && r.status !== 'zavrsen')
-    .forEach((r) => candidates.push({ datum: r.datum, label: r.naziv }));
+    .forEach((r) => candidates.push(currentRokDeadline(r, today)));
   return candidates
     .filter((c) => c.datum >= today)
     .sort((a, b) => a.datum.localeCompare(b.datum))[0] ?? null;

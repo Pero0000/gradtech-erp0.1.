@@ -48,7 +48,9 @@ function endDateOf(rok: Rok) {
 function dateRangeLabel(rok: Rok) {
   const start = startDateOf(rok);
   const end = endDateOf(rok);
-  return start === end ? displayDate(end) : `${displayDate(start)} – ${displayDate(end)}`;
+  return start === end
+    ? `Krajnji rok: ${displayDate(end)}`
+    : `Početni rok: ${displayDate(start)} · Krajnji rok: ${displayDate(end)}`;
 }
 
 function dateRangeLabelForDates(start: string, end: string) {
@@ -188,6 +190,14 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
   ]);
   const groupedTimeline = useMemo(() => {
     const groups = new Map<string, { site: Gradiliste; deadlines: Rok[]; angazmani: KooperantAngazman[] }>();
+    for (const site of gradilista) {
+      if (selectedSite && site.id !== selectedSite) continue;
+      const start = site.datum_pocetka ?? site.datum_zavrsetka;
+      const end = site.datum_zavrsetka ?? site.datum_pocetka;
+      if (start && end && start < rangeEnd && end >= rangeStart) {
+        groups.set(site.id, { site, deadlines: [], angazmani: [] });
+      }
+    }
     for (const rok of visibleDeadlines) {
       const site = siteById.get(rok.gradiliste_id);
       if (!site) continue;
@@ -206,7 +216,7 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
       siteStatusOrder[first.site.status] - siteStatusOrder[second.site.status]
       || first.site.naziv.localeCompare(second.site.naziv),
     );
-  }, [visibleDeadlines, visibleAngazmani, siteById]);
+  }, [visibleDeadlines, visibleAngazmani, siteById, gradilista, selectedSite, rangeStart, rangeEnd]);
 
   const moveRange = (direction: -1 | 1) => setRangeStart((current) => shiftDate(current, direction * windowDays));
   const openToday = () => setRangeStart(today);
@@ -239,6 +249,19 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
     setError(null);
     try {
       const rows: TerminskiPlanPdfRow[] = groupedTimeline.flatMap(({ site, deadlines, angazmani: siteAngazmani }) => [
+        ...(site.datum_pocetka || site.datum_zavrsetka ? [{
+          gradiliste: site.naziv,
+          aktivnost: 'Razdoblje gradilišta',
+          kooperant: '',
+          pocetak: site.datum_pocetka ?? site.datum_zavrsetka ?? '',
+          kraj: site.datum_zavrsetka ?? site.datum_pocetka ?? '',
+          status: [
+            site.datum_pocetka ? `Početak: ${displayDate(site.datum_pocetka)}` : '',
+            site.datum_zavrsetka ? `Kraj: ${displayDate(site.datum_zavrsetka)}` : '',
+          ].filter(Boolean).join(' · '),
+          boja: '#94a3b8',
+          orijentir: true,
+        }] : []),
         ...deadlines.map((rok) => {
           const task = rok.zadatak_id ? taskById.get(rok.zadatak_id) : undefined;
           const kooperantId = rok.kooperant_id ?? task?.kooperant_id ?? null;
@@ -285,6 +308,7 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
       const visibleContractors = sortedKooperanti.filter((kooperant) =>
         selectedKooperantIds === null || selectedKooperantIds.includes(kooperant.id));
       const legenda = [
+        { naziv: 'Razdoblje gradilišta (orijentir)', boja: '#94a3b8' },
         { naziv: 'Otvoren rok', boja: '#0ea5e9' },
         { naziv: 'Prekoračen rok', boja: '#ef4444' },
         { naziv: 'Završen rok/angažman', boja: '#10b981' },
@@ -524,6 +548,7 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
       </section>
 
       <div className="terminski-plan-hide-print flex flex-wrap gap-2 text-xs">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-slate-500"><span className="w-5 border-t border-dashed border-slate-400" /> Razdoblje gradilišta</span>
         <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-sky-800"><span className="h-2 w-2 rounded-full bg-sky-500" /> Otvoren</span>
         <span className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-red-800"><span className="h-2 w-2 rounded-full bg-red-500" /> Prekoračen</span>
         <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-800"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Završen</span>
@@ -549,10 +574,10 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
       {error && <div role="alert" className="terminski-plan-hide-print flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
       {loading ? (
         <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">Učitavanje rokova i kooperanata…</div>
-      ) : visibleDeadlines.length === 0 && visibleAngazmani.length === 0 ? (
+      ) : groupedTimeline.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center">
           <Clock3 className="mx-auto h-8 w-8 text-slate-400" />
-          <p className="mt-2 font-medium text-slate-700">Nema rokova ni angažmana kooperanata za odabrane filtre i razdoblje.</p>
+          <p className="mt-2 font-medium text-slate-700">Nema datiranih gradilišta, rokova ni angažmana za odabrane filtre i razdoblje.</p>
           <p className="mt-1 text-sm text-slate-500">Pomakni razdoblje ili promijeni filtre za prikaz drugih aktivnosti.</p>
         </div>
       ) : (
@@ -599,7 +624,13 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
                     title={expandedSiteIds.includes(site.id) ? 'Sakrij radove' : 'Prikaži radove'}
                   >
                     <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${expandedSiteIds.includes(site.id) ? '' : '-rotate-90'}`} />
-                    <span className="truncate">{site.naziv}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate">{site.naziv}</span>
+                      {(site.datum_pocetka || site.datum_zavrsetka) && <span className="mt-1 block text-[9px] font-normal leading-snug text-slate-500">
+                        {site.datum_pocetka && <span className="block">Početak: {displayDate(site.datum_pocetka)}</span>}
+                        {site.datum_zavrsetka && <span className="block">Kraj: {displayDate(site.datum_zavrsetka)}</span>}
+                      </span>}
+                    </span>
                   </button>
                   <div
                     className="terminski-plan-site-timeline relative grid"
@@ -613,6 +644,27 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
                     {todayOffset >= 0 && todayOffset < windowDays && (
                       <div className="pointer-events-none absolute inset-y-0 z-[1] w-px bg-slate-500/70" style={{ left: `${todayPosition}%` }} />
                     )}
+                    {(() => {
+                      const start = site.datum_pocetka;
+                      const end = site.datum_zavrsetka;
+                      if (!start && !end) return null;
+                      const startOffset = (dateToUtc(start ?? end ?? rangeStart) - dateToUtc(rangeStart)) / DAY_MS;
+                      const endOffset = (dateToUtc(end ?? start ?? rangeStart) - dateToUtc(rangeStart)) / DAY_MS;
+                      if (endOffset < 0 || startOffset >= windowDays) return null;
+                      const label = [
+                        start ? `Početak gradilišta: ${displayDate(start)}` : '',
+                        end ? `Kraj gradilišta: ${displayDate(end)}` : '',
+                      ].filter(Boolean).join(' · ');
+                      const left = Math.max(0, (startOffset + 0.5) / windowDays * 100);
+                      const right = Math.min(100, (endOffset + 0.5) / windowDays * 100);
+                      return <div role="img" aria-label={label} title={label}
+                        className="absolute bottom-1 z-[1] h-2"
+                        style={{ left: `${left}%`, width: `${Math.max(0, right - left)}%` }}>
+                        {start && end && <span className="absolute inset-x-0 top-1 border-t border-dashed border-slate-400/70" />}
+                        {start && startOffset >= 0 && startOffset < windowDays && <span className="absolute left-0 top-0 h-2 border-l border-slate-400" />}
+                        {end && endOffset >= 0 && endOffset < windowDays && <span className="absolute right-0 top-0 h-2 border-r border-slate-400" />}
+                      </div>;
+                    })()}
                     {!expandedSiteIds.includes(site.id) && deadlines.map((rok, index) => {
                       const start = startDateOf(rok);
                       const end = endDateOf(rok);
@@ -686,7 +738,7 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
           </div>
         </div>
       )}
-      {!loading && <p className="terminski-plan-hide-print text-xs text-slate-500">Prikazano {visibleDeadlines.length} rokova i {visibleAngazmani.length} angažmana kooperanata s unesenim datumima · nedjelje i blagdani označeni su rozo, subote blago sivo · razdoblje {displayDate(rangeStart)} – {displayDate(shiftDate(rangeEnd, -1))}. Klikni naziv ili traku za otvaranje gradilišta.</p>}
+      {!loading && <p className="terminski-plan-hide-print text-xs text-slate-500">Prikazano {groupedTimeline.length} gradilišta, {visibleDeadlines.length} rokova i {visibleAngazmani.length} angažmana kooperanata s unesenim datumima · tanka siva isprekidana crta označava razdoblje gradilišta i ostaje kao orijentir neovisno o filtrima aktivnosti · nedjelje i blagdani označeni su rozo, subote blago sivo · razdoblje {displayDate(rangeStart)} – {displayDate(shiftDate(rangeEnd, -1))}. Klikni naziv ili traku za otvaranje gradilišta.</p>}
       <Modal
         open={deadlineModalOpen}
         onClose={() => { if (!savingDeadline && !deadlineRestoring) setDeadlineModalOpen(false); }}

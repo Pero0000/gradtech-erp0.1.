@@ -1337,7 +1337,10 @@ export async function resolveVoziloGorivoAnomalija(id: string) {
 
 export async function fetchMobileVoziloGorivoOptions(workerId?: string): Promise<MobileVoziloGorivoOptions> {
   const radnici = await fetchVozilaGorivoWorkers();
-  const selectedWorker = radnici.find((worker) => worker.id === workerId) ?? radnici[0];
+  const selectedWorker = workerId ? radnici.find((worker) => worker.id === workerId) : radnici[0];
+  if (workerId && !selectedWorker) {
+    throw new Error('Prijavljeni djelatnik nije aktivan ili nije dostupan za unos goriva. Obratite se administratoru.');
+  }
   if (!selectedWorker) return { vozila: [], radnici };
   const { data: vehicles, error: vehicleError } = await supabase.rpc('get_mobile_vozila_gorivo_vehicles', {
     p_radnik_id: selectedWorker.id,

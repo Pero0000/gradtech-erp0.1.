@@ -14,7 +14,7 @@ test('offline responsive fixtures render ERP screens, worker portal and constrai
   assert.ok(fixtures.length >= 37);
   assert.equal(new Set(fixtures.map(({ name }) => name)).size, fixtures.length);
   for (const name of ['RasporedView', 'RadniNaloziView', 'ObracunSatiPanel', 'MobileWorkOrdersView', 'Sidebar-mobile', 'Modal',
-    'GradilisteDetailsPanel', 'GradilisteMaterijalDokumenti', 'PonudaEditor', 'RadniciView-modal', 'KorisniciView']) {
+    'GradilisteDetailsPanel', 'GradilisteMaterijalDokumenti', 'PonudaEditor', 'RadniciView-modal', 'KorisniciView', 'MobileWorkOrdersView-personal-car', 'TerminskiPlanView']) {
     assert.ok(fixtures.some((fixture) => fixture.name === name), `Missing fixture: ${name}`);
   }
   const modal = fixtures.find((fixture) => fixture.name === 'Modal').html;

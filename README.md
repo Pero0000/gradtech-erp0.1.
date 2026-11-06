@@ -618,6 +618,106 @@ zatvorene naloge, nepovezane zapise, granice tvrtke/vrste/gradilišta, RLS poče
 povrat povijesti, rokove i atomsko odbijanje neuskladive izmjene. Istodobne sesije
 treba dodatno provjeriti na testnoj PostgreSQL instanci.
 
+Postavke dopuštenih tipova vozila po kategoriji djelatnika nalaze se u modulu
+**Vozila**, u malom izborniku **Ograničenja točenja goriva**, koji je početno
+sklopljen. Podaci se učitavaju tek pri otvaranju izbornika; postavke više ne
+zauzimaju prostor na popisu djelatnika. Zadržana su postojeća prava: pregled
+zahtijeva pregled djelatnika, a spremanje uređivanje djelatnika, uz nepromijenjene
+politike baze. U obrascu djelatnika ostaje informativni prikaz ograničenja njegove
+kategorije. Premještanje ne zahtijeva novu SQL migraciju.
+
+Na portalu djelatnika unos goriva nema izbor „Tko je točio”. Osoba se automatski
+preuzima iz djelatnika povezanog s prijavljenim računom (`profile.radnik_id`);
+njegova kategorija određuje dostupna vozila. I dalje se spremaju djelatnik, ime i
+korisnik koji je unio gorivo. Ako povezani djelatnik nije dostupan, unos se odbija
+uz poruku, bez zamjene prvim djelatnikom s popisa. ERP unos goriva zadržava izbor
+osobe. Za ovu promjenu portala nije potrebna nova SQL migracija.
+
+### Oznake početnih i krajnjih rokova
+
+Terminski plan uz naziv gradilišta prikazuje njegov početak i kraj kada su
+uneseni. Tanka siva isprekidana crta u zaglavlju gradilišta označava razdoblje,
+a kratke okomite oznake stvarne datume početka/kraja unutar prikazanog prozora.
+Ako postoji samo jedan datum, prikazuje se samo njegova oznaka (ne pretpostavlja
+se trajanje). Gradilišta s razdobljem koje ulazi u prozor prikazuju se i bez
+rokova ili angažmana; ostaju orijentir uz filtriranje aktivnosti po statusu i
+kooperantima, ali poštuju odabir gradilišta i razdoblja. Orijentir ostaje i pri
+širenju aktivnosti te se uključuje u PDF izvoz. Ne dodaju se novi rokovi u bazu.
+
+Sažeci rokova na karticama gradilišta, u rasporedu i obavijestima (uključujući
+nadzornu ploču) uz naziv aktivnosti prikazuju **Početni rok** ili **Krajnji rok**.
+Za razdoblje s različitim datumima do uključivo dana početka koristi se početni
+datum; nakon toga krajnji. Prošli početak ne označava aktivnost zakašnjelom dok
+krajnji rok nije prošao. Jednodnevni rokovi i stari zapisi samo s jednim datumom
+prikazuju se kao krajnji rokovi. U detaljima gradilišta i terminskom planu oba
+datuma razdoblja imaju izričite oznake; nazivi aktivnosti ne mijenjaju se.
+Promjena ne zahtijeva migraciju baze.
+
+### Odustajanje od naloga — popravak stare veze ekipe
+
+Ako odustajanje u rasporedu javlja `radni_nalozi_radnici_nalog_id_fkey`,
+primijeniti `supabase/migrations/20261110430000_nalozi_radnici_brisanje_fk.sql`
+nakon prethodnih migracija. Stare instalacije mogu imati nekaskadnu vezu:
+izvorni `CREATE TABLE IF NOT EXISTS` ne popravlja već postojeća ograničenja.
+Nova migracija usklađuje samo vezu `radni_nalozi_radnici.nalog_id` prema nalogu
+na `ON DELETE CASCADE`, bez brisanja postojećih podataka ili promjene veze prema
+djelatnicima, RLS-a i zaštićenog postupka brisanja. Zadržava naziv ograničenja,
+ponašanje pri promjeni ID-a i odgodivost postojećih veza.
+
+U rasporedu **Odustani od naloga** briše nalog kroz postojeći atomski paket s
+povratom 30 dana; dodjele ekipe ulaze u isti paket i vraćaju se zajedno s nalogom.
+Ne brišu se sami djelatnici. U modulu **Radni nalozi**, akcija odustajanja
+označava nalog kao **Otkazan** i ne briše njegove povezane zapise. Neuspjelo
+brisanje iz rasporeda zadržava otvoren obrazac. Migraciju prvo provjeriti na
+testnoj bazi; ne zaobilaziti zaštitne okidače niti ručno brisati ekipu.
+
+### Osobni auto — pilot portala djelatnika
+
+Nakon prethodnih migracija na testnoj bazi primijeniti
+`supabase/migrations/20261110420000_osobni_auto_pilot.sql` i zatim objaviti novi
+build. Migracija zahtijeva točno jednog aktivnog djelatnika **Ivan Perićak** s
+odobrenim računom povezanim u istoj tvrtki; ako ga nema ili ih ima više, prekida
+se bez djelomične primjene. U privatnu tablicu pohranjuje njegov ID i tvrtku.
+Naknadna promjena imena ne prenosi pristup drugom djelatniku. Administrator bez
+te veze također nema pristup pilotu. Vidljivost kartice **Osobni auto** provjerava
+se na poslužitelju; isti uvjeti vrijede za svaki RPC i čitanje zapisa.
+
+Obrazac **Prijavi vožnju** ima auto, datum, početno/završno stanje kilometara i
+obavezan odabir gradilišta ili **Privatno**. Zadnji odabrani auto pamti se u bazi
+i na drugim uređajima. Početno se nudi njegova aktualna kilometraža, a raniji
+zapis može se unijeti ispravkom početnog stanja. Neobavezni polazak/dolazak i
+napomena služe samo evidenciji vožnje; dolazak može biti sljedeći dan.
+**Ne nastaju radni sati niti stavke obračuna plaće.**
+
+- Privatna vožnja ostaje u vlastitoj povijesti bez troška gradilišta.
+- Poslovna vožnja atomski stvara red u postojećim troškovima (`put`): prijeđeni
+  kilometri × cijena/km odabranog vozila, zaokruženo na dvije decimale. Gradilište
+  i nadzorna ploča koriste taj postojeći trošak. Cijena, iznos i nazivi ostaju
+  snimljeni uz vožnju; naknadna promjena cjenika ne mijenja prošli obračun.
+  Nedostala ili nevaljana cijena blokira poslovni unos, ali ne privatni.
+- Unos, trošak i povećanje kilometraže spremaju se zajedno ili ništa. Kilometraža
+  se nikad ne smanjuje. Ponovljena prijava istog zahtjeva ne udvostručuje trošak;
+  aktivni intervali kilometara za isti auto ne smiju se preklapati.
+- Pogrešan unos stornira se uz razlog. Povijest i originalni iznos ostaju,
+  povezani trošak postaje 0 €, kilometraža auta se ne vraća unatrag. Plaćen
+  trošak prvo treba razriješiti u uredu. Izravno uređivanje iznosa/veza i brisanje
+  povezanog troška blokirani su; status plaćanja može se mijenjati.
+- Povijest učitava po 30 vlastitih vožnji. Druge tvrtke i djelatnici nemaju
+  pristup. Izravni klijentski unos, izmjena i brisanje redova vožnji nisu dopušteni.
+  Vozilo, gradilište, djelatnik, račun i povezani trošak ne mogu se obrisati dok
+  postoje reference iz ove trajne povijesti, uključujući stornirane zapise.
+
+**Ne unositi ovdje kilometre već obračunate radnim nalogom.** Pilot blokira
+preklapanje svojih vožnji, ali ne provjerava intervale obračuna naloga. Opis
+troška počinje s `Osobni auto:`, odvojeno od dnevnog obračuna `Kilometri:`,
+pa dnevni obračun ne briše ni zamjenjuje troškove pilota.
+
+Prije produkcije provjeriti na stagingu Ivanov račun, privatni/poslovni unos,
+točan zbroj na gradilištu/nadzornoj ploči, storno, prava drugog korisnika i
+istodobne unose u dvije sesije. Lokalni PostgreSQL testovi koriste postojeće
+okidače troškova i audita, ali ne zamjenjuju provjeru stvarnih paralelnih sesija.
+Migracija i objava ne pokreću se automatski iz aplikacije.
+
 ## Prijava i korisnička prava
 
 U **Korisnici i prava** popis modula za svakog korisnika početno je sklopljen. Klik na **Moduli i prava** otvara ili zatvara tablicu prava; sažetak prikazuje broj modula s pravom pregleda i uređivanja. Gumb **Spremi prava** ostaje dostupan i kada je popis sklopljen. Otvaranje i zatvaranje popisa ne mijenja dodijeljena prava.

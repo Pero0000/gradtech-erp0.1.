@@ -285,14 +285,14 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
       {canEdit && <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <h3 className="mb-3 font-semibold text-slate-900">{editing ? 'Uredi točenje' : 'Unesi točenje goriva'}</h3>
         <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <label className="grid gap-1 text-xs font-medium text-slate-600">Datum
-            <TextInput type="date" value={datum} onChange={(event) => setDatum(event.target.value)} />
+          <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-slate-600">Datum
+            <TextInput className="h-11" type="date" value={datum} onChange={(event) => setDatum(event.target.value)} />
           </label>
-          <label className="grid gap-1 text-xs font-medium text-slate-600">Litre goriva
-            <TextInput type="text" inputMode="decimal" value={litara} onChange={(event) => setLitara(event.target.value)} placeholder="npr. 42,5" />
+          <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-slate-600">Litre goriva
+            <TextInput className="h-11" type="text" inputMode="decimal" value={litara} onChange={(event) => setLitara(event.target.value)} placeholder="npr. 42,5" />
           </label>
-          <label className="grid gap-1 text-xs font-medium text-slate-600">Kilometraža auta
-            <TextInput type="number" min={0} step="1" value={kilometraza} onChange={(event) => setKilometraza(event.target.value)} />
+          <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-slate-600">Kilometraža auta
+            <TextInput className="h-11" type="number" min={0} step="1" value={kilometraza} onChange={(event) => setKilometraza(event.target.value)} />
             <span className="text-xs font-normal text-slate-500">Trenutno stanje: {vozilo.kilometraza.toLocaleString('hr-HR')} km</span>
             {kilometraza.trim() && Number(kilometraza) < vozilo.kilometraza && (
               <span role="status" className="text-xs font-normal text-amber-800">
@@ -300,8 +300,8 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
               </span>
             )}
           </label>
-          <label className="grid gap-1 text-xs font-medium text-slate-600">Tko je točio
-            <Select value={tocioId} onChange={(event) => setTocioId(event.target.value)}>
+          <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-slate-600">Tko je točio
+            <Select className="h-11" value={tocioId} onChange={(event) => setTocioId(event.target.value)}>
               <option value="">Odaberi djelatnika</option>
               {tocioId && !eligibleWorkers.some((worker) => worker.id === tocioId) && (
                 <option value={tocioId} disabled>Odabrani djelatnik više nema dopuštenje za ovaj tip vozila</option>

@@ -146,6 +146,10 @@ test('mobile fuel vehicle options are requested for the selected worker category
   ]);
   assert.equal(options.vozila[0].tip, 'Radno');
   assert.equal(options.radnici[1].dozvoljeni_tipovi_vozila, null);
+  calls.length = 0;
+  await assert.rejects(api.fetchMobileVoziloGorivoOptions('unavailable-worker'), /djelatnik nije aktivan ili nije dostupan/);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [['get_vozila_gorivo_workers', null]],
+    'An unavailable linked worker must not fall back to another worker or request their permitted vehicles');
 });
 
 test('mobile fuel vehicle result type errors identify the corrective migration', async () => {

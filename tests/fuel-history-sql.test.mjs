@@ -1125,6 +1125,13 @@ test('recovery SQL compiles and passes transactional, permission and retention c
       const remove = async () => (await db.query("SELECT public.delete_resource_with_history('radni_nalozi', $1) id", [order])).rows[0].id;
       const restore = (id) => db.query('SELECT public.restore_resource_deletion($1)', [id]);
       const auditBefore = (await db.query('SELECT * FROM public.mobile_work_order_audit WHERE nalog_id = $1', [order])).rows;
+      await db.exec(`ALTER TABLE public.radni_nalozi_radnici DROP CONSTRAINT radni_nalozi_radnici_nalog_id_fkey;
+        ALTER TABLE public.radni_nalozi_radnici ADD CONSTRAINT radni_nalozi_radnici_nalog_id_fkey
+          FOREIGN KEY(nalog_id) REFERENCES public.radni_nalozi(id) ON DELETE NO ACTION;`);
+      await assert.rejects(remove(), (reason) => reason.code === '23503'
+        && reason.constraint === 'radni_nalozi_radnici_nalog_id_fkey');
+      for (const table of tables) assert.deepEqual(await rows(table), before.get(table), `Blocked FK leaves all order data intact: ${table}`);
+      await db.exec(sqlFile('migrations/20261110430000_nalozi_radnici_brisanje_fk.sql'));
       await db.query('DELETE FROM storage.objects WHERE name = $1', [paths[0]]);
       await assert.rejects(remove(), /Zaštićeno brisanje nije moguće/);
       for (const table of tables) assert.deepEqual(await rows(table), before.get(table), `Missing report blocks order deletion: ${table}`);
@@ -4670,6 +4677,191 @@ test('recovery SQL compiles and passes transactional, permission and retention c
       await db.query('SELECT public.restore_resource_deletion($1)',[deletion3]);
       assert.equal((await costSnapshots(invoice)).length,2);
       await db.exec('RESET ROLE');
+    });
+    await t.test('personal car pilot: real accounting, audit, access, idempotency and rollback integration', async (t) => {
+      const company = '00000000-0000-0000-0000-000000000001';
+      const actor = '00000000-0000-0000-0000-000000000002';
+      const worker = 'a2000000-0000-0000-0000-000000000001';
+      const car = 'a2000000-0000-0000-0000-000000000002';
+      const site = 'a2000000-0000-0000-0000-000000000003';
+      const foreign = 'a2000000-0000-0000-0000-000000000004';
+      const outsider = 'a2000000-0000-0000-0000-000000000005';
+      const secondWorker = 'a2000000-0000-0000-0000-000000000006';
+      const migration = sqlFile('migrations/20261110420000_osobni_auto_pilot.sql');
+      await db.exec(`RESET ROLE;
+        GRANT SELECT ON public.app_profiles TO authenticated;
+        INSERT INTO public.radnici(id,company_id,ime,prezime,status) VALUES ('${worker}','${company}','Ivan','Perićak','aktivan');
+        UPDATE public.app_profiles SET company_id='${company}',approved=true,is_admin=true,radnik_id='${worker}' WHERE id='${actor}';
+        SELECT set_config('request.jwt.claim.sub','${actor}',false);
+        INSERT INTO public.vozila(id,company_id,marka,model,registracija,status,kilometraza,cijena_km)
+          VALUES ('${car}','${company}','Pilot','Auto','ZG-PILOT','slobodno',1000,0.333);
+        INSERT INTO public.gradilista(id,company_id,naziv,status) VALUES ('${site}','${company}','Pilot gradilište','aktivno');
+        INSERT INTO public.tvrtke(id,aktivna) VALUES ('${foreign}',true);
+        INSERT INTO public.vozila(id,company_id,marka,model,registracija,status,kilometraza,cijena_km)
+          VALUES ('${foreign}','${foreign}','Tuđi','Auto','FOREIGN-PILOT','slobodno',1000,0.5);
+        INSERT INTO public.gradilista(id,company_id,naziv,status) VALUES ('${foreign}','${foreign}','Tuđe gradilište','aktivno');
+        INSERT INTO auth.users(id) VALUES ('${outsider}');
+        INSERT INTO public.radnici(id,company_id,ime,prezime,status) VALUES ('${secondWorker}','${company}','Drugi','Djelatnik','aktivan');
+        INSERT INTO public.app_profiles(id,company_id,approved,is_admin,radnik_id)
+          VALUES ('${outsider}','${company}',true,true,'${secondWorker}');`);
+      // Check fail-closed enrollment before the real migration is committed.
+      const enrollment = migration.slice(0, migration.indexOf('CREATE FUNCTION public.has_my_personal_car'));
+      await db.query("UPDATE public.radnici SET ime='Drugo' WHERE id=$1", [worker]);
+      await assert.rejects(db.exec(enrollment), /točno jednog/);
+      await db.exec('ROLLBACK');
+      await db.query("UPDATE public.radnici SET ime='Ivan' WHERE id=$1", [worker]);
+      await db.query("UPDATE public.radnici SET ime='Ivan',prezime='Perićak' WHERE id=$1", [secondWorker]);
+      await assert.rejects(db.exec(enrollment), /točno jednog/);
+      await db.exec('ROLLBACK');
+      await db.query("UPDATE public.radnici SET ime='Drugi',prezime='Djelatnik' WHERE id=$1", [secondWorker]);
+      await db.exec(migration);
+      const id = (n) => `a2100000-0000-0000-0000-${String(n).padStart(12, '0')}`;
+      const report = async (n, from, to, destination = null, overrides = {}) => {
+        const args = { id: id(n), car, date: '2026-01-01', from, to, destination, start: null, end: null, note: '', ...overrides };
+        return (await db.query('SELECT public.report_my_personal_car_trip($1,$2,$3,$4,$5,$6,$7,$8,$9) id',
+          [args.id, args.car, args.date, args.from, args.to, args.destination, args.start, args.end, args.note])).rows[0].id;
+      };
+      const trip = async (n) => (await db.query('SELECT * FROM public.osobni_auto_voznje WHERE id=$1', [id(n)])).rows[0];
+      const cost = async (n) => (await db.query('SELECT * FROM public.troskovi WHERE id=$1', [(await trip(n)).trosak_id])).rows[0];
+      const count = async (table) => Number((await db.query(`SELECT count(*) n FROM public.${table}`)).rows[0].n);
+      const km = async () => (await db.query('SELECT kilometraza FROM public.vozila WHERE id=$1', [car])).rows[0].kilometraza;
+      const cancel = (n, reason = 'Pogrešan unos') => db.query('SELECT public.cancel_my_personal_car_trip($1,$2)', [id(n), reason]);
+
+      await t.test('private and business trips snapshot exact accounting without hours; retries never duplicate', async () => {
+        const costsBefore = await count('troskovi');
+        const hoursBefore = await count('radno_vrijeme');
+        assert.equal(await report(1, 1000, 1010), id(1));
+        assert.equal(await count('troskovi'), costsBefore);
+        assert.equal((await trip(1)).iznos, '0.00');
+        assert.equal((await trip(1)).trosak_id, null);
+        assert.equal(await km(), 1010);
+        assert.equal(await report(2, 1010, 1035, site, { start: '22:30', end: '01:00', note: ' Test ' }), id(2));
+        const business = await trip(2);
+        assert.equal(business.iznos, '8.33');
+        assert.equal(business.napomena, 'Test');
+        const expense = await cost(2);
+        assert.equal(expense.iznos, '8.33');
+        assert.equal(expense.gradiliste_id, site);
+        assert.equal(expense.company_id, company);
+        assert.equal(expense.kategorija, 'put');
+        assert.match(expense.opis, /^Osobni auto:/);
+        assert.equal(expense.datum.toISOString().slice(0, 10), '2026-01-01');
+        assert.equal(await count('radno_vrijeme'), hoursBefore);
+        assert.equal(await count('troskovi'), costsBefore + 1);
+        await db.query('UPDATE public.vozila SET cijena_km=0.5 WHERE id=$1', [car]);
+        assert.equal(await report(2, 1010, 1035, site, { start: '22:30', end: '01:00', note: 'Test' }), id(2));
+        assert.equal(await count('troskovi'), costsBefore + 1);
+        assert.equal((await trip(2)).cijena_km, '0.333');
+        await assert.rejects(report(2, 1010, 1036, site), /iskorištena/);
+        const options = (await db.query('SELECT public.get_my_personal_car_options() data')).rows[0].data;
+        assert.equal(options.zadnje_vozilo_id, car);
+        assert.ok(options.vozila.every((item) => item.id !== foreign));
+        assert.ok(options.gradilista.every((item) => item.id !== foreign));
+        await db.query('SELECT public.remember_my_personal_car_vehicle($1)', [car]);
+        await assert.rejects(db.query('SELECT public.remember_my_personal_car_vehicle($1)', [foreign]), (reason) => reason.code === '42501');
+        assert.equal(await report(3, 900, 920), id(3));
+        assert.equal(await km(), 1035);
+      });
+      await t.test('server rejects overlapping intervals, bad input, unavailable assets and missing business rate', async () => {
+        await assert.rejects(report(4, 1020, 1040), /preklapaju/);
+        for (const override of [{ from: -1 }, { to: 1035 }, { date: '2999-01-01' }, { start: '08:00' }, { note: 'x'.repeat(1001) }]) {
+          await assert.rejects(report(4, 1035, 1050, null, override), (reason) => reason.code === '22023');
+        }
+        await assert.rejects(report(4, 1035, 1050, foreign), (reason) => reason.code === '42501');
+        await assert.rejects(report(4, 1035, 1050, null, { car: foreign }), (reason) => reason.code === '42501');
+        await db.query("UPDATE public.vozila SET status='servis' WHERE id=$1", [car]);
+        await assert.rejects(report(4, 1035, 1050), (reason) => reason.code === '42501');
+        await db.query("UPDATE public.vozila SET status='slobodno',cijena_km=0 WHERE id=$1", [car]);
+        await assert.rejects(report(4, 1035, 1050, site), /cijenu po kilometru/);
+        assert.equal(await report(4, 1035, 1050), id(4));
+        await db.query('UPDATE public.vozila SET cijena_km=0.5 WHERE id=$1', [car]);
+      });
+      await t.test('only the enrolled active approved worker sees trips; names and admin status do not grant access', async () => {
+        await db.query("UPDATE public.radnici SET ime='Promijenjeno' WHERE id=$1", [worker]);
+        await db.exec('SET ROLE authenticated');
+        assert.equal((await db.query('SELECT public.has_my_personal_car() allowed')).rows[0].allowed, true);
+        assert.equal((await db.query('SELECT * FROM public.osobni_auto_voznje')).rows.length, 4);
+        await assert.rejects(db.query('UPDATE public.osobni_auto_voznje SET iznos=0'), (reason) => reason.code === '42501');
+        await assert.rejects(db.query('DELETE FROM public.osobni_auto_voznje'), (reason) => reason.code === '42501');
+        await assert.rejects(db.query('INSERT INTO public.osobni_auto_voznje(id) VALUES ($1)', [id(90)]), (reason) => reason.code === '42501');
+        await db.exec(`RESET ROLE; SELECT set_config('request.jwt.claim.sub','${outsider}',false); SET ROLE authenticated`);
+        assert.equal((await db.query('SELECT public.has_my_personal_car() allowed')).rows[0].allowed, false);
+        assert.equal((await db.query('SELECT * FROM public.osobni_auto_voznje')).rows.length, 0);
+        for (const call of [
+          () => db.query('SELECT public.get_my_personal_car_options()'),
+          () => db.query('SELECT * FROM public.get_my_personal_car_trips()'),
+          () => db.query('SELECT public.remember_my_personal_car_vehicle($1)', [car]),
+          () => report(5, 1050, 1060, site), () => cancel(2),
+        ]) await assert.rejects(call(), (reason) => reason.code === '42501');
+        await db.exec(`RESET ROLE; SELECT set_config('request.jwt.claim.sub','${actor}',false)`);
+        for (const [table, column, value] of [['radnici', 'status', 'neaktivan'], ['app_profiles', 'approved', false], ['app_profiles', 'company_id', foreign]]) {
+          await db.exec('BEGIN');
+          await db.query(`UPDATE public.${table} SET ${column}=$1 WHERE id=$2`, [value, table === 'radnici' ? worker : actor]);
+          assert.equal((await db.query('SELECT public.has_my_personal_car() allowed')).rows[0].allowed, false);
+          await assert.rejects(report(5, 1050, 1060), (reason) => reason.code === '42501');
+          await db.exec('ROLLBACK');
+        }
+        await db.exec('SET ROLE anon');
+        await assert.rejects(db.query('SELECT public.has_my_personal_car()'), (reason) => reason.code === '42501');
+        await db.exec('RESET ROLE');
+      });
+      await t.test('storno retains audit and mileage, zeroes expense atomically, blocks paid and independently edited costs', async () => {
+        await assert.rejects(db.query('UPDATE public.troskovi SET iznos=1 WHERE id=$1', [(await trip(2)).trosak_id]), /vezan uz prijavu/);
+        await assert.rejects(db.query('DELETE FROM public.troskovi WHERE id=$1', [(await trip(2)).trosak_id]), /vezan uz prijavu/);
+        await db.query('UPDATE public.troskovi SET placen=true WHERE id=$1', [(await trip(2)).trosak_id]);
+        await assert.rejects(cancel(2), /već plaćen/);
+        assert.equal((await trip(2)).stornirano_at, null);
+        await db.query('UPDATE public.troskovi SET placen=false WHERE id=$1', [(await trip(2)).trosak_id]);
+        await assert.rejects(cancel(2, ' '), /razlog/);
+        await cancel(2);
+        assert.ok((await trip(2)).stornirano_at);
+        assert.equal((await trip(2)).iznos, '8.33');
+        assert.equal((await cost(2)).iznos, '0.00');
+        const audit = (await db.query("SELECT * FROM private.business_change_history WHERE record_id=$1 AND table_name='troskovi'", [(await trip(2)).trosak_id])).rows;
+        assert.ok(audit.some((row) => row.operation === 'UPDATE'));
+        await cancel(2);
+        await assert.rejects(db.query('UPDATE public.troskovi SET iznos=8.33 WHERE id=$1', [(await trip(2)).trosak_id]), /vezan uz prijavu/);
+        assert.equal(await km(), 1050);
+        await cancel(1);
+        assert.equal(await report(5, 1010, 1035, site), id(5));
+        assert.equal((await cost(5)).iznos, '12.50');
+      });
+      await t.test('failed cost/vehicle/cancellation writes roll back all changes', async () => {
+        for (const table of ['troskovi', 'vozila', 'osobni_auto_voznje']) {
+          await db.exec('BEGIN');
+          const beforeCosts = await count('troskovi');
+          const beforeKm = await km();
+          await db.exec(`CREATE FUNCTION public.test_personal_car_skip() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
+            CREATE TRIGGER test_personal_car_skip BEFORE ${table === 'vozila' ? 'UPDATE' : 'INSERT'} ON public.${table}
+            FOR EACH ROW EXECUTE FUNCTION public.test_personal_car_skip();
+            SAVEPOINT before_report;`);
+          await assert.rejects(report(6, 1050, 1060, site), /nije .*spremljen/);
+          await db.exec('ROLLBACK TO SAVEPOINT before_report');
+          assert.equal(await count('troskovi'), beforeCosts);
+          assert.equal(await trip(6), undefined);
+          assert.equal(await km(), beforeKm);
+          await db.exec('ROLLBACK');
+        }
+        await db.exec(`BEGIN;
+          CREATE FUNCTION public.test_personal_car_skip() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
+          CREATE TRIGGER test_personal_car_skip BEFORE UPDATE ON public.troskovi FOR EACH ROW EXECUTE FUNCTION public.test_personal_car_skip();
+          SAVEPOINT before_cancel;`);
+        await assert.rejects(cancel(5), /nije storniran/);
+        await db.exec('ROLLBACK TO SAVEPOINT before_cancel');
+        assert.equal((await trip(5)).stornirano_at, null);
+        assert.equal((await cost(5)).iznos, '12.50');
+        await db.exec('ROLLBACK');
+      });
+      await t.test('history uses stable paired cursors with thirty rows per page', async () => {
+        for (let n = 10; n < 43; n++) await report(n, 2000 + n * 2, 2001 + n * 2);
+        const page = (await db.query('SELECT * FROM public.get_my_personal_car_trips()')).rows;
+        assert.equal(page.length, 30);
+        const cursor = page.at(-1);
+        const older = (await db.query('SELECT * FROM public.get_my_personal_car_trips($1,$2)', [cursor.created_at, cursor.id])).rows;
+        assert.ok(older.length > 0);
+        assert.ok(older.every((item) => !page.some((first) => first.id === item.id)));
+        await assert.rejects(db.query('SELECT * FROM public.get_my_personal_car_trips(now(),NULL)'), /Nepotpun/);
+      });
     });
   } finally {
     await db.close();

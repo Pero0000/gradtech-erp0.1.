@@ -972,7 +972,9 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     const endDate = item.datum_zavrsetka ?? item.datum;
     const startDate = item.datum_pocetka ?? item.datum;
     const late = item.status === 'otvoren' && endDate < new Date().toISOString().slice(0, 10);
-    const dateLabel = startDate === endDate ? date(endDate) : `${date(startDate)} – ${date(endDate)}`;
+    const dateLabel = startDate === endDate
+      ? `Krajnji rok: ${date(endDate)}`
+      : `Početni rok: ${date(startDate)} · Krajnji rok: ${date(endDate)}`;
     return (
       <div key={item.id} className="group flex flex-wrap items-start gap-2 text-xs">
         <input
@@ -997,7 +999,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
           <option value="">Bez kooperanta</option>
           {kooperanti.map((kooperant) => <option key={kooperant.id} value={kooperant.id}>{kooperant.naziv}</option>)}
         </Select>
-        <span className={`flex-shrink-0 font-medium ${late ? 'text-red-600' : 'text-slate-600'}`}>{dateLabel}</span>
+        <span className={`min-w-0 font-medium ${late ? 'text-red-600' : 'text-slate-600'}`}>{dateLabel}</span>
         {item.zadatak_id ? (
           <span className="flex-shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{item.opis === 'Dodatni rad' ? 'Dodatni rad' : 'Zadatak'}</span>
         ) : (

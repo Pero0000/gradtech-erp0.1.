@@ -43,6 +43,13 @@ const auth = {
   }),
 };
 const stateFixtures = {
+  'TerminskiPlanView.tsx': {
+    rangeStart: '2026-11-06',
+    gradilista: [
+      { ...site, datum_pocetka: '2026-11-07', datum_zavrsetka: '2026-11-18' },
+      { ...site, id: 'site-start', naziv: 'Gradilište samo s početkom', datum_pocetka: '2026-11-10', datum_zavrsetka: null },
+    ],
+  },
   'KorisniciView.tsx': {
     users: [{
       id: 'managed-user', company_id: 'company', email: 'very.long.employee.address@example.test',
@@ -149,6 +156,7 @@ function loader(overrides = {}) {
 
 export async function buildResponsiveFixtures() {
   const views = [
+    ['TerminskiPlanView', { onOpenGradiliste() {} }],
     ['Dashboard', { onNavigate() {} }], ['GradilistaView', {}], ['RegistryViews', {}, 'InvestitoriView'],
     ['RegistryViews', {}, 'ObjektiView'], ['KooperantiView', {}], ['StavkeView', {}], ['PonudeView', {}],
     ['RadniciView', {}], ['VozilaView', {}], ['OpremaView', { kategorija: 'alat' }], ['OpremaView', { kategorija: 'stroj' }],
@@ -185,6 +193,26 @@ export async function buildResponsiveFixtures() {
       fixtures.push({ name, html: renderToStaticMarkup(React.createElement(exports[name], props)) });
     }
   }
+  const personalCarLoader = loader({
+    'MobileWorkOrdersView.tsx': { portalTab: 'osobni_auto', personalCarAccess: true },
+    'PersonalCarTab.tsx': {
+      ready: true, vehicleId: vehicle.id, startKm: '123456', endKm: '123481', destination: site.id,
+      options: {
+        zadnje_vozilo_id: vehicle.id,
+        vozila: [{ id: vehicle.id, naziv: `${vehicle.marka} ${vehicle.model} · ${vehicle.registracija}`, kilometraza: 123456, cijena_km: 0.333 }],
+        gradilista: [{ id: site.id, naziv: site.naziv }],
+      },
+      trips: [{
+        id: 'trip', vozilo_naziv: `${vehicle.marka} ${vehicle.model} · ${vehicle.registracija}`,
+        datum: '2026-01-01', km_pocetak: 123456, km_kraj: 123481, kilometri: 25,
+        gradiliste_id: site.id, gradiliste_naziv: site.naziv, iznos: 8.33, cijena_km: 0.333,
+        vrijeme_od: '08:00:00', vrijeme_do: '09:00:00', napomena: 'Evidencija poslovne vožnje',
+        stornirano_at: null,
+      }],
+    },
+  });
+  const personalPortal = personalCarLoader(path.join(root, 'src', 'components', 'mobile', 'MobileWorkOrdersView.tsx')).MobileWorkOrdersView;
+  fixtures.push({ name: 'MobileWorkOrdersView-personal-car', html: renderToStaticMarkup(React.createElement(personalPortal)) });
   const { Modal } = load(path.join(root, 'src', 'components', 'ui', 'Modal.tsx'));
   const { Sidebar } = load(path.join(root, 'src', 'components', 'Sidebar.tsx'));
   fixtures.push({ name: 'Sidebar-mobile', html: renderToStaticMarkup(React.createElement(Sidebar, {

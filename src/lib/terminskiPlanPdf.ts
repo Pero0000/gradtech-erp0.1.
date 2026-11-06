@@ -9,6 +9,7 @@ export interface TerminskiPlanPdfRow {
   kraj: string;
   status: string;
   boja: string;
+  orijentir?: boolean;
 }
 
 export interface TerminskiPlanPdfSpec {
@@ -88,7 +89,7 @@ function pageMarkup(spec: TerminskiPlanPdfSpec) {
       </div>
       <div class="timeline-row">
         <div class="cells" style="grid-template-columns:${gridTemplate}">${weekendCells}</div>
-        ${intersectsPage ? `<div class="bar" style="left:${left}%;width:${width}%;background:${escapeHtml(row.boja)}" title="${escapeHtml(row.status)}"></div>` : ''}
+        ${intersectsPage ? `<div class="bar${row.orijentir ? ' reference' : ''}" style="left:${left}%;width:${width}%;${row.orijentir ? '' : `background:${escapeHtml(row.boja)}`}" title="${escapeHtml(row.status)}"></div>` : ''}
       </div>
       </div>`;
   }).join('');
@@ -126,6 +127,7 @@ function pageMarkup(spec: TerminskiPlanPdfSpec) {
       .cell.sunday{background:#fff1f2;border-right:2px solid #fecdd3}
       .cell.holiday{background:#fff1f2;border-right:2px solid #fecdd3}
       .bar{position:absolute;top:50%;height:9px;min-width:4px;transform:translateY(-50%);border-radius:8px;box-shadow:0 1px 2px #0f172a33}
+      .bar.reference{height:1px;border-top:1px dashed #94a3b8;border-radius:0;box-shadow:none;background:transparent}
       .footer{display:flex;justify-content:space-between;margin-top:7px;padding-top:4px;border-top:1px solid #cbd5e1;font-size:9px;color:#64748b}
     </style>
     <div class="page">

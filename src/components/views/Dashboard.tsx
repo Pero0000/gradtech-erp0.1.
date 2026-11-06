@@ -190,8 +190,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     const site = row.gradiliste;
     const lateMilestone = rokovi
       .filter((rok) => rok.gradiliste_id === site.id && rok.status !== 'zavrsen'
-        && site.status !== 'zavrseno' && site.status !== 'neplaceno' && rok.datum < danas)
-      .sort((a, b) => a.datum.localeCompare(b.datum))[0];
+        && site.status !== 'zavrseno' && site.status !== 'neplaceno' && (rok.datum_zavrsetka ?? rok.datum) < danas)
+      .sort((a, b) => (a.datum_zavrsetka ?? a.datum).localeCompare(b.datum_zavrsetka ?? b.datum))[0];
     const lateEndDate = site.datum_zavrsetka && site.datum_zavrsetka < danas
       && site.status !== 'zavrseno' && site.status !== 'neplaceno' ? site.datum_zavrsetka : null;
     const daysLate = (date: string) => Math.floor((new Date(`${danas}T00:00:00`).getTime() - new Date(`${date}T00:00:00`).getTime()) / 86400000);
@@ -214,8 +214,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     let days = -1;
     const level: ObavijestLevel = 'overdue';
     if (lateMilestone) {
-      days = -daysLate(lateMilestone.datum);
-      detail = `${lateMilestone.naziv} kasni ${daysLate(lateMilestone.datum)} dana`;
+      days = -daysLate(lateMilestone.datum_zavrsetka ?? lateMilestone.datum);
+      detail = `${lateMilestone.naziv} · Krajnji rok kasni ${Math.abs(days)} dana`;
       badge = 'Rok';
     } else if (lateEndDate) {
       days = -daysLate(lateEndDate);

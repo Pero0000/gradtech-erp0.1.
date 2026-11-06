@@ -13,7 +13,7 @@ import {
   iznosFakture,
 } from '@/lib/api';
 import { servisAlert } from '@/lib/servis';
-import { todayISO } from '@/lib/rokovi';
+import { currentRokDeadline, todayISO } from '@/lib/rokovi';
 import { obavijestTipovi, type ObavijestGrupa, type ObavijestTip, type Postavke } from '@/lib/postavke';
 
 export type ObavijestLevel = 'overdue' | 'today' | 'soon' | 'upcoming';
@@ -173,7 +173,8 @@ export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
   src.rokovi.filter((r) => r.status !== 'zavrsen').forEach((r) => {
     const g = gradNaziv.get(r.gradiliste_id);
     if (!g || g.status === 'zavrseno' || g.status === 'neplaceno') return;
-    push('projekt_rok', `rk-${r.id}`, g.naziv, r.naziv, r.datum, 'gradilista', g.id);
+    const deadline = currentRokDeadline(r, today);
+    push('projekt_rok', `rk-${r.id}`, g.naziv, deadline.label, deadline.datum, 'gradilista', g.id);
   });
 
   src.fakture.filter((f) => f.status !== 'placena' && f.datum_dospjecja).forEach((f) => {

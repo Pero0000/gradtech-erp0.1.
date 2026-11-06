@@ -829,7 +829,6 @@ export function RasporedView() {
       await loadDay(selectedDate);
     } catch (e) {
       setError(errMsg(e, 'Greška pri brisanju naloga'));
-      closeNalog();
     } finally {
       setNalogSaving(false);
     }

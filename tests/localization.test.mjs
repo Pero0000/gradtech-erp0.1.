@@ -57,7 +57,7 @@ function elements(node) {
   return [node, ...elements(node.props.children)];
 }
 
-function fuelForm(mobile, liters, pin = null) {
+function fuelForm(mobile, liters, pin = null, workerId = 'worker') {
   const writes = [];
   const worker = {
     id: 'worker', ime: 'Test', prezime: 'Worker', uloga: 'radnik',
@@ -73,6 +73,7 @@ function fuelForm(mobile, liters, pin = null) {
     options: { vozila: [vehicle], radnici: [worker] },
   };
   const mocks = {
+    '@/auth/useAuth': { useAuth: () => ({ profile: { radnik_id: workerId } }) },
     'react/jsx-runtime': jsxRuntime,
     react: { useState: (value) => [value, () => {}], useEffect() {}, useMemo: (fn) => fn() },
     'lucide-react': { Fuel() {}, Gauge() {}, Plus() {}, RefreshCw() {}, AlertTriangle() {}, Pencil() {}, Trash2() {} },
@@ -140,9 +141,42 @@ for (const mobile of [false, true]) {
         assert.equal(writes.length, 1);
         assert.equal(writes[0].litara, 42.5);
         assert.equal(writes[0].datum, '2026-11-04');
+        if (mobile) assert.equal(writes[0].tocio_radnik_id, 'worker');
       } else {
         assert.equal(writes.length, 0, 'Invalid quantities must not reach the API');
       }
+
     });
   }
+}
+
+test('ERP fuel entry fields share top-aligned labels and equal control heights', () => {
+  const { nodes } = fuelForm(false, '42,5');
+  for (const title of ['Datum', 'Litre goriva', 'Kilometraža auta', 'Tko je točio']) {
+    const label = nodes.find(node => node.type === 'label'
+      && Array.isArray(node.props.children) && node.props.children[0] === title);
+    assert.ok(label, `Missing ${title} field`);
+    assert.match(label.props.className, /flex min-w-0 flex-col gap-1/);
+    const control = label.props.children.find(child => child?.props && 'value' in child.props);
+    assert.equal(control.props.className, 'h-11');
+  }
+});
+
+test('worker fuel portal hides worker selection while retaining automatic attribution', () => {
+  const { nodes } = fuelForm(true, '42,5');
+  assert.equal(nodes.filter(node => node.type === 'select').length, 1, 'Only the vehicle selector remains');
+  assert.equal(nodes.some(node => node.type === 'option' && node.props.value === 'worker'), false);
+  assert.equal(nodes.some(node => node.type === 'p'
+    && typeof node.props.children === 'string' && node.props.children.includes('automatski bilježi na tvoje ime')), true);
+});
+
+for (const workerId of [null, 'unavailable-worker']) {
+  test(`worker fuel portal refuses attribution to another worker when linked worker is ${workerId}`, async () => {
+    const { nodes, writes } = fuelForm(true, '42,5', null, workerId);
+    const saveButton = nodes.find(node => node.type === 'button'
+      && Array.isArray(node.props.children) && node.props.children.includes('Spremi točenje'));
+    assert.equal(saveButton.props.disabled, true);
+    await saveButton.props.onClick();
+    assert.equal(writes.length, 0);
+  });
 }

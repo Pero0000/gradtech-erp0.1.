@@ -23,6 +23,7 @@ import {
   fetchNalogZadaci,
   fetchOprema,
   saveMobileNalogIzvjestaj,
+  saveMobileNalogTimeEntries,
   saveMobileWorkerTime,
   setMobileNalogVozac,
   startMobileWorkerTime,
@@ -98,6 +99,17 @@ const emptyReport: MobileReport = {
 
 const DEFAULT_POCETAK_RADA = '06:00';
 const DEFAULT_KRAJ_RADA = '16:00';
+const timeToMinutes = (value: string) => {
+  const [hours, minutes] = value.split(':').map(Number);
+  return hours * 60 + minutes;
+};
+const timeRangesOverlap = (firstStart: string, firstEnd: string, secondStart: string, secondEnd: string) => {
+  const firstFrom = timeToMinutes(firstStart);
+  const secondFrom = timeToMinutes(secondStart);
+  const firstTo = timeToMinutes(firstEnd) + (firstEnd <= firstStart ? 1440 : 0);
+  const secondTo = timeToMinutes(secondEnd) + (secondEnd <= secondStart ? 1440 : 0);
+  return [-1440, 0, 1440].some((shift) => firstFrom < secondTo + shift && secondFrom + shift < firstTo);
+};
 interface PhotoUpload {
   id: string;
   nalogId: string;
@@ -172,11 +184,18 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [photoLoadError, setPhotoLoadError] = useState<string | null>(null);
+  const [equipmentLoadError, setEquipmentLoadError] = useState<string | null>(null);
   const [refreshingPhotos, setRefreshingPhotos] = useState(false);
   const [newMaterial, setNewMaterial] = useState('');
   const [newTool, setNewTool] = useState('');
   const [newTask, setNewTask] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
   const [teamTimeDrafts, setTeamTimeDrafts] = useState<Record<string, { vrijemeOd: string; vrijemeDo: string }>>({});
+  const [extraTimeRows, setExtraTimeRows] = useState<Array<{
+    id: string;
+    radnici: Array<{ radnikId: string; id: string; vrijemeOd: string; vrijemeDo: string }>;
+    napomena: string;
+  }>>([]);
+  const [bezSatiRadnici, setBezSatiRadnici] = useState<string[]>([]);
 
   const [photoQueue, setPhotoQueue] = useState<PhotoUpload[]>([]);
   const [portalTab, setPortalTab] = useState<WorkerPortalTab>('nalozi');
@@ -188,6 +207,9 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
   selectedIdRef.current = selectedId;
 
   const selected = orders.find((order) => order.id === selectedId) ?? null;
+  const isWorkTimeOverlapError = Boolean(
+    error && /već je upisano|preklapa se s drugim radnim vremenom|dionica se preklapa/i.test(error),
+  );
   const canEditOrder = Boolean(
     selected
     && selected.status !== 'zavrsen'
@@ -298,6 +320,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
       setError(null);
       setNotice(null);
       setPhotoLoadError(null);
+      setEquipmentLoadError(null);
       setPrep([]);
     }
     try {
@@ -317,15 +340,32 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         (foto) => ({ foto, error: null as unknown }),
         (reason: unknown) => ({ foto: [] as NalogFoto[], error: reason }),
       );
-      const [zadaci, stavke, dokumenti, linkedIds, ekipa, alati, strojevi] = await Promise.all([
+      const [zadaci, stavke, dokumenti, linkedIds, ekipa] = await Promise.all([
         fetchNalogZadaci(order.id),
         fetchNalogStavke(order.id),
         fetchNalogDokumenti(order.id),
         fetchNalogGradilisteDokumentIds(order.id),
         fetchMobileNalogTeam(order.id),
+      ]);
+      const [alatiResult, strojeviResult] = await Promise.allSettled([
         fetchOprema('alat'),
         fetchOprema('stroj'),
       ]);
+      const alati = alatiResult.status === 'fulfilled' ? alatiResult.value : [];
+      const strojevi = strojeviResult.status === 'fulfilled' ? strojeviResult.value : [];
+      const equipmentErrors = [
+        alatiResult.status === 'rejected'
+          ? `alat: ${errorMessage(alatiResult.reason, 'nije moguće učitati')}`
+          : null,
+        strojeviResult.status === 'rejected'
+          ? `strojeve: ${errorMessage(strojeviResult.reason, 'nije moguće učitati')}`
+          : null,
+      ].filter((message): message is string => message !== null);
+      setEquipmentLoadError(
+        equipmentErrors.length > 0
+          ? `Popis opreme nije moguće učitati (${equipmentErrors.join('; ')}). Nalog je otvoren, ali opremu trenutačno nije moguće odabrati.`
+          : null,
+      );
       const { foto, error: photoError } = await photoRequest;
       const siteDocs = nalog.gradiliste_id ? await fetchGradilisteDokumenti(nalog.gradiliste_id) : [];
       const selectedSiteDocs = siteDocs.filter((document) => linkedIds.includes(document.id));
@@ -342,6 +382,26 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         foto,
         ekipa,
       });
+      const extraRows = new Map<string, {
+        id: string;
+        radnici: Array<{ radnikId: string; id: string; vrijemeOd: string; vrijemeDo: string }>;
+        napomena: string;
+      }>();
+      for (const worker of ekipa) {
+        for (const segment of worker.dodatne_dionice) {
+          const groupId = segment.grupa_id || segment.id;
+          const row = extraRows.get(groupId) ?? { id: groupId, radnici: [], napomena: segment.napomena ?? '' };
+          row.radnici.push({
+            radnikId: worker.radnik_id,
+            id: crypto.randomUUID(),
+            vrijemeOd: segment.vrijeme_od.slice(0, 5),
+            vrijemeDo: segment.vrijeme_do.slice(0, 5),
+          });
+          extraRows.set(groupId, row);
+        }
+      }
+      setExtraTimeRows([...extraRows.values()]);
+      setBezSatiRadnici(ekipa.filter((worker) => worker.bez_sati_na_gradilistu).map((worker) => worker.radnik_id));
       setPhotoLoadError(photoError
         ? errorMessage(photoError, 'Fotografije naloga nije moguće učitati.')
         : null);
@@ -582,7 +642,9 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
       return;
     }
     await runAction(async () => {
+      const timeRangesByWorker = new Map<string, Array<{ from: string; to: string }>>();
       for (const worker of details.ekipa) {
+        if (bezSatiRadnici.includes(worker.radnik_id)) continue;
         const draft = teamTimeDrafts[worker.radnik_id];
         if (!draft?.vrijemeOd || !draft.vrijemeDo) {
           throw new Error(`Upiši početak i završetak rada za ${worker.ime} ${worker.prezime}.`);
@@ -590,8 +652,28 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         if (draft.vrijemeDo <= draft.vrijemeOd) {
           throw new Error(`Završetak rada mora biti nakon početka (${worker.ime} ${worker.prezime}).`);
         }
+        timeRangesByWorker.set(worker.radnik_id, [{ from: draft.vrijemeOd, to: draft.vrijemeDo }]);
+      }
+      for (const row of extraTimeRows) {
+        if (row.radnici.length === 0) {
+          throw new Error('Za svaku dodatnu dionicu odaberi barem jednog djelatnika.');
+        }
+        for (const assignment of row.radnici) {
+          if (!assignment.vrijemeOd || !assignment.vrijemeDo || assignment.vrijemeOd === assignment.vrijemeDo) {
+            const worker = details.ekipa.find((member) => member.radnik_id === assignment.radnikId);
+            throw new Error(`Upiši početak i završetak dodatne dionice za ${worker?.ime ?? 'djelatnika'} ${worker?.prezime ?? ''}.`);
+          }
+          const ranges = timeRangesByWorker.get(assignment.radnikId) ?? [];
+          if (ranges.some((range) => timeRangesOverlap(range.from, range.to, assignment.vrijemeOd, assignment.vrijemeDo))) {
+            const worker = details.ekipa.find((member) => member.radnik_id === assignment.radnikId);
+            throw new Error(`Dionica se preklapa s drugim radnim vremenom za ${worker?.ime ?? 'djelatnika'} ${worker?.prezime ?? ''}.`);
+          }
+          ranges.push({ from: assignment.vrijemeOd, to: assignment.vrijemeDo });
+          timeRangesByWorker.set(assignment.radnikId, ranges);
+        }
       }
       for (const worker of details.ekipa) {
+        if (bezSatiRadnici.includes(worker.radnik_id)) continue;
         const draft = teamTimeDrafts[worker.radnik_id];
         await saveMobileWorkerTime({
           nalogId: selected.id,
@@ -601,6 +683,18 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
           reviewedSections: reviewSectionIds,
         });
       }
+      await saveMobileNalogTimeEntries({
+        nalogId: selected.id,
+        dodatneDionice: extraTimeRows.flatMap((row) => row.radnici.map((assignment) => ({
+          id: assignment.id,
+          grupaId: row.id,
+          radnikId: assignment.radnikId,
+          vrijemeOd: assignment.vrijemeOd,
+          vrijemeDo: assignment.vrijemeDo,
+          napomena: row.napomena.trim() || null,
+        }))),
+        bezSatiRadnici,
+      });
       await saveReport({ potvrde: [...potvrde.filter((item) => item !== 'vrijeme'), 'vrijeme'] });
     }, 'Radno vrijeme ekipe je potvrđeno.');
   };
@@ -745,7 +839,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
 
       <div className="mx-auto min-w-0 w-full max-w-xl space-y-4 p-3 sm:p-4 xl:max-w-4xl">
         {pushError && <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{pushError}</p>}
-        {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+        {error && !isWorkTimeOverlapError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
         {notice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
 
         {selected ? (
@@ -1178,6 +1272,11 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                     </WorkOrderPanel>
 
                     <WorkOrderPanel title="Strojevi i radni sati" icon={<Wrench className="h-5 w-5" />} tone="amber">
+                      {equipmentLoadError && (
+                        <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                          {equipmentLoadError}
+                        </p>
+                      )}
                       <ItemEditor
                         title="Strojevi"
                         items={strojStavke}
@@ -1198,20 +1297,42 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                     <StepHeader step={3} title="Završetak dana" text="Potvrdi radno vrijeme, stanje ENC-a i kilometre povratka, zatim zaključi nalog." />
 
                     <WorkOrderPanel title="Radno vrijeme" icon={<Clock3 className="h-5 w-5" />} tone="sky">
-                      <p className="text-sm text-slate-600">Radno vrijeme je unaprijed postavljeno na {DEFAULT_POCETAK_RADA}–{DEFAULT_KRAJ_RADA}. Ispravi ako je potrebno pa potvrdi.</p>
+                      <p className="text-sm text-slate-600">Radno vrijeme je unaprijed postavljeno na {DEFAULT_POCETAK_RADA}–{DEFAULT_KRAJ_RADA}. Ispravi ga ako je potrebno. Dodatne dionice ulaze u ukupne sate pa se s osnovnim vremenom ne smiju preklapati.</p>
+                      {isWorkTimeOverlapError && error && (
+                        <div role="alert" aria-live="assertive" className="rounded-xl border-2 border-red-300 bg-red-50 p-4 text-sm font-semibold leading-6 text-red-900 shadow-sm">
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                            <p>{error}</p>
+                          </div>
+                        </div>
+                      )}
                       <div className="space-y-3">
                         {details.ekipa.map((worker) => {
                           const timeDraft = teamTimeDrafts[worker.radnik_id] ?? { vrijemeOd: DEFAULT_POCETAK_RADA, vrijemeDo: DEFAULT_KRAJ_RADA };
                           const locked = !canEditOrder || potvrde.includes('vrijeme') || working;
+                          const bezSati = bezSatiRadnici.includes(worker.radnik_id);
                           return (
                             <div key={worker.radnik_id} className="rounded-xl border border-slate-200 p-3">
                               <p className="font-semibold text-slate-900">{worker.ime} {worker.prezime}</p>
+                              <label className="mt-2 flex min-h-10 items-center gap-2 text-sm text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  checked={bezSati}
+                                  disabled={locked}
+                                  onChange={(event) => setBezSatiRadnici((current) => event.target.checked
+                                    ? [...new Set([...current, worker.radnik_id])]
+                                    : current.filter((id) => id !== worker.radnik_id))}
+                                  className="h-4 w-4 rounded border-slate-300"
+                                />
+                                Nije radio u osnovnoj smjeni (0 sati)
+                              </label>
+                              {bezSati && <p className="mt-1 text-xs text-amber-700">Osnovna smjena neće se obračunati. Djelatnika i dalje možeš odabrati za dodatnu dionicu.</p>}
                               <div className="mt-2 grid min-w-0 grid-cols-1 xl:grid-cols-2 gap-2">
                                 <label className="block text-sm text-slate-700">Početak
                                   <input
                                     type="time"
                                     value={timeDraft.vrijemeOd}
-                                    disabled={locked}
+                                    disabled={locked || bezSati}
                                     onChange={(event) => setTeamTimeDrafts((current) => ({ ...current, [worker.radnik_id]: { ...timeDraft, vrijemeOd: event.target.value } }))}
                                     className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-base disabled:bg-slate-100"
                                   />
@@ -1220,7 +1341,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                                   <input
                                     type="time"
                                     value={timeDraft.vrijemeDo}
-                                    disabled={locked}
+                                    disabled={locked || bezSati}
                                     onChange={(event) => setTeamTimeDrafts((current) => ({ ...current, [worker.radnik_id]: { ...timeDraft, vrijemeDo: event.target.value } }))}
                                     className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-base disabled:bg-slate-100"
                                   />
@@ -1229,6 +1350,112 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                             </div>
                           );
                         })}
+                      </div>
+                      <div className="mt-4 border-t border-slate-200 pt-4">
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <h3 className="font-semibold text-slate-900">Dodatno radno vrijeme</h3>
+                            <p className="text-xs text-slate-500">Dodaj još jednu vremensku dionicu i označi djelatnike koji su radili. Vrijeme se pribraja osnovnoj smjeni.</p>
+                          </div>
+                          <Button
+                            onClick={() => setExtraTimeRows((current) => [...current, {
+                              id: crypto.randomUUID(),
+                              radnici: [],
+                              napomena: '',
+                            }])}
+                            disabled={!canEditOrder || potvrde.includes('vrijeme') || working}
+                            variant="secondary"
+                          >
+                            <Plus className="h-4 w-4" /> Dodaj dionicu
+                          </Button>
+                        </div>
+                        <div className="space-y-3">
+                          {extraTimeRows.map((row) => (
+                            <div key={row.id} className="rounded-xl border border-slate-200 p-3">
+                              <label className="mt-2 block text-sm text-slate-700">Napomena (nije obavezna)
+                                <input
+                                  type="text"
+                                  value={row.napomena}
+                                  disabled={!canEditOrder || potvrde.includes('vrijeme') || working}
+                                  onChange={(event) => setExtraTimeRows((current) => current.map((item) => item.id === row.id ? { ...item, napomena: event.target.value } : item))}
+                                  className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-base disabled:bg-slate-100"
+                                />
+                              </label>
+                              <fieldset className="mt-3">
+                                <legend className="text-sm font-medium text-slate-700">Djelatnici</legend>
+                                <div className="mt-1 grid grid-cols-1 gap-1 sm:grid-cols-2">
+                                  {details.ekipa.map((worker) => (
+                                    <label key={worker.radnik_id} className="flex min-h-9 items-center gap-2 text-sm text-slate-700">
+                                      <input
+                                        type="checkbox"
+                                        checked={row.radnici.some((assignment) => assignment.radnikId === worker.radnik_id)}
+                                        disabled={!canEditOrder || potvrde.includes('vrijeme') || working}
+                                        onChange={(event) => setExtraTimeRows((current) => current.map((item) => {
+                                          if (item.id !== row.id) return item;
+                                          return {
+                                            ...item,
+                                            radnici: event.target.checked
+                                              ? [...item.radnici, {
+                                                radnikId: worker.radnik_id,
+                                                id: crypto.randomUUID(),
+                                                vrijemeOd: '',
+                                                vrijemeDo: '',
+                                              }]
+                                              : item.radnici.filter((assignment) => assignment.radnikId !== worker.radnik_id),
+                                          };
+                                        }))}
+                                        className="h-4 w-4 rounded border-slate-300"
+                                      />
+                                      {worker.ime} {worker.prezime}
+                                    </label>
+                                  ))}
+                                </div>
+                              </fieldset>
+                              {row.radnici.map((assignment) => {
+                                const worker = details.ekipa.find((member) => member.radnik_id === assignment.radnikId);
+                                return (
+                                  <div key={assignment.radnikId} className="mt-3 rounded-lg bg-slate-50 p-3">
+                                    <p className="mb-2 text-sm font-semibold text-slate-800">
+                                      {worker ? `${worker.ime} ${worker.prezime}` : 'Djelatnik'} — upiši njegovo vrijeme
+                                    </p>
+                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                      <label className="block text-sm text-slate-700">Početak
+                                        <input
+                                          type="time"
+                                          value={assignment.vrijemeOd}
+                                          disabled={!canEditOrder || potvrde.includes('vrijeme') || working}
+                                          onChange={(event) => setExtraTimeRows((current) => current.map((item) => item.id === row.id
+                                            ? { ...item, radnici: item.radnici.map((entry) => entry.radnikId === assignment.radnikId ? { ...entry, vrijemeOd: event.target.value } : entry) }
+                                            : item))}
+                                          className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-base disabled:bg-slate-100"
+                                        />
+                                      </label>
+                                      <label className="block text-sm text-slate-700">Završetak
+                                        <input
+                                          type="time"
+                                          value={assignment.vrijemeDo}
+                                          disabled={!canEditOrder || potvrde.includes('vrijeme') || working}
+                                          onChange={(event) => setExtraTimeRows((current) => current.map((item) => item.id === row.id
+                                            ? { ...item, radnici: item.radnici.map((entry) => entry.radnikId === assignment.radnikId ? { ...entry, vrijemeDo: event.target.value } : entry) }
+                                            : item))}
+                                          className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-base disabled:bg-slate-100"
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                              <button
+                                type="button"
+                                onClick={() => setExtraTimeRows((current) => current.filter((item) => item.id !== row.id))}
+                                disabled={!canEditOrder || potvrde.includes('vrijeme') || working}
+                                className="mt-3 inline-flex min-h-9 items-center gap-1 text-sm font-medium text-rose-700 disabled:opacity-50"
+                              >
+                                <Trash2 className="h-4 w-4" /> Ukloni dionicu
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                       {canEditOrder && (
                         <CheckField

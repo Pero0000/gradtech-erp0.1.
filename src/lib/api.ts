@@ -3075,15 +3075,20 @@ export async function syncNalogTroskovi(nalogId: string, transition?: WorkOrderS
     return datum;
   }
 
-  const radniciSelect = (prava: boolean) =>
+  const radniciSelect = (prava: boolean, dodatnoVrijeme: boolean) =>
     supabase
       .from('radni_nalozi_radnici')
-      .select(`radnik_id, vrijeme_od, vrijeme_do, radnik:radnik_id ( ime, prezime, cijena_sata, nocni_dodatak, teren_dnevnica${prava ? ', pravo_nocni, pravo_teren' : ''} )`)
+      .select(`radnik_id, vrijeme_od, vrijeme_do${dodatnoVrijeme ? ', mobile_extra_time, mobile_zero_hours' : ''}, radnik:radnik_id ( ime, prezime, cijena_sata, nocni_dodatak, teren_dnevnica${prava ? ', pravo_nocni, pravo_teren' : ''} )`)
       .eq('nalog_id', nalogId);
-  let radniciRes = await radniciSelect(true);
+  let imaDodatnihDionica = true;
+  let radniciRes = await radniciSelect(true, true);
+  if (radniciRes.error && /mobile_extra_time|mobile_zero_hours/i.test(radniciRes.error.message)) {
+    imaDodatnihDionica = false;
+    radniciRes = await radniciSelect(true, false);
+  }
   // Prije migracije obracun_sati stupci prava ne postoje; tada svi zadržavaju dosadašnji obračun.
   const imaPrava = !(radniciRes.error && /pravo_/i.test(radniciRes.error.message));
-  if (!imaPrava) radniciRes = await radniciSelect(false);
+  if (!imaPrava) radniciRes = await radniciSelect(false, imaDodatnihDionica);
   const { data: radnici, error: rError } = radniciRes;
   if (rError) throw rError;
 
@@ -3091,6 +3096,8 @@ export async function syncNalogTroskovi(nalogId: string, transition?: WorkOrderS
     radnik_id: string;
     vrijeme_od: string | null;
     vrijeme_do: string | null;
+    mobile_extra_time?: { vrijeme_od: string; vrijeme_do: string; napomena: string | null }[] | null;
+    mobile_zero_hours?: boolean | null;
     radnik: {
       ime: string;
       prezime: string;
@@ -3107,35 +3114,49 @@ export async function syncNalogTroskovi(nalogId: string, transition?: WorkOrderS
 
   for (const r of (radnici ?? []) as unknown as RR[]) {
     const ime = r.radnik ? `${r.radnik.ime} ${r.radnik.prezime}` : 'Radnik';
-    if (r.vrijeme_od && r.vrijeme_do) {
-      const { ukupno: diff, nocne } = minuteSmjene(r.vrijeme_od, r.vrijeme_do, nocniInterval());
-      if (diff > 0) {
-        const napomene = [
-          bezTroska ? `Ostalo: ${nalog.naslov ?? nalog.broj} (bez troška)` : null,
-          nocne > 0 ? `Noćni rad ${round2(nocne / 60)} h` : null,
-        ].filter(Boolean);
-        sati.push({
-          radnik_id: r.radnik_id,
-          gradiliste_id: gradilisteId,
+    const includeBaseTime = !imaDodatnihDionica || !r.mobile_zero_hours;
+    const intervals = [
+      ...(includeBaseTime && r.vrijeme_od && r.vrijeme_do
+        ? [{ vrijeme_od: r.vrijeme_od, vrijeme_do: r.vrijeme_do, napomena: null }]
+        : []),
+      ...((imaDodatnihDionica ? r.mobile_extra_time : null) ?? []),
+    ];
+    let ukupnoMinuta = 0;
+    let nocneMinute = 0;
+    const dioniceNapomene: string[] = [];
+    for (const interval of intervals) {
+      const { ukupno, nocne } = minuteSmjene(interval.vrijeme_od, interval.vrijeme_do, nocniInterval());
+      ukupnoMinuta += ukupno;
+      nocneMinute += nocne;
+      if (interval.napomena) dioniceNapomene.push(interval.napomena);
+    }
+    if (ukupnoMinuta > 0) {
+      const napomene = [
+        bezTroska ? `Ostalo: ${nalog.naslov ?? nalog.broj} (bez troška)` : null,
+        ...dioniceNapomene,
+        nocneMinute > 0 ? `Noćni rad ${round2(nocneMinute / 60)} h` : null,
+      ].filter(Boolean);
+      sati.push({
+        radnik_id: r.radnik_id,
+        gradiliste_id: gradilisteId,
+        datum,
+        sati: round2(ukupnoMinuta / 60),
+        napomena: napomene.length > 0 ? napomene.join(' · ') : null,
+        nalog_id: nalogId,
+        ...(imaPrava ? { nocni_sati: round2(nocneMinute / 60) } : {}),
+      });
+      const dodatak = Number(r.radnik?.nocni_dodatak ?? 0);
+      const satnica = Number(r.radnik?.cijena_sata ?? 0);
+      const pravoNocni = !imaPrava || r.radnik?.pravo_nocni !== false;
+      if (!bezTroska && pravoNocni && nocneMinute > 0 && dodatak > 0 && satnica > 0) {
+        dodatni.push({
+          gradiliste_id: nalog.gradiliste_id,
+          kategorija: 'place',
+          opis: `Noćni rad: ${ime} ${round2(nocneMinute / 60)} h × ${dodatak}%`,
+          iznos: round2((nocneMinute / 60) * satnica * (dodatak / 100)),
           datum,
-          sati: round2(diff / 60),
-          napomena: napomene.length > 0 ? napomene.join(' · ') : null,
           nalog_id: nalogId,
-          ...(imaPrava ? { nocni_sati: round2(nocne / 60) } : {}),
         });
-        const dodatak = Number(r.radnik?.nocni_dodatak ?? 0);
-        const satnica = Number(r.radnik?.cijena_sata ?? 0);
-        const pravoNocni = !imaPrava || r.radnik?.pravo_nocni !== false;
-        if (!bezTroska && pravoNocni && nocne > 0 && dodatak > 0 && satnica > 0) {
-          dodatni.push({
-            gradiliste_id: nalog.gradiliste_id,
-            kategorija: 'place',
-            opis: `Noćni rad: ${ime} ${round2(nocne / 60)} h × ${dodatak}%`,
-            iznos: round2((nocne / 60) * satnica * (dodatak / 100)),
-            datum,
-            nalog_id: nalogId,
-          });
-        }
       }
     }
     const dnevnica = Number(r.radnik?.teren_dnevnica ?? 0);
@@ -3522,12 +3543,59 @@ export interface MobileWorkerTime {
   mobile_finished_at: string | null;
   vrijeme_od: string | null;
   vrijeme_do: string | null;
+  dodatne_dionice: { id: string; grupa_id?: string | null; vrijeme_od: string; vrijeme_do: string; napomena: string | null }[];
+  bez_sati_na_gradilistu: boolean;
 }
 
 export async function fetchMobileNalogTeam(nalogId: string): Promise<MobileWorkerTime[]> {
-  const { data, error } = await supabase.rpc('get_mobile_nalog_team', { p_nalog_id: nalogId });
+  const [{ data, error }, { data: timeData, error: timeError }] = await Promise.all([
+    supabase.rpc('get_mobile_nalog_team', { p_nalog_id: nalogId }),
+    supabase.rpc('get_mobile_nalog_time_entries', { p_nalog_id: nalogId }),
+  ]);
   if (error) throw error;
-  return (data ?? []) as MobileWorkerTime[];
+  if (timeError) {
+    if (['42883', 'PGRST202'].includes(timeError.code ?? '')) {
+      throw new Error('Nedostaje migracija za dodatno radno vrijeme na radnim nalozima.');
+    }
+    throw timeError;
+  }
+  type TimeEntry = {
+    radnik_id: string;
+    dodatne_dionice: MobileWorkerTime['dodatne_dionice'];
+    bez_sati_na_gradilistu: boolean;
+  };
+  const entries = new Map<string, TimeEntry>(
+    ((timeData ?? []) as TimeEntry[]).map((row): [string, TimeEntry] => [row.radnik_id, row]),
+  );
+  return ((data ?? []) as Omit<MobileWorkerTime, 'dodatne_dionice' | 'bez_sati_na_gradilistu'>[])
+    .map((worker) => ({
+      ...worker,
+      dodatne_dionice: entries.get(worker.radnik_id)?.dodatne_dionice ?? [],
+      bez_sati_na_gradilistu: entries.get(worker.radnik_id)?.bez_sati_na_gradilistu ?? false,
+    }));
+}
+
+export async function saveMobileNalogTimeEntries(input: {
+  nalogId: string;
+  dodatneDionice: { id: string; grupaId: string; radnikId: string; vrijemeOd: string; vrijemeDo: string; napomena: string | null }[];
+  bezSatiRadnici: string[];
+}) {
+  const { error } = await supabase.rpc('mobile_save_nalog_time_entries', {
+    p_nalog_id: input.nalogId,
+    p_dodatne_dionice: input.dodatneDionice.map((segment) => ({
+      id: segment.id,
+      grupa_id: segment.grupaId,
+      radnik_id: segment.radnikId,
+      vrijeme_od: segment.vrijemeOd,
+      vrijeme_do: segment.vrijemeDo,
+      napomena: segment.napomena,
+    })),
+    p_bez_sati_radnici: input.bezSatiRadnici,
+  });
+  if (error && ['42883', 'PGRST202'].includes(error.code ?? '')) {
+    throw new Error('Nedostaje migracija za dodatno radno vrijeme na radnim nalozima.');
+  }
+  if (error) throw error;
 }
 
 export async function fetchMobileWorkerDisplayName(): Promise<string | null> {
@@ -3537,7 +3605,7 @@ export async function fetchMobileWorkerDisplayName(): Promise<string | null> {
 }
 
 export interface MojeRadnoVrijeme {
-  izvor: 'nalog' | 'evidencija';
+  izvor: 'nalog' | 'evidencija' | 'dionica';
   nalog_id: string | null;
   nalog_broj: string | null;
   gradiliste_naziv: string | null;
@@ -3558,17 +3626,25 @@ export async function fetchMojeRadnoVrijeme(od: string | null, doo: string | nul
     }
     throw error;
   }
-  const interval = nocniInterval();
+  const nightWindow = nocniInterval();
   return ((data ?? []) as MojeRadnoVrijeme[]).map((row) => {
     // Nalog prikazuje aktualnu smjenu, ne evidenciju koja nastaje tek nakon odobrenja.
     if (row.izvor === 'nalog') {
       const smjena = row.vrijeme_od && row.vrijeme_do
-        ? minuteSmjene(row.vrijeme_od, row.vrijeme_do, interval)
+        ? minuteSmjene(row.vrijeme_od, row.vrijeme_do, nightWindow)
         : null;
       return {
         ...row,
         sati: smjena ? Math.round(smjena.ukupno / 60 * 100) / 100 : null,
         nocni_sati: smjena ? Math.round(smjena.nocne / 60 * 100) / 100 : 0,
+      };
+    }
+    if (row.izvor === 'dionica' && row.vrijeme_od && row.vrijeme_do) {
+      const shift = minuteSmjene(row.vrijeme_od, row.vrijeme_do, nightWindow);
+      return {
+        ...row,
+        sati: Math.round(shift.ukupno / 60 * 100) / 100,
+        nocni_sati: Math.round(shift.nocne / 60 * 100) / 100,
       };
     }
     return {

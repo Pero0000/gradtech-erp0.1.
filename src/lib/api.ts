@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import { nocniInterval } from './postavke';
 import { minuteSmjene, nocniIzNapomene, type ObracunPrava } from './obracunSati';
-import { calculateDailyVehicleKmCosts } from './vehicleKmCosts';
+import { calculateDailyVehicleKmCosts, type VehicleKmAllocation } from './vehicleKmCosts';
 import { requireCompany } from './company';
 import { fetchAllRows } from './pagination';
 import { todayISO } from './rokovi';
@@ -3243,6 +3243,10 @@ async function syncKmGrupe(datum: string) {
     if (error) throw error;
     return data ?? [];
   })();
+  const { data: savedAllocations, error: allocationsError } = await supabase.rpc('get_daily_vehicle_km_allocations', {
+    p_datum: datum,
+  });
+  if (allocationsError) throw allocationsError;
   const nalogPoId = new Map(lista.map((nalog) => [nalog.id, nalog]));
   for (const [voziloId, ids] of vezaPoVozilu) {
     const vehicleSummary = summary.get(voziloId);
@@ -3259,6 +3263,7 @@ async function syncKmGrupe(datum: string) {
       km_kraj: Number(nalog.km_kraj),
     })),
     vozila,
+    (savedAllocations ?? []) as VehicleKmAllocation[],
   ).map((row) => ({
     nalog_id: row.nalog_id,
     gradiliste_id: row.gradiliste_id,
@@ -3273,6 +3278,87 @@ async function syncKmGrupe(datum: string) {
   }
   await replaceDailyVehicleKmSettlement(datum, rows);
   return summary;
+}
+
+export async function fetchDailyVehicleKmAllocations(
+  datum: string,
+  voziloId: string,
+): Promise<{ saved: VehicleKmAllocation[]; baseline: VehicleKmAllocation[] }> {
+  const [savedResult, assignmentResult, vehicleResult] = await Promise.all([
+    supabase.rpc('get_daily_vehicle_km_allocations', { p_datum: datum }),
+    supabase
+      .from('dnevni_raspored_gradilista')
+      .select('nalog_id, vozilo_id, gradiliste_id')
+      .eq('datum', datum)
+      .eq('vozilo_id', voziloId),
+    supabase.from('vozila').select('id, marka, model, cijena_km').eq('id', voziloId).single(),
+  ]);
+  if (savedResult.error) throw savedResult.error;
+  if (assignmentResult.error) throw assignmentResult.error;
+  if (vehicleResult.error) throw vehicleResult.error;
+  const assignments = assignmentResult.data ?? [];
+  const orderIds = [...new Set(assignments.map((assignment) => assignment.nalog_id).filter((id): id is string => Boolean(id)))];
+  const ordersResult = orderIds.length === 0
+    ? { data: [], error: null }
+    : await supabase
+      .from('radni_nalozi')
+      .select('id, broj, gradiliste_id, km_pocetak, km_kraj, bez_troska, bez_izvrsenja')
+      .in('id', orderIds)
+      .eq('status', 'zavrsen')
+      .not('km_pocetak', 'is', null)
+      .not('km_kraj', 'is', null);
+  if (ordersResult.error) throw ordersResult.error;
+
+  const eligibleOrders = (ordersResult.data ?? []).filter((order) => !order.bez_troska && !order.bez_izvrsenja);
+  const baselineCosts = calculateDailyVehicleKmCosts(
+    assignments.filter((assignment): assignment is typeof assignment & { nalog_id: string; vozilo_id: string } =>
+      Boolean(assignment.nalog_id && assignment.vozilo_id)),
+    eligibleOrders.map((order) => ({
+      id: order.id,
+      broj: order.broj,
+      gradiliste_id: order.gradiliste_id,
+      km_pocetak: Number(order.km_pocetak),
+      km_kraj: Number(order.km_kraj),
+    })),
+    [vehicleResult.data],
+  );
+  const amountsBySite = new Map<string, number>();
+  for (const cost of baselineCosts) {
+    if (!cost.gradiliste_id) continue;
+    amountsBySite.set(cost.gradiliste_id, (amountsBySite.get(cost.gradiliste_id) ?? 0) + Math.round(cost.iznos * 100));
+  }
+  const siteIds = [...new Set(assignments.map((assignment) => assignment.gradiliste_id).filter((id): id is string => Boolean(id)))];
+  const totalCents = [...amountsBySite.values()].reduce((sum, amount) => sum + amount, 0);
+  const positiveSiteIds = siteIds.filter((siteId) => (amountsBySite.get(siteId) ?? 0) > 0);
+  let allocatedBasisPoints = 0;
+  const baseline = siteIds.map((gradiliste_id) => {
+    const amount = amountsBySite.get(gradiliste_id) ?? 0;
+    const basisPoints = amount <= 0 || totalCents <= 0
+      ? 0
+      : gradiliste_id === positiveSiteIds[positiveSiteIds.length - 1]
+        ? 10000 - allocatedBasisPoints
+        : Math.round(amount / totalCents * 10000);
+    allocatedBasisPoints += basisPoints;
+    return { vozilo_id: voziloId, gradiliste_id, postotak: basisPoints / 100 };
+  });
+  return {
+    saved: ((savedResult.data ?? []) as VehicleKmAllocation[]).filter((allocation) => allocation.vozilo_id === voziloId),
+    baseline,
+  };
+}
+
+export async function saveDailyVehicleKmAllocations(
+  datum: string,
+  voziloId: string,
+  allocations: Array<{ gradiliste_id: string; postotak: number }>,
+): Promise<void> {
+  const { error } = await supabase.rpc('save_daily_vehicle_km_allocations', {
+    p_datum: datum,
+    p_vozilo_id: voziloId,
+    p_allocations: allocations,
+  });
+  if (error) throw error;
+  await syncKmGrupe(datum);
 }
 
 // Neriješeni materijal i alat s ranijih naloga istog gradilišta kopiraju se na novi nalog.
@@ -3545,6 +3631,48 @@ export interface MobileWorkerTime {
   vrijeme_do: string | null;
   dodatne_dionice: { id: string; grupa_id?: string | null; vrijeme_od: string; vrijeme_do: string; napomena: string | null }[];
   bez_sati_na_gradilistu: boolean;
+}
+
+export interface MobileNalogVoznja {
+  id: string;
+  radnik_id: string;
+  polaziste: string;
+  odrediste: string;
+  redoslijed: number;
+}
+
+export async function fetchMobileNalogVoznje(nalogId: string): Promise<MobileNalogVoznja[]> {
+  const { data, error } = await supabase.rpc('get_mobile_nalog_voznje', { p_nalog_id: nalogId });
+  if (error && ['42883', 'PGRST202'].includes(error.code ?? '')) {
+    throw new Error('Nedostaje migracija za vozače i relacije na radnim nalozima.');
+  }
+  if (error) throw error;
+  return (data ?? []) as MobileNalogVoznja[];
+}
+
+export async function addMobileNalogVoznja(nalogId: string, voznja: MobileNalogVoznja) {
+  const { error } = await supabase.rpc('mobile_add_nalog_voznja', {
+    p_nalog_id: nalogId,
+    p_id: voznja.id,
+    p_radnik_id: voznja.radnik_id,
+    p_polaziste: voznja.polaziste,
+    p_odrediste: voznja.odrediste,
+  });
+  if (error && ['42883', 'PGRST202'].includes(error.code ?? '')) {
+    throw new Error('Nedostaje migracija za vozače i relacije na radnim nalozima.');
+  }
+  if (error) throw error;
+}
+
+export async function deleteMobileNalogVoznja(nalogId: string, voznjaId: string) {
+  const { error } = await supabase.rpc('mobile_delete_nalog_voznja', {
+    p_nalog_id: nalogId,
+    p_voznja_id: voznjaId,
+  });
+  if (error && ['42883', 'PGRST202'].includes(error.code ?? '')) {
+    throw new Error('Nedostaje migracija za vozače i relacije na radnim nalozima.');
+  }
+  if (error) throw error;
 }
 
 export async function fetchMobileNalogTeam(nalogId: string): Promise<MobileWorkerTime[]> {

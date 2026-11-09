@@ -1,6 +1,6 @@
 import { formatHrDate, formatHrDateTime } from '@/lib/localization';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, GripVertical, Hammer, Package, Plus, Send, Trash2, Truck, X } from 'lucide-react';
+import { CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, GripVertical, Hammer, Package, Percent, Plus, Send, Trash2, Truck, X } from 'lucide-react';
 import type { DnevniRasporedGradiliste, DnevniRasporedOstalo, DnevniRasporedRadnik, Gradiliste, GradilisteRegija, GradilisteStatus, GradilisteZadatak, Investitor, NalogPrioritet, NalogStatus, Objekt, Radnik, RadnikOdsustvo, Rok, Vozilo, ZadatakVrsta } from '@/types';
 import { zadatakVrsta } from '@/types';
 import { nextDeadline } from '@/lib/rokovi';
@@ -57,6 +57,8 @@ import {
   updateRasporedTekst,
   fetchRasporedObjava,
   sendRasporedObjava,
+  fetchDailyVehicleKmAllocations,
+  saveDailyVehicleKmAllocations,
   type RasporedObjava,
   type RasporedObjavaVozilo,
 } from '@/lib/api';
@@ -248,6 +250,12 @@ export function RasporedView() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [copyingSchedule, setCopyingSchedule] = useState(false);
+  const [kmAllocationVehicle, setKmAllocationVehicle] = useState<Vozilo | null>(null);
+  const [kmAllocationDate, setKmAllocationDate] = useState<string | null>(null);
+  const [kmAllocationSiteIds, setKmAllocationSiteIds] = useState<string[]>([]);
+  const [kmAllocationValues, setKmAllocationValues] = useState<Record<string, string>>({});
+  const [kmAllocationSaving, setKmAllocationSaving] = useState(false);
+  const [kmAllocationError, setKmAllocationError] = useState<string | null>(null);
   const { profile, canAccess, company } = useAuth();
   const columnLabels = company?.postavke.gradiliste_column_labels ?? [...DEFAULT_GRADILISTE_COLUMN_LABELS];
   const canCreateSite = canAccess('gradilista', 'edit');
@@ -264,6 +272,7 @@ export function RasporedView() {
   const [sendingSchedule, setSendingSchedule] = useState(false);
   const [rasporedTab, setRasporedTab] = useState<'slaganje' | 'posalji'>('slaganje');
   const canSendSchedule = canAccess('raspored', 'edit');
+  const canEditKmAllocations = canAccess('radni_nalozi', 'edit') && canAccess('troskovi', 'edit');
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [savedColumns, setSavedColumns] = useState<string[][]>([[], [], []]);
   const layoutSaveQueue = useRef<Promise<void>>(Promise.resolve());
@@ -550,6 +559,77 @@ export function RasporedView() {
       await Promise.all([loadDay(selectedDate), loadOstalo()]);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Greška pri spremanju rasporeda');
+    }
+  };
+
+  const dailyKmSites = (vehicleId: string) => [...new Set(
+    siteAssignments
+      .filter((assignment) => assignment.vozilo_id === vehicleId && assignment.gradiliste_id)
+      .flatMap((assignment) => assignment.gradiliste_id ? [assignment.gradiliste_id] : []),
+  )];
+
+  const equalKmAllocationValues = (siteIds: string[]) => Object.fromEntries(siteIds.map((siteId, index) => {
+    const basisPoints = Math.floor(10000 / siteIds.length);
+    const share = index === siteIds.length - 1 ? 10000 - basisPoints * (siteIds.length - 1) : basisPoints;
+    return [siteId, (share / 100).toFixed(2)];
+  }));
+
+  const openKmAllocation = async (vehicle: Vozilo) => {
+    const date = selectedDate;
+    const siteIds = dailyKmSites(vehicle.id);
+    if (siteIds.length === 0) {
+      setError('Za ovo vozilo danas nema raspoređenih gradilišta.');
+      return;
+    }
+    setError(null);
+    try {
+      const { saved, baseline } = await fetchDailyVehicleKmAllocations(date, vehicle.id);
+      const savedSiteIds = saved.map((allocation) => allocation.gradiliste_id).sort();
+      const currentSiteIds = [...siteIds].sort();
+      const savedTotal = saved.reduce((total, allocation) => total + Number(allocation.postotak), 0);
+      const hasCompleteSavedAllocation = saved.length === siteIds.length
+        && savedSiteIds.every((siteId, index) => siteId === currentSiteIds[index])
+        && Math.abs(savedTotal - 100) < 0.01;
+      setKmAllocationValues(hasCompleteSavedAllocation
+        ? Object.fromEntries(saved.map((allocation) => [allocation.gradiliste_id, Number(allocation.postotak).toFixed(2)]))
+        : Object.fromEntries(baseline.map((allocation) => [allocation.gradiliste_id, allocation.postotak.toFixed(2)])));
+      setKmAllocationDate(date);
+      setKmAllocationSiteIds(siteIds);
+      setKmAllocationVehicle(vehicle);
+      setKmAllocationError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Greška pri učitavanju raspodjele kilometara.');
+    }
+  };
+
+  const saveKmAllocation = async (restoreRecordedKm: boolean) => {
+    if (!kmAllocationVehicle || !kmAllocationDate) return;
+    const siteIds = kmAllocationSiteIds;
+    const allocations = restoreRecordedKm
+      ? []
+      : siteIds.map((gradiliste_id) => ({ gradiliste_id, postotak: Number(kmAllocationValues[gradiliste_id]) }));
+    const total = allocations.reduce((sum, allocation) => sum + allocation.postotak, 0);
+    if (!restoreRecordedKm && (allocations.some((allocation) => !Number.isFinite(allocation.postotak) || allocation.postotak < 0 || allocation.postotak > 100)
+      || allocations.some((allocation) => Math.abs(allocation.postotak * 100 - Math.round(allocation.postotak * 100)) > 0.000001)
+      || Math.round(total * 100) !== 10000)) {
+      setKmAllocationError('Postoci raspodjele moraju imati najviše dvije decimale i ukupno iznositi 100%.');
+      return;
+    }
+    setKmAllocationSaving(true);
+    setKmAllocationError(null);
+    try {
+      await saveDailyVehicleKmAllocations(kmAllocationDate, kmAllocationVehicle.id, allocations);
+      setNotice(restoreRecordedKm
+        ? 'Vraćen je obračun kilometara prema upisanim kilometrima po nalogu.'
+        : 'Raspodjela kilometarskog troška je spremljena.');
+      setKmAllocationVehicle(null);
+      setKmAllocationDate(null);
+      setKmAllocationSiteIds([]);
+      setKmAllocationError(null);
+    } catch (reason) {
+      setKmAllocationError(reason instanceof Error ? reason.message : 'Greška pri spremanju raspodjele kilometara.');
+    } finally {
+      setKmAllocationSaving(false);
     }
   };
 
@@ -1436,6 +1516,17 @@ export function RasporedView() {
                       <span className="rounded bg-amber-200 px-1 py-0.5 text-[8px] font-bold text-amber-900">
                         {vehicleConfirmed ? 'POTVRĐENA STAVKA' : 'NALOG ZAKLJUČEN – DODAVANJE DOPUŠTENO'}
                       </span>
+                    )}
+                    {canEditKmAllocations && dailyKmSites(vozilo.id).length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => void openKmAllocation(vozilo)}
+                        className="inline-flex items-center gap-1 rounded border border-sky-200 bg-white px-1.5 py-1 text-[10px] font-semibold text-sky-800 hover:bg-sky-50"
+                        title="Uredi raspodjelu kilometarskog troška za ovaj datum"
+                      >
+                        <Percent className="h-3 w-3" />
+                        Raspodjela km
+                      </button>
                     )}
                   </div>
 
@@ -2327,6 +2418,104 @@ export function RasporedView() {
           </div>
         </div>
         <p className="mt-3 text-xs text-slate-500">Investitor i objekt moraju biti uneseni zajedno. Nakon spremanja gradilište će se pojaviti na popisu i možeš ga povući na vozilo.</p>
+      </Modal>
+      <Modal
+        open={kmAllocationVehicle !== null}
+        onClose={() => {
+          if (!kmAllocationSaving) {
+            setKmAllocationVehicle(null);
+            setKmAllocationDate(null);
+            setKmAllocationSiteIds([]);
+          }
+        }}
+        title={`Raspodjela kilometara · ${kmAllocationVehicle ? [kmAllocationVehicle.marka, kmAllocationVehicle.model].filter(Boolean).join(' ') : ''} · ${kmAllocationDate ? formatDate(kmAllocationDate) : ''}`}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setKmAllocationValues(equalKmAllocationValues(kmAllocationSiteIds))}
+              disabled={kmAllocationSaving}
+              className="mr-auto rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Postavi jednake udjele
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveKmAllocation(true)}
+              disabled={kmAllocationSaving}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Vrati upisane km
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setKmAllocationVehicle(null);
+                setKmAllocationDate(null);
+                setKmAllocationSiteIds([]);
+              }}
+              disabled={kmAllocationSaving}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+            >
+              Odustani
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveKmAllocation(false)}
+              disabled={kmAllocationSaving || Math.round(kmAllocationSiteIds.reduce(
+                (sum, siteId) => sum + Number(kmAllocationValues[siteId] ?? 0),
+                0,
+              ) * 100) !== 10000}
+              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+            >
+              {kmAllocationSaving ? 'Spremam…' : 'Spremi raspodjelu'}
+            </button>
+          </>
+        }
+      >
+        <p className="mb-4 text-sm text-slate-600">
+          Osnova ostaje postojeći obračun po kilometrima upisanim na svakom nalogu. Postotci se primjenjuju samo ako ih ovdje promijeniš i spremiš.
+        </p>
+        {kmAllocationError && (
+          <p role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {kmAllocationError}
+          </p>
+        )}
+        <div className="space-y-2">
+          {kmAllocationVehicle && kmAllocationSiteIds.map((siteId) => {
+            const site = gradilista.find((item) => item.id === siteId);
+            return (
+              <label key={siteId} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{site?.naziv ?? 'Gradilište'}</span>
+                <span className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    value={kmAllocationValues[siteId] ?? ''}
+                    onChange={(event) => setKmAllocationValues((previous) => ({
+                      ...previous,
+                      [siteId]: event.target.value,
+                    }))}
+                    aria-label={`Postotak kilometarskog troška za ${site?.naziv ?? 'gradilište'}`}
+                    className="w-24 rounded-md border border-slate-300 px-2 py-1.5 text-right text-sm"
+                  />
+                  <span className="text-sm text-slate-500">%</span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        <p className={`mt-3 text-sm font-semibold ${Math.round(kmAllocationSiteIds.reduce(
+          (sum, siteId) => sum + Number(kmAllocationValues[siteId] ?? 0),
+          0,
+        ) * 100) === 10000 ? 'text-emerald-700' : 'text-amber-700'}`}>
+          Ukupno: {kmAllocationSiteIds.reduce(
+            (sum, siteId) => sum + Number(kmAllocationValues[siteId] ?? 0),
+            0,
+          ).toFixed(2)}%
+        </p>
       </Modal>
     </div>
   );

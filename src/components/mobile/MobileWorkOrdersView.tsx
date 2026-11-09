@@ -11,7 +11,9 @@ import {
   updateNalogStavka,
   updateGradilisteZadatak,
   addNalogZadatak,
+  addMobileNalogVoznja,
   fetchGradilisteDokumenti,
+  fetchMobileNalogVoznje,
   fetchMobileNalogTeam,
   fetchMobileRadniNalozi,
   fetchMobileWorkerDisplayName,
@@ -22,6 +24,7 @@ import {
   fetchNalogStavke,
   fetchNalogZadaci,
   fetchOprema,
+  deleteMobileNalogVoznja,
   saveMobileNalogIzvjestaj,
   saveMobileNalogTimeEntries,
   saveMobileWorkerTime,
@@ -31,6 +34,7 @@ import {
   uploadNalogFoto,
   type GradilisteDokument,
   type MobileRadniNalog,
+  type MobileNalogVoznja,
   type MobileWorkerTime,
   type NalogDokument,
   type NalogFoto,
@@ -59,7 +63,7 @@ const portalTabs: Array<{ id: WorkerPortalTab; label: string; title: string; ico
 const reviewSectionIds = ['upute', 'zadaci', 'materijal', 'alat', 'dokumenti'];
 
 type PrepKey = 'napomena' | 'zadaci' | 'dodatni' | 'materijal_na' | 'alat_na' | 'dokumenti';
-type SectionKey = 'poslovi' | 'dodatni' | 'foto' | 'materijal' | 'alat' | 'strojevi';
+type SectionKey = 'poslovi' | 'dodatni' | 'foto' | 'materijal' | 'alat';
 
 const sectionLabels: Record<SectionKey, string> = {
   poslovi: 'Poslovi',
@@ -67,7 +71,6 @@ const sectionLabels: Record<SectionKey, string> = {
   foto: 'Fotografije',
   materijal: 'Materijal',
   alat: 'Alat',
-  strojevi: 'Strojevi',
 };
 
 type MobileReport = {
@@ -88,6 +91,7 @@ type MobileDetails = {
   dokumenti: Array<NalogDokument | GradilisteDokument>;
   foto: NalogFoto[];
   ekipa: MobileWorkerTime[];
+  voznje: MobileNalogVoznja[];
 };
 
 const emptyReport: MobileReport = {
@@ -184,6 +188,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [photoLoadError, setPhotoLoadError] = useState<string | null>(null);
+  const [routeLoadError, setRouteLoadError] = useState<string | null>(null);
   const [equipmentLoadError, setEquipmentLoadError] = useState<string | null>(null);
   const [refreshingPhotos, setRefreshingPhotos] = useState(false);
   const [newMaterial, setNewMaterial] = useState('');
@@ -196,6 +201,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     napomena: string;
   }>>([]);
   const [bezSatiRadnici, setBezSatiRadnici] = useState<string[]>([]);
+  const [voznjaDraft, setVoznjaDraft] = useState({ radnikId: '', polaziste: '', odrediste: '' });
 
   const [photoQueue, setPhotoQueue] = useState<PhotoUpload[]>([]);
   const [portalTab, setPortalTab] = useState<WorkerPortalTab>('nalozi');
@@ -320,6 +326,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
       setError(null);
       setNotice(null);
       setPhotoLoadError(null);
+      setRouteLoadError(null);
       setEquipmentLoadError(null);
       setPrep([]);
     }
@@ -347,6 +354,12 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         fetchNalogGradilisteDokumentIds(order.id),
         fetchMobileNalogTeam(order.id),
       ]);
+      const routesResult = await fetchMobileNalogVoznje(order.id)
+        .then((voznje) => ({ voznje, error: null as unknown }))
+        .catch((reason: unknown) => ({ voznje: [] as MobileNalogVoznja[], error: reason }));
+      setRouteLoadError(routesResult.error
+        ? errorMessage(routesResult.error, 'Evidenciju vožnji nije moguće učitati.')
+        : null);
       const [alatiResult, strojeviResult] = await Promise.allSettled([
         fetchOprema('alat'),
         fetchOprema('stroj'),
@@ -381,6 +394,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         dokumenti: [...dokumenti, ...selectedSiteDocs],
         foto,
         ekipa,
+        voznje: routesResult.voznje,
       });
       const extraRows = new Map<string, {
         id: string;
@@ -514,6 +528,37 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     if (value === 'da') next.push(key);
     if (value === 'na') next.push(`${key}:na`);
     await runAction(() => saveReport({ potvrde: next }));
+  };
+
+  const addNalogVoznja = async () => {
+    if (!selected || !details) return;
+    const polaziste = voznjaDraft.polaziste.trim();
+    const odrediste = voznjaDraft.odrediste.trim();
+    const radnikId = voznjaDraft.radnikId || details.ekipa[0]?.radnik_id || '';
+    if (!radnikId || !polaziste || !odrediste) {
+      setError('Odaberi vozača i upiši polazište i odredište relacije.');
+      return;
+    }
+    const newRoute: MobileNalogVoznja = {
+      id: crypto.randomUUID(),
+      radnik_id: radnikId,
+      polaziste,
+      odrediste,
+      redoslijed: details.voznje.length,
+    };
+    await runAction(async () => {
+      await addMobileNalogVoznja(selected.id, newRoute);
+      setVoznjaDraft({ radnikId: '', polaziste: '', odrediste: '' });
+      setRouteLoadError(null);
+    }, 'Relacija je spremljena.');
+  };
+
+  const removeNalogVoznja = async (voznjaId: string) => {
+    if (!selected || !details) return;
+    await runAction(async () => {
+      await deleteMobileNalogVoznja(selected.id, voznjaId);
+      setRouteLoadError(null);
+    }, 'Relacija je uklonjena.');
   };
 
   const togglePrep = (key: PrepKey, checked: boolean) => {
@@ -810,6 +855,92 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     }
   };
 
+  const renderDrivingRoutes = () => {
+    if (!details) return null;
+    return (
+      <details open={Boolean(routeLoadError)} className="border-t border-slate-200 pt-2">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold text-sky-800">
+          <span>Dodatne relacije</span>
+          <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs">{details.voznje.length}</span>
+        </summary>
+        <div className="mt-2 space-y-3">
+          <p className="text-xs text-slate-500">Unesi vozača i relaciju za svaku dionicu vožnje.</p>
+          {routeLoadError && (
+            <p role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
+              {routeLoadError}
+            </p>
+          )}
+          {details.voznje.length > 0 && (
+            <ol className="space-y-1.5">
+              {details.voznje.map((voznja, index) => {
+                const driver = details.ekipa.find((worker) => worker.radnik_id === voznja.radnik_id);
+                return (
+                  <li key={voznja.id} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-2">
+                    <div className="min-w-0">
+                      <p className="text-xs text-slate-500">Relacija {index + 1} · {driver ? `${driver.ime} ${driver.prezime}` : 'Vozač'}</p>
+                      <p className="break-words text-sm font-medium text-slate-900">{voznja.polaziste} → {voznja.odrediste}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void removeNalogVoznja(voznja.id)}
+                      disabled={working}
+                      aria-label={`Ukloni relaciju ${voznja.polaziste} – ${voznja.odrediste}`}
+                      className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-rose-700 disabled:opacity-50"
+                    >
+                      <Trash2 className="h-4 w-4" /> Ukloni
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+          <div className="grid gap-2 sm:grid-cols-3">
+            <label className="block text-xs font-medium text-slate-700">
+              Vozač
+              <select
+                value={voznjaDraft.radnikId || details.ekipa[0]?.radnik_id || ''}
+                disabled={working || details.ekipa.length === 0}
+                onChange={(event) => setVoznjaDraft((current) => ({ ...current, radnikId: event.target.value }))}
+                className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm disabled:bg-slate-100"
+              >
+                {details.ekipa.map((worker) => (
+                  <option key={worker.radnik_id} value={worker.radnik_id}>{worker.ime} {worker.prezime}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-xs font-medium text-slate-700">
+              Polazište
+              <input
+                value={voznjaDraft.polaziste}
+                disabled={working}
+                onChange={(event) => setVoznjaDraft((current) => ({ ...current, polaziste: event.target.value }))}
+                placeholder="Npr. Zadar"
+                className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 px-2 text-sm disabled:bg-slate-100"
+              />
+            </label>
+            <label className="block text-xs font-medium text-slate-700">
+              Odredište
+              <input
+                value={voznjaDraft.odrediste}
+                disabled={working}
+                onChange={(event) => setVoznjaDraft((current) => ({ ...current, odrediste: event.target.value }))}
+                placeholder="Npr. Split"
+                className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 px-2 text-sm disabled:bg-slate-100"
+              />
+            </label>
+          </div>
+          <Button
+            onClick={() => void addNalogVoznja()}
+            disabled={working || details.ekipa.length === 0}
+            variant="secondary"
+          >
+            <Plus className="h-4 w-4" /> Dodaj relaciju
+          </Button>
+        </div>
+      </details>
+    );
+  };
+
   return (
     <main className="min-h-[100dvh] min-w-0 bg-slate-100 pb-[env(safe-area-inset-bottom)] [overflow-wrap:anywhere]">
       <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 pt-[max(env(safe-area-inset-top),0.75rem)]">
@@ -925,6 +1056,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                           ))}
                         </select>
                       </label>
+                      {renderDrivingRoutes()}
                     </WorkOrderPanel>
 
                     {([
@@ -1102,6 +1234,11 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                     {selected.mobile_status === 'predan' && (
                       <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">Nalog je predan uredu, ali ga još možete uređivati. Nakon izmjena ponovno ga predajte; ured ga zaključuje tek završnim odobrenjem.</p>
                     )}
+                    {canEditOrder && (
+                      <div className="rounded-xl border border-slate-200 bg-white px-3">
+                        {renderDrivingRoutes()}
+                      </div>
+                    )}
 
                     {([
                       { vrsta: 'zadatak' as const, key: 'poslovi' as const, title: 'Poslovi', canAdd: false, list: radniZadaci, empty: 'Nema upisanih poslova.', placeholder: 'Dodaj posao' },
@@ -1271,28 +1408,36 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                       <SectionConfirm value={potvrdaOf('alat')} onChange={(value) => void setPotvrda('alat', value)} disabled={working || !canEditOrder} />
                     </WorkOrderPanel>
 
-                    <WorkOrderPanel title="Strojevi i radni sati" icon={<Wrench className="h-5 w-5" />} tone="amber">
-                      {equipmentLoadError && (
-                        <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                          {equipmentLoadError}
-                        </p>
-                      )}
-                      <ItemEditor
-                        title="Strojevi"
-                        items={strojStavke}
-                        equipment={details.strojevi}
-                        equipmentLabel="stroj"
-                        value=""
-                        onValue={() => undefined}
-                        onAdd={() => undefined}
-                        onAddEquipment={(opremaId) => void addInventoryMachine(opremaId)}
-                        onHours={(item, hours) => void setMachineHours(item, hours)}
-                        onToggle={(item) => void toggleItem(item)}
-                        placeholder=""
-                        working={working}
-                      />
-                      <SectionConfirm value={potvrdaOf('strojevi')} onChange={(value) => void setPotvrda('strojevi', value)} disabled={working || !canEditOrder} />
-                    </WorkOrderPanel>
+                    <details className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                      <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3">
+                        <Wrench className="h-5 w-5 shrink-0 text-amber-700" />
+                        <span className="min-w-0 flex-1 text-sm font-bold text-slate-900">Strojevi (po potrebi)</span>
+                        {strojStavke.length > 0 && (
+                          <span className="text-xs font-semibold text-slate-500">{strojStavke.length} na nalogu</span>
+                        )}
+                      </summary>
+                      <div className="space-y-3 border-t border-slate-200 p-4">
+                        {equipmentLoadError && (
+                          <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                            {equipmentLoadError}
+                          </p>
+                        )}
+                        <ItemEditor
+                          title="Strojevi"
+                          items={strojStavke}
+                          equipment={details.strojevi}
+                          equipmentLabel="stroj"
+                          value=""
+                          onValue={() => undefined}
+                          onAdd={() => undefined}
+                          onAddEquipment={(opremaId) => void addInventoryMachine(opremaId)}
+                          onHours={(item, hours) => void setMachineHours(item, hours)}
+                          onToggle={(item) => void toggleItem(item)}
+                          placeholder=""
+                          working={working}
+                        />
+                      </div>
+                    </details>
 
                     <StepHeader step={3} title="Završetak dana" text="Potvrdi radno vrijeme, stanje ENC-a i kilometre povratka, zatim zaključi nalog." />
 

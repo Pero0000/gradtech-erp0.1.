@@ -190,6 +190,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
   const [photoLoadError, setPhotoLoadError] = useState<string | null>(null);
   const [routeLoadError, setRouteLoadError] = useState<string | null>(null);
   const [equipmentLoadError, setEquipmentLoadError] = useState<string | null>(null);
+  const [documentLoadError, setDocumentLoadError] = useState<string | null>(null);
   const [refreshingPhotos, setRefreshingPhotos] = useState(false);
   const [newMaterial, setNewMaterial] = useState('');
   const [newTool, setNewTool] = useState('');
@@ -328,6 +329,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
       setPhotoLoadError(null);
       setRouteLoadError(null);
       setEquipmentLoadError(null);
+      setDocumentLoadError(null);
       setPrep([]);
     }
     try {
@@ -347,10 +349,13 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         (foto) => ({ foto, error: null as unknown }),
         (reason: unknown) => ({ foto: [] as NalogFoto[], error: reason }),
       );
-      const [zadaci, stavke, dokumenti, linkedIds, ekipa] = await Promise.all([
+      const documentRequest = fetchNalogDokumenti(order.id).then(
+        (dokumenti) => ({ dokumenti, error: null as unknown }),
+        (reason: unknown) => ({ dokumenti: [] as NalogDokument[], error: reason }),
+      );
+      const [zadaci, stavke, linkedIds, ekipa] = await Promise.all([
         fetchNalogZadaci(order.id),
         fetchNalogStavke(order.id),
-        fetchNalogDokumenti(order.id),
         fetchNalogGradilisteDokumentIds(order.id),
         fetchMobileNalogTeam(order.id),
       ]);
@@ -380,8 +385,13 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
           : null,
       );
       const { foto, error: photoError } = await photoRequest;
-      const siteDocs = nalog.gradiliste_id ? await fetchGradilisteDokumenti(nalog.gradiliste_id) : [];
-      const selectedSiteDocs = siteDocs.filter((document) => linkedIds.includes(document.id));
+      const { dokumenti, error: documentError } = await documentRequest;
+      const siteDocuments = await (nalog.gradiliste_id
+        ? fetchGradilisteDokumenti(nalog.gradiliste_id, linkedIds)
+        : Promise.resolve([] as GradilisteDokument[])).then(
+        (documents) => ({ documents, error: null as unknown }),
+        (reason: unknown) => ({ documents: [] as GradilisteDokument[], error: reason }),
+      );
 
       setDetails({
         gradilisteId: nalog.gradiliste_id,
@@ -391,7 +401,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         stavke,
         alati: alati.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'),
         strojevi: strojevi.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'),
-        dokumenti: [...dokumenti, ...selectedSiteDocs],
+        dokumenti: [...dokumenti, ...siteDocuments.documents],
         foto,
         ekipa,
         voznje: routesResult.voznje,
@@ -419,6 +429,13 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
       setPhotoLoadError(photoError
         ? errorMessage(photoError, 'Fotografije naloga nije moguće učitati.')
         : null);
+      const documentErrors = [
+        documentError ? `Dokumenti naloga: ${errorMessage(documentError, 'Učitavanje nije uspjelo.')}` : null,
+        siteDocuments.error ? `Dokumenti gradilišta: ${errorMessage(siteDocuments.error, 'Učitavanje nije uspjelo.')}` : null,
+      ].filter(Boolean);
+      setDocumentLoadError(documentErrors.length > 0
+        ? `Neke dokumente nije moguće učitati. To ne sprječava predaju naloga. ${documentErrors.join(' ')}`
+        : null);
       const savedPotvrde = (nalog.mobile_potvrde as string[] | null) ?? [];
       const timeConfirmed = savedPotvrde.includes('vrijeme');
       // Dok vrijeme nije potvrđeno pretpostavka je uvijek 06:00–16:00; ručne izmjene se čuvaju između osvježavanja.
@@ -439,7 +456,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         encStanje: nalog.enc_stanje?.toString() ?? '',
       });
     } catch (reason) {
-      setError(errorMessage(reason, 'Detalje radnog naloga nije moguće učitati.'));
+      setError(`Detalje radnog naloga nije moguće ${showLoading ? 'učitati' : 'osvježiti'}. ${errorMessage(reason, 'Pokušaj ponovno.')}`);
       if (showLoading) setDetails(null);
     } finally {
       if (showLoading) setLoading(false);
@@ -486,14 +503,19 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     setWorking(true);
     setError(null);
     setNotice(null);
+    let saved = false;
     try {
       await action();
+      saved = true;
       if (success) setNotice(success);
-      await refreshOrders();
-      const latest = (await fetchMobileRadniNalozi()).find((order) => order.id === selectedId);
+      const list = visibleMobileOrders(await fetchMobileRadniNalozi());
+      setOrders(list);
+      const latest = list.find((order) => order.id === selectedId);
       if (latest) await loadDetails(latest, false);
     } catch (reason) {
-      setError(errorMessage(reason, 'Promjena nije spremljena.'));
+      setError(saved
+        ? `Promjena je spremljena, ali prikaz nije osvježen. ${errorMessage(reason, 'Pokušaj osvježiti nalog.')}`
+        : errorMessage(reason, 'Promjena nije spremljena.'));
     } finally {
       setWorking(false);
     }
@@ -972,6 +994,10 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         {pushError && <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{pushError}</p>}
         {error && !isWorkTimeOverlapError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
         {notice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
+        {selected && documentLoadError && <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <p>{documentLoadError}</p>
+          <button type="button" disabled={working || loading} onClick={() => void loadDetails(selected, false)} className="mt-2 min-h-10 font-semibold underline disabled:opacity-50">Ponovi učitavanje dokumenata</button>
+        </div>}
 
         {selected ? (
           <section className="space-y-4">

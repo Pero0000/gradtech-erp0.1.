@@ -4409,8 +4409,11 @@ export interface GradilisteDokument {
   thumbnailUrl: string;
 }
 
-export async function fetchGradilisteDokumenti(gradilisteId: string): Promise<GradilisteDokument[]> {
-  const { data, error } = await supabase.from('gradiliste_dokumenti').select('*').eq('gradiliste_id', gradilisteId).order('created_at');
+export async function fetchGradilisteDokumenti(gradilisteId: string, dokumentIds?: readonly string[]): Promise<GradilisteDokument[]> {
+  if (dokumentIds?.length === 0) return [];
+  let query = supabase.from('gradiliste_dokumenti').select('*').eq('gradiliste_id', gradilisteId);
+  if (dokumentIds) query = query.in('id', [...dokumentIds]);
+  const { data, error } = await query.order('created_at');
   if (error) throw error;
   return Promise.all((data ?? []).map(async (document: GradilisteDokument) => {
     const [url, thumbnailUrl] = await Promise.all([

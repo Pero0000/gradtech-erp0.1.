@@ -768,6 +768,8 @@ Detaljan plan, prijenos postojećih podataka, konfiguracija pozivnica i provjere
 
 ### Portal djelatnika
 
+Nedostupan dokument naloga ili povezani dokument gradilišta prikazuje zasebno upozorenje s mogućnošću ponovnog učitavanja; ne prekida učitavanje radnih podataka ni predaju naloga. Portal traži poveznice samo za dokumente gradilišta povezane s odabranim nalogom. Ako predaja uspije, a naknadno osvježavanje ne uspije, poruka jasno navodi da je promjena spremljena. Upozorenje o dokumentima ne znači da je datoteka izbrisana: uzrok može biti i nedostupan pristup u Storageu. Nova SQL migracija nije potrebna; potrebno je objaviti novi web-build (i ažurirati web-sadržaj native aplikacije ako se koristi). Regresijske provjere: `node --test tests/mobile-work-order-submit.test.mjs`.
+
 Na radnim nalozima prikazuju se samo neriješeni radni zadaci, dodatni radovi, materijal i alat — pri odabiru stavki u rasporedu i pri popunjavanju naloga u web portalu i mobilnoj aplikaciji. Nakon oznake „riješeno” stavka nestaje s naloga, ali se ne briše iz evidencije gradilišta. Spremanje naloga zadržava vezu ranije riješenih stavki s nalogom. Nova migracija nije potrebna. Provjera spremanja: `node --test tests/work-order-items.test.mjs`.
 
 Pregled gradilišta zadržava i riješene stavke s kvačicom i precrtanim nazivom. Zadaci, materijal i alat čitaju isti spremljeni status kao nalog; nije potrebno zaključiti nalog. Otvoreni pregled osvježava te podatke svakih 15 sekundi dok je kartica preglednika vidljiva te pri povratku na karticu/prozor, kako bi pokazao i promjene radnika s drugog uređaja.

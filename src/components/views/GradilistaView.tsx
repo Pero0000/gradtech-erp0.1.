@@ -544,7 +544,7 @@ export function GradilistaView({
       if (selectedGradilisteId === deleteId) setSelectedGradilisteId(null);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Greška pri brisanju');
+      setError(getErrorMessage(e, 'Greška pri brisanju'));
     }
   };
 

@@ -427,6 +427,7 @@ export function NalogIzvrsenje({
   const [restoringStatusId, setRestoringStatusId] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [km, setKm] = useState({ pocetak: '', kraj: '' });
+  const [kmBezObracuna, setKmBezObracuna] = useState(false);
   const [stavke, setStavke] = useState<NalogStavka[]>([]);
   const [alati, setAlati] = useState<Oprema[]>([]);
   const [strojevi, setStrojevi] = useState<Oprema[]>([]);
@@ -436,6 +437,8 @@ export function NalogIzvrsenje({
   const [gradLinked, setGradLinked] = useState<string[]>([]);
   const docRef = useRef<HTMLInputElement>(null);
   const [vremena, setVremena] = useState<NalogRadnikVrijeme[]>([]);
+  const [savingTime, setSavingTime] = useState(false);
+  const timeSavePending = useRef(false);
   const [zadaci, setZadaci] = useState<GradilisteZadatak[]>([]);
   const [savingCompletion, setSavingCompletion] = useState(false);
   const completionDisabled = savingCompletion || zavrsen || nalog.status === 'zavrsen' || nalog.status === 'otkazan';
@@ -484,6 +487,7 @@ export function NalogIzvrsenje({
     ]);
     if (izv.status === 'fulfilled') {
       setKm({ pocetak: izv.value.km_pocetak?.toString() ?? '', kraj: izv.value.km_kraj?.toString() ?? '' });
+      setKmBezObracuna(Boolean(izv.value.km_bez_obracuna));
       setNapomena(izv.value.napomena ?? '');
       setZavrsen(izv.value.status === 'zavrsen');
       setBezIzvrsenja(Boolean(izv.value.bez_izvrsenja));
@@ -505,10 +509,10 @@ export function NalogIzvrsenje({
     if (dok.status === 'fulfilled') setDokumenti(dok.value);
     else setError((e) => e ?? errText(dok.reason, 'Greška pri učitavanju dokumenata.') + hint2);
     if (vr.status === 'fulfilled') {
-      const withDefault = vr.value.map((v) => (v.vrijeme_od ? v : { ...v, vrijeme_od: '06:00:00' }));
+      const withDefault = vr.value.map((v) => (v.mobile_zero_hours || v.vrijeme_od ? v : { ...v, vrijeme_od: '06:00:00' }));
       setVremena(withDefault);
       vr.value
-        .filter((v) => !v.vrijeme_od)
+        .filter((v) => !v.mobile_zero_hours && !v.vrijeme_od)
         .forEach((v) => void saveNalogRadnikVrijeme(nalog.id, v.radnik_id, '06:00', v.vrijeme_do).catch(() => undefined));
     }
     else setError((e) => e ?? errText(vr.reason, 'Greška pri učitavanju radnika.') + hint);
@@ -651,7 +655,7 @@ export function NalogIzvrsenje({
     try {
       await action();
     } catch (reason) {
-      setError(errText(reason, fallback) + hint);
+      setError(errText(reason, fallback));
     }
   };
 
@@ -664,6 +668,10 @@ export function NalogIzvrsenje({
   };
 
   const toggleZavrsen = (value: boolean, bezPotvrdeDjelatnika = false, zavrsiBezIzvrsenja = false) => {
+    if (timeSavePending.current) {
+      setError('Pričekaj da se spremi radno vrijeme prije promjene statusa naloga.');
+      return;
+    }
     if (zavrsiBezIzvrsenja) {
       if (nalog.status === 'zavrsen' || nalog.status === 'otkazan') {
         setError('Bez izvršenja može se završiti samo otvoren nalog koji još nije zaključen ili otkazan.');
@@ -677,7 +685,7 @@ export function NalogIzvrsenje({
         return;
       }
       const radnici = radnikIds ? vremena.filter((v) => radnikIds.includes(v.radnik_id)) : vremena;
-      if (!zavrsiBezIzvrsenja && !bezPotvrdeDjelatnika && radnici.some((v) => !v.vrijeme_od || !v.vrijeme_do)) {
+      if (!zavrsiBezIzvrsenja && !bezPotvrdeDjelatnika && radnici.some((v) => !v.mobile_zero_hours && (!v.vrijeme_od || !v.vrijeme_do))) {
         setError('Nalog se ne može zaključiti dok nije upisan završetak rada (Do) za sve radnike.');
         return;
       }
@@ -720,21 +728,61 @@ export function NalogIzvrsenje({
 
   const saveDetails = () =>
     guard(async () => {
-      const toNum = (v: string) => (v.trim() === '' ? null : Math.max(0, Math.round(Number(v))));
+      const toNum = (v: string) => (v.trim() === '' ? null : Number(v));
       const pocetak = toNum(km.pocetak);
       const kraj = toNum(km.kraj);
-      if ((pocetak !== null && Number.isNaN(pocetak)) || (kraj !== null && Number.isNaN(kraj))) throw new Error('Kilometri moraju biti broj.');
+      if ([pocetak, kraj].some((value) => value !== null && (!Number.isSafeInteger(value) || value < 0))) {
+        throw new Error('Očitanja kilometara moraju biti nenegativni cijeli brojevi.');
+      }
       if (pocetak !== null && kraj !== null && kraj < pocetak) throw new Error('Završno stanje ne može biti manje od početnog.');
       await saveNalogIzvrsenje(nalog.id, { km_pocetak: pocetak, km_kraj: kraj, napomena: napomena.trim() || null });
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1500);
     }, 'Greška pri spremanju.');
 
-  const changeVrijeme = (radnikId: string, field: 'vrijeme_od' | 'vrijeme_do', value: string) => {
-    const next = vremena.map((v) => (v.radnik_id === radnikId ? { ...v, [field]: value || null } : v));
-    setVremena(next);
+  const saveVrijeme = (next: NalogRadnikVrijeme[], radnikId: string, zeroHours = false) => {
+    if (timeSavePending.current) return;
     const row = next.find((v) => v.radnik_id === radnikId);
-    if (row) void guard(() => saveNalogRadnikVrijeme(nalog.id, radnikId, row.vrijeme_od, row.vrijeme_do), 'Greška pri spremanju vremena.');
+    if (!row) return;
+    const previous = vremena;
+    timeSavePending.current = true;
+    setSavingTime(true);
+    setVremena(next);
+    void guard(async () => {
+      try {
+        await saveNalogRadnikVrijeme(nalog.id, radnikId, row.vrijeme_od, row.vrijeme_do, zeroHours);
+      } catch (reason) {
+        setVremena(previous);
+        try {
+          setVremena(await fetchNalogRadnikVrijeme(nalog.id));
+        } catch (reloadReason) {
+          throw new Error(`${errText(reason, 'Greška pri spremanju vremena.')} ${errText(reloadReason, 'Nije moguće osvježiti spremljena vremena.')} Ponovno otvori nalog za provjeru spremljenih sati.`);
+        }
+        throw reason;
+      }
+    }, 'Greška pri spremanju vremena.').finally(() => {
+      timeSavePending.current = false;
+      setSavingTime(false);
+    });
+  };
+
+  const changeVrijeme = (radnikId: string, field: 'vrijeme_od' | 'vrijeme_do', value: string) => {
+    const next = vremena.map((v) => (v.radnik_id === radnikId
+      ? { ...v, [field]: value || null, mobile_zero_hours: false }
+      : v));
+    saveVrijeme(next, radnikId);
+  };
+
+  const changeZeroHours = (radnikId: string, zeroHours: boolean) => {
+    const next = vremena.map((v) => (v.radnik_id === radnikId
+      ? {
+        ...v,
+        vrijeme_od: zeroHours ? null : '06:00',
+        vrijeme_do: zeroHours ? null : '16:00',
+        mobile_zero_hours: zeroHours,
+      }
+      : v));
+    saveVrijeme(next, radnikId, zeroHours);
   };
 
   const addZadatak = (vrsta: ZadatakVrsta) => {
@@ -894,13 +942,13 @@ export function NalogIzvrsenje({
             {nalog.mobile_status === 'zakljucen_bez_potvrde' && (
               <span className="rounded bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">Djelatnici nisu potvrdili</span>
             )}
-            <button onClick={() => toggleZavrsen(false)} className="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100">Ponovno otvori</button>
+            <button onClick={() => toggleZavrsen(false)} disabled={savingTime} className="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50">Ponovno otvori</button>
           </div>
         ) : (
           <>
             <button
               onClick={() => toggleZavrsen(true)}
-              disabled={nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku'}
+              disabled={savingTime || nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku'}
               className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Check className="h-4 w-4" />
@@ -909,6 +957,7 @@ export function NalogIzvrsenje({
             {nalog.status !== 'zavrsen' && nalog.status !== 'otkazan' && (
               <button
                 onClick={() => toggleZavrsen(true, false, true)}
+                disabled={savingTime}
                 className="ml-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 <Check className="h-4 w-4" />
@@ -918,6 +967,7 @@ export function NalogIzvrsenje({
             {(nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku') && (
               <button
                 onClick={() => toggleZavrsen(true, true)}
+                disabled={savingTime}
                 className="ml-2 inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-900 hover:bg-amber-100"
               >
                 <Check className="h-4 w-4" />
@@ -1006,8 +1056,8 @@ export function NalogIzvrsenje({
         ) : (
           <div className="space-y-1.5">
             {visibleVremena.map((v) => {
-              const od = v.vrijeme_od ? toMinutes(v.vrijeme_od) : null;
-              const doo = v.vrijeme_do ? toMinutes(v.vrijeme_do) : null;
+              const od = !v.mobile_zero_hours && v.vrijeme_od ? toMinutes(v.vrijeme_od) : null;
+              const doo = !v.mobile_zero_hours && v.vrijeme_do ? toMinutes(v.vrijeme_do) : null;
               const mins = od !== null && doo !== null ? (doo >= od ? doo - od : doo + 1440 - od) : null;
               let nocne = 0;
               if (od !== null && mins) {
@@ -1028,9 +1078,25 @@ export function NalogIzvrsenje({
                     />
                     Poslovođa
                   </label>
+                  <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={v.mobile_zero_hours}
+                      disabled={savingTime}
+                      onChange={(event) => changeZeroHours(v.radnik_id, event.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                    Nije radio (0 sati)
+                  </label>
                   <label className="flex items-center gap-1.5 text-xs text-slate-500">
                     Od
-                    <input type="time" value={v.vrijeme_od?.slice(0, 5) ?? ''} onChange={(e) => changeVrijeme(v.radnik_id, 'vrijeme_od', e.target.value)} className={inputCls} />
+                    <input
+                      type="time"
+                      value={v.vrijeme_od?.slice(0, 5) ?? ''}
+                      onChange={(e) => changeVrijeme(v.radnik_id, 'vrijeme_od', e.target.value)}
+                      disabled={savingTime || v.mobile_zero_hours}
+                      className={inputCls}
+                    />
                   </label>
                   <label className="flex items-center gap-1.5 text-xs text-slate-500">
                     Do
@@ -1038,9 +1104,10 @@ export function NalogIzvrsenje({
                       type="time"
                       value={v.vrijeme_do?.slice(0, 5) ?? ''}
                       onFocus={() => {
-                        if (!v.vrijeme_do) changeVrijeme(v.radnik_id, 'vrijeme_do', '16:00');
+                        if (!v.mobile_zero_hours && !v.vrijeme_do) changeVrijeme(v.radnik_id, 'vrijeme_do', '16:00');
                       }}
                       onChange={(e) => changeVrijeme(v.radnik_id, 'vrijeme_do', e.target.value)}
+                      disabled={savingTime || v.mobile_zero_hours}
                       className={inputCls}
                     />
                   </label>
@@ -1061,6 +1128,11 @@ export function NalogIzvrsenje({
 
       <div className={modulePanelCls}>
         <SectionTitle icon={<Gauge className="h-4 w-4" />}>Kilometri</SectionTitle>
+        {kmBezObracuna && (
+          <p className="mb-2 text-sm text-amber-800">
+            Kilometri ovog naloga isključeni su iz obračuna zbog pogrešnog puta. Izvorna očitanja sačuvana su radi provjere.
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-1.5 text-xs text-slate-500">
             Početno stanje

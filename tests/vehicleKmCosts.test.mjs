@@ -17,6 +17,38 @@ const orders = [
   { id: 'nalog-2', broj: '002', gradiliste_id: 'site-2', km_pocetak: 1150, km_kraj: 1230 },
 ];
 
+test('razmak očitanja različitih naloga ne stvara fantomski trošak od 82000 km', () => {
+  const separated = [
+    { ...orders[0], km_pocetak: 0, km_kraj: 0 },
+    { ...orders[1], km_pocetak: 81900, km_kraj: 82000 },
+  ];
+  const vehicle = { id: 'vivaro', marka: 'Opel', model: 'Vivaro', cijena_km: 0.28 };
+  const baseline = calculateVehicleKmCosts(separated, vehicle);
+  assert.equal(baseline.reduce((sum, row) => sum + row.km, 0), 100);
+  assert.equal(baseline.reduce((sum, row) => sum + row.iznos, 0), 28);
+  assert.equal(baseline.some((row) => row.nalog_id === 'nalog-1'), false);
+
+  const manual = calculateDailyVehicleKmCosts([
+    { nalog_id: 'nalog-1', vozilo_id: 'vivaro' },
+    { nalog_id: 'nalog-2', vozilo_id: 'vivaro' },
+  ], separated, [vehicle], [
+    { vozilo_id: 'vivaro', gradiliste_id: 'site-1', postotak: 50 },
+    { vozilo_id: 'vivaro', gradiliste_id: 'site-2', postotak: 50 },
+  ]);
+  assert.equal(manual.reduce((sum, row) => sum + row.km, 0), 100);
+  assert.equal(manual.reduce((sum, row) => sum + row.iznos, 0), 28);
+});
+
+test('nevaljana i nepotpuna očitanja nisu pretvorena u kilometarski trošak', () => {
+  for (const [km_pocetak, km_kraj] of [
+    [null, 82000], [0, null], [NaN, 82000], [0, Infinity], [-1, 100], [100, 99], [10.5, 20],
+  ]) {
+    assert.throws(() => calculateVehicleKmCosts([
+      { ...orders[0], km_pocetak, km_kraj },
+    ], { marka: 'Opel', model: 'Vivaro', cijena_km: 0.28 }));
+  }
+});
+
 test('obračunava kilometre zasebno po cijeni svakog vozila, uključujući Vivaro', () => {
   const vehicles = [
     { marka: 'Opel', model: 'Vivaro', cijena_km: 0.5 },

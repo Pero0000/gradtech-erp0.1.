@@ -32,3 +32,11 @@ export function hasOstaloEntry(
       ? candidate.radnik_id === entry.radnik_id
       : !candidate.radnik_id && normalizeText(candidate.tekst) === normalizeText(entry.tekst)));
 }
+
+export function entriesForRosterDate(entries: DnevniRasporedOstalo[], date: string) {
+  return entries.filter((entry) => entry.datum === date);
+}
+
+export function workerReturnsToOstalo(assignment: Pick<DnevniRasporedRadnik, 'iz_ostalo'>) {
+  return assignment.iz_ostalo === true;
+}

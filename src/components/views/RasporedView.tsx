@@ -64,7 +64,7 @@ import {
 } from '@/lib/api';
 import { useAuth } from '@/auth/useAuth';
 import { DEFAULT_GRADILISTE_COLUMN_LABELS } from '@/lib/company';
-import { countOstaloAssignments, hasOstaloEntry } from '@/lib/rasporedOstalo';
+import { countOstaloAssignments, entriesForRosterDate, hasOstaloEntry, workerReturnsToOstalo } from '@/lib/rasporedOstalo';
 
 type DragPayload =
   | { type: 'gradiliste'; id: string; assignmentId?: string }
@@ -1014,7 +1014,9 @@ export function RasporedView() {
   };
 
   const removeWorkerAssignment = async (assignmentId: string, workerId: string) => {
-    if (!hasOstaloEntry(ostalo, { tekst: null, radnik_id: workerId }, selectedDate)) {
+    const assignment = workerAssignments.find((item) => item.id === assignmentId);
+    if (assignment && workerReturnsToOstalo(assignment)
+      && !hasOstaloEntry(ostalo, { tekst: null, radnik_id: workerId }, selectedDate)) {
       await addRasporedOstalo(selectedDate, { radnikId: workerId });
     }
     await removeRasporedRadnik(assignmentId);
@@ -1030,7 +1032,7 @@ export function RasporedView() {
     const payload = readPayload(event);
     if (!payload) return;
     if (payload.type === 'ostalo') {
-      const entry = ostalo.find((item) => item.id === payload.id);
+      const entry = ostalo.find((item) => item.id === payload.id && item.datum === selectedDate);
       if (entry?.radnik_id && isWorkerAssignedToLockedVehicle(entry.radnik_id)) {
         setError('Radnik je na vozilu sa zaključenim radnim nalogom i ne može se premjestiti.');
         return;
@@ -1044,9 +1046,9 @@ export function RasporedView() {
     }
     void run(async () => {
       if (payload.type === 'ostalo') {
-        const entry = ostalo.find((o) => o.id === payload.id);
+        const entry = ostalo.find((o) => o.id === payload.id && o.datum === selectedDate);
         if (!entry) return;
-        if (entry.radnik_id) await assignRasporedRadnik(selectedDate, voziloId, entry.radnik_id);
+        if (entry.radnik_id) await assignRasporedRadnik(selectedDate, voziloId, entry.radnik_id, true);
         else if (entry.tekst) await addRasporedTekst(selectedDate, voziloId, entry.tekst, true);
       } else if (payload.type === 'gradiliste') {
         if (payload.assignmentId) await moveRasporedGradiliste(payload.assignmentId, voziloId);
@@ -1085,8 +1087,6 @@ export function RasporedView() {
         setError('Gradilište sa zaključenim radnim nalogom ne može se premjestiti s vozila.');
         return;
       }
-      const assignment = siteAssignments.find((a) => a.id === payload.assignmentId);
-      if (assignment?.gradiliste_id) placeSite(assignment.gradiliste_id, columnIndex, beforeId);
       const assignmentId = payload.assignmentId;
       void run(() => removeSiteAssignment(assignmentId));
     } else {
@@ -1098,7 +1098,7 @@ export function RasporedView() {
     event.preventDefault();
     setDropTarget(null);
     const payload = readPayload(event);
-    if (!payload || payload.type === 'ostalo' || (payload.type === 'radnik' && ostalo.some((o) => o.radnik_id === payload.id))) return;
+    if (!payload || payload.type === 'ostalo') return;
     const assignmentId = payload.type === 'radnik' || payload.type === 'gradiliste' ? payload.assignmentId : undefined;
     if (payload.type === 'radnik' && isWorkerAssignedToLockedVehicle(payload.id)) {
       setError('Radnik je na vozilu sa zaključenim radnim nalogom i ne može se premjestiti.');
@@ -1112,7 +1112,9 @@ export function RasporedView() {
     }
     void run(async () => {
       if (payload.type === 'radnik') {
-        await addRasporedOstalo(selectedDate, { radnikId: payload.id });
+        if (!hasOstaloEntry(ostalo, { tekst: null, radnik_id: payload.id }, selectedDate)) {
+          await addRasporedOstalo(selectedDate, { radnikId: payload.id });
+        }
         if (assignmentId) await removeRasporedRadnik(assignmentId);
       } else if (assignmentId) {
         const assignment = siteAssignments.find((a) => a.id === assignmentId);
@@ -1131,7 +1133,7 @@ export function RasporedView() {
     setDropTarget(null);
     const payload = readPayload(event);
     if (payload?.type === 'ostalo' && type === 'radnik') {
-      const entry = ostalo.find((o) => o.id === payload.id);
+      const entry = ostalo.find((o) => o.id === payload.id && o.datum === selectedDate);
       if (entry?.radnik_id) void run(() => removeRasporedOstalo(entry.id));
       return;
     }
@@ -1163,8 +1165,9 @@ export function RasporedView() {
   const sites = gradilista.filter((g) => categoryStatuses.includes(g.status));
   const columns = reconcileColumns(gradilista, savedColumns).map((column) =>
     column.filter((id) => sites.some((site) => site.id === id)));
+  const dailyOstalo = entriesForRosterDate(ostalo, selectedDate);
   const workers = radnici.filter((r) => (r.status === 'aktivan' || workerAssignments.some((a) => a.radnik_id === r.id))
-    && !ostalo.some((o) => o.radnik_id === r.id));
+    && !dailyOstalo.some((o) => o.radnik_id === r.id));
   const vehicleOf = (voziloId: string) => vozila.find((v) => v.id === voziloId);
   const workerCount = (radnikId: string) => workerAssignments.filter((a) => a.radnik_id === radnikId).length;
   const siteCount = (gradilisteId: string) => siteAssignments.filter((a) => a.gradiliste_id === gradilisteId).length;
@@ -1509,12 +1512,12 @@ export function RasporedView() {
                 >
                   <div className="schedule-vehicle-header mb-2 flex min-w-0 flex-wrap items-center gap-1.5">
                     <span className="w-12 flex-shrink-0 truncate rounded border border-slate-800 bg-white px-1 py-0.5 text-[9px] text-slate-900">AUTO:</span>
-                    <span className="min-w-0 flex-1 truncate rounded border border-slate-800 bg-amber-200 px-1 py-0.5 text-center text-xs font-bold uppercase text-slate-900" title={[vozilo.marka, vozilo.model].filter(Boolean).join(' ')}>
+                    <span className="min-w-0 flex-1 break-words rounded border border-slate-800 bg-amber-200 px-1 py-0.5 text-center text-xs font-bold uppercase text-slate-900" title={[vozilo.marka, vozilo.model].filter(Boolean).join(' ')}>
                       {[vozilo.marka, vozilo.model].filter(Boolean).join(' ')}
                     </span>
-                    {(vehicleLocked || vehicleHasLockedOrder) && (
+                    {vehicleLocked && (
                       <span className="rounded bg-amber-200 px-1 py-0.5 text-[8px] font-bold text-amber-900">
-                        {vehicleConfirmed ? 'POTVRĐENA STAVKA' : 'NALOG ZAKLJUČEN – DODAVANJE DOPUŠTENO'}
+                        POTVRĐENA STAVKA
                       </span>
                     )}
                     {canEditKmAllocations && dailyKmSites(vozilo.id).length > 0 && (
@@ -1762,7 +1765,7 @@ export function RasporedView() {
         >
           <h2 className="mb-2 text-xs font-semibold uppercase text-slate-500">Ostalo</h2>
           <div className="space-y-1.5">
-            {ostalo.map((entry) => {
+            {dailyOstalo.map((entry) => {
               const worker = entry.radnik_id ? radnici.find((r) => r.id === entry.radnik_id) : null;
               return (
                 <div

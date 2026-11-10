@@ -911,7 +911,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
         onClose={() => setCancelTarget(null)}
         onConfirm={handleCancelOrder}
         title="Odustati od radnog naloga?"
-        message={`Nalog ${cancelTarget?.broj ?? ''} bit će označen kao otkazan. Nalog i povezani podaci neće biti izbrisani.`}
+        message={`Nalog ${cancelTarget?.broj ?? ''} bit će označen kao otkazan i odvezan od dnevnog rasporeda kako bi se za tu stavku mogao otvoriti novi nalog. Otkazani nalog i povezani podaci ostaju sačuvani u povijesti.`}
         confirmLabel="Otkazati nalog"
       />
       <ConfirmDialog

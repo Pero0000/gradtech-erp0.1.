@@ -124,6 +124,8 @@ test('kilometre sync retry recalculates only the work-order day and propagates f
   const success = createApi({ error: null });
   await success.api.retryNalogKilometrazaSync('order');
   assert.deepEqual(JSON.parse(JSON.stringify(success.calls)), [
+    ['review_daily_vehicle_km', { p_datum: '2026-11-05' }],
+    ['get_daily_vehicle_km_allocations', { p_datum: '2026-11-05' }],
     ['replace_daily_vehicle_km_settlement', { p_datum: '2026-11-05', p_costs: [] }],
   ]);
 
@@ -168,6 +170,8 @@ test('status restore commits once and recalculates daily vehicle kilometres sepa
   await api.restoreWorkOrderStatusChange('change-id', 'order-id');
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
     ['restore_work_order_status_change', { p_status_change_id: 'change-id' }],
+    ['review_daily_vehicle_km', { p_datum: '2026-11-05' }],
+    ['get_daily_vehicle_km_allocations', { p_datum: '2026-11-05' }],
     ['replace_daily_vehicle_km_settlement', { p_datum: '2026-11-05', p_costs: [] }],
   ]);
 });

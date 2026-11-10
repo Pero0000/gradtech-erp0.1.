@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import { nocniInterval } from './postavke';
 import { minuteSmjene, nocniIzNapomene, type ObracunPrava } from './obracunSati';
-import { calculateDailyVehicleKmCosts, type VehicleKmAllocation } from './vehicleKmCosts';
+import { calculateDailyVehicleKmCosts, validateWorkOrderKm, type VehicleKmAllocation } from './vehicleKmCosts';
 import { requireCompany } from './company';
 import { fetchAllRows } from './pagination';
 import { todayISO } from './rokovi';
@@ -582,14 +582,14 @@ export async function fetchVoziloMjesecniObracun(
 
   const { data: nalozi, error: naloziError } = await supabase
     .from('radni_nalozi')
-    .select('id, broj, gradiliste_id, km_pocetak, km_kraj, bez_troska, bez_izvrsenja')
+    .select('id, broj, gradiliste_id, km_pocetak, km_kraj, bez_troska, bez_izvrsenja, km_bez_obracuna')
     .in('id', ids)
     .eq('status', 'zavrsen')
     .not('km_pocetak', 'is', null)
     .not('km_kraj', 'is', null);
   if (naloziError) throw naloziError;
 
-  const completedOrders = (nalozi ?? []).filter((order) => !order.bez_izvrsenja);
+  const completedOrders = (nalozi ?? []).filter((order) => !order.bez_izvrsenja && !order.km_bez_obracuna);
   const ordersById = new Map(completedOrders.map((order) => [order.id, {
     id: order.id,
     broj: order.broj,
@@ -2034,7 +2034,7 @@ export async function copyLatestDnevniRaspored(targetDate: string) {
     fetchDnevniRaspored(sourceDate),
     fetchDnevniRaspored(targetDate),
     supabase.from('dnevni_raspored_ostalo').select('*').eq('datum', sourceDate),
-    supabase.from('dnevni_raspored_ostalo').select('*'),
+    supabase.from('dnevni_raspored_ostalo').select('*').eq('datum', targetDate),
   ]);
   if (sourceOstaloResult.error) throw ostaloError(sourceOstaloResult.error);
   if (existingOstaloResult.error) throw ostaloError(existingOstaloResult.error);
@@ -2066,7 +2066,12 @@ export async function copyLatestDnevniRaspored(targetDate: string) {
       targetWorkerKeys.add(key);
       return true;
     })
-    .map((row) => ({ datum: targetDate, vozilo_id: row.vozilo_id, radnik_id: row.radnik_id }));
+    .map((row) => ({
+      datum: targetDate,
+      vozilo_id: row.vozilo_id,
+      radnik_id: row.radnik_id,
+      iz_ostalo: row.iz_ostalo ?? false,
+    }));
 
   const existingOstalo = (existingOstaloResult.data ?? []) as DnevniRasporedOstalo[];
   const existingOstaloKeys = new Set(existingOstalo.map((row) =>
@@ -2172,10 +2177,10 @@ export async function removeRasporedOstalo(id: string) {
   if (error) throw ostaloError(error);
 }
 
-export async function assignRasporedRadnik(datum: string, voziloId: string, radnikId: string) {
+export async function assignRasporedRadnik(datum: string, voziloId: string, radnikId: string, izOstalo = false) {
   const { error } = await supabase
     .from('dnevni_raspored_radnici')
-    .upsert({ datum, vozilo_id: voziloId, radnik_id: radnikId }, { onConflict: 'datum,vozilo_id,radnik_id', ignoreDuplicates: true });
+    .upsert({ datum, vozilo_id: voziloId, radnik_id: radnikId, iz_ostalo: izOstalo }, { onConflict: 'datum,vozilo_id,radnik_id' });
   if (error) throw dnevniRasporedError(error);
 }
 
@@ -3224,7 +3229,7 @@ async function syncKmGrupe(datum: string) {
   const nalozi = nalogIds.length === 0 ? [] : await (async () => {
     const { data, error } = await supabase
       .from('radni_nalozi')
-      .select('id, broj, gradiliste_id, km_pocetak, km_kraj, bez_troska, bez_izvrsenja')
+      .select('id, broj, gradiliste_id, km_pocetak, km_kraj, bez_troska, bez_izvrsenja, km_bez_obracuna')
       .in('id', nalogIds)
       .eq('status', 'zavrsen')
       .not('km_pocetak', 'is', null)
@@ -3232,7 +3237,24 @@ async function syncKmGrupe(datum: string) {
     if (error) throw error;
     return data ?? [];
   })();
-  const lista = nalozi.filter((nalog) => !nalog.bez_troska && !nalog.bez_izvrsenja);
+  const lista = nalozi.filter((nalog) => !nalog.bez_troska && !nalog.bez_izvrsenja && !nalog.km_bez_obracuna);
+  for (const nalog of lista) {
+    await verifyWorkOrderKm(nalog.id, Number(nalog.km_pocetak), Number(nalog.km_kraj));
+  }
+  const { data: reviews, error: reviewError } = await supabase.rpc('review_daily_vehicle_km', { p_datum: datum });
+  if (reviewError) throw reviewError;
+  for (const review of (reviews ?? []) as Array<{
+    vozilo_id: string; naziv: string; kilometri: number; signature: string; confirmed: boolean;
+  }>) {
+    if (review.confirmed) continue;
+    if (!window.confirm(`Provjera kilometara: ${review.naziv} dana ${datum} ima ukupno ${review.kilometri} km (više od 1.000 km dnevno).\nJe li unos ispravan?\n\nU redu = potvrdi stvarnu vožnju. Odustani = ispravi očitanja; obračun neće biti promijenjen.`)) {
+      throw new Error('Dnevni kilometarski obračun nije spremljen. Provjeri početna i završna očitanja na nalozima.');
+    }
+    const { error } = await supabase.rpc('confirm_daily_vehicle_km', {
+      p_datum: datum, p_vozilo_id: review.vozilo_id, p_signature: review.signature,
+    });
+    if (error) throw error;
+  }
 
   const voziloIds = [...vezaPoVozilu.keys()];
   const vozila = voziloIds.length === 0 ? [] : await (async () => {
@@ -3302,14 +3324,14 @@ export async function fetchDailyVehicleKmAllocations(
     ? { data: [], error: null }
     : await supabase
       .from('radni_nalozi')
-      .select('id, broj, gradiliste_id, km_pocetak, km_kraj, bez_troska, bez_izvrsenja')
+      .select('id, broj, gradiliste_id, km_pocetak, km_kraj, bez_troska, bez_izvrsenja, km_bez_obracuna')
       .in('id', orderIds)
       .eq('status', 'zavrsen')
       .not('km_pocetak', 'is', null)
       .not('km_kraj', 'is', null);
   if (ordersResult.error) throw ordersResult.error;
 
-  const eligibleOrders = (ordersResult.data ?? []).filter((order) => !order.bez_troska && !order.bez_izvrsenja);
+  const eligibleOrders = (ordersResult.data ?? []).filter((order) => !order.bez_troska && !order.bez_izvrsenja && !order.km_bez_obracuna);
   const baselineCosts = calculateDailyVehicleKmCosts(
     assignments.filter((assignment): assignment is typeof assignment & { nalog_id: string; vozilo_id: string } =>
       Boolean(assignment.nalog_id && assignment.vozilo_id)),
@@ -3424,13 +3446,14 @@ export async function prenesiOtvoreneStavke(nalogId: string, gradilisteId: strin
 export async function fetchNalogIzvrsenje(nalogId: string) {
   const { data, error } = await supabase
     .from('radni_nalozi')
-    .select('km_pocetak, km_kraj, napomena, status, teren, bez_izvrsenja, poslovodja_id, vozac_id')
+    .select('km_pocetak, km_kraj, napomena, status, teren, bez_izvrsenja, poslovodja_id, vozac_id, km_bez_obracuna')
     .eq('id', nalogId)
     .single();
   if (error) throw error;
   return data as {
     km_pocetak: number | null;
     km_kraj: number | null;
+    km_bez_obracuna: boolean;
     napomena: string | null;
     status: NalogStatus;
     teren: boolean | null;
@@ -3504,6 +3527,9 @@ export async function setNalogZavrsen(
   bezIzvrsenja = false,
   izvrsenje?: { km_pocetak: number | null; km_kraj: number | null; napomena: string | null },
 ) {
+  if (zavrsen && !bezIzvrsenja && izvrsenje) {
+    await verifyWorkOrderKm(nalogId, izvrsenje.km_pocetak, izvrsenje.km_kraj);
+  }
   if (izvrsenje && (
     (izvrsenje.km_pocetak !== null && (!Number.isFinite(izvrsenje.km_pocetak) || izvrsenje.km_pocetak < 0))
     || (izvrsenje.km_kraj !== null && (!Number.isFinite(izvrsenje.km_kraj) || izvrsenje.km_kraj < 0))
@@ -3855,6 +3881,7 @@ export async function saveMobileNalogReport(input: {
   materijalNa: boolean;
   alatNa: boolean;
 }) {
+  await verifyWorkOrderKm(input.nalogId, input.kmNa ? null : input.kmPocetak, input.kmNa ? null : input.kmKraj);
   const { error } = await supabase.rpc('mobile_save_nalog_report', {
     p_nalog_id: input.nalogId,
     p_km_pocetak: input.kmPocetak,
@@ -3878,6 +3905,11 @@ export async function saveMobileNalogIzvjestaj(input: {
   encStanje: number | null;
   potvrde: string[];
 }) {
+  await verifyWorkOrderKm(
+    input.nalogId,
+    input.kmNa ? null : input.kmPocetak,
+    input.kmNa || input.potvrde.includes('km_kraj:na') ? null : input.kmKraj,
+  );
   const { error } = await supabase.rpc('mobile_save_nalog_izvjestaj', {
     p_nalog_id: input.nalogId,
     p_km_pocetak: input.kmPocetak,
@@ -3922,10 +3954,28 @@ export async function fetchMobileWorkOrderAudit(nalogId: string, before?: Pick<M
   return (data ?? []) as MobileWorkOrderAuditEntry[];
 }
 
+async function verifyWorkOrderKm(nalogId: string, start: number | null, end: number | null) {
+  validateWorkOrderKm(start, end);
+  if (start === null || end === null || end - start <= 1000) return;
+  const { data: confirmed, error } = await supabase.rpc('work_order_km_confirmed', {
+    p_nalog_id: nalogId, p_start: start, p_end: end,
+  });
+  if (error) throw error;
+  if (confirmed) return;
+  if (!window.confirm(`Provjera kilometara: početno stanje ${start} km, završno ${end} km — prijeđeno ${end - start} km.\nTo je više od 1.000 km. Je li unos ispravan?\n\nU redu = potvrdi. Odustani = vrati se i ispravi očitanja.`)) {
+    throw new Error('Kilometri nisu spremljeni. Provjeri početno i završno očitanje.');
+  }
+  const { error: confirmationError } = await supabase.rpc('confirm_work_order_km', {
+    p_nalog_id: nalogId, p_start: start, p_end: end,
+  });
+  if (confirmationError) throw confirmationError;
+}
+
 export async function saveNalogIzvrsenje(
   nalogId: string,
   u: { km_pocetak: number | null; km_kraj: number | null; napomena: string | null },
 ) {
+  await verifyWorkOrderKm(nalogId, u.km_pocetak, u.km_kraj);
   const { error } = await supabase.from('radni_nalozi').update(u).eq('id', nalogId);
   if (error) throw error;
   await syncNalogTroskovi(nalogId);
@@ -3935,13 +3985,14 @@ export interface NalogRadnikVrijeme {
   radnik_id: string;
   vrijeme_od: string | null;
   vrijeme_do: string | null;
+  mobile_zero_hours: boolean;
   radnik: Pick<Radnik, 'id' | 'ime' | 'prezime'> | null;
 }
 
 export async function fetchNalogRadnikVrijeme(nalogId: string): Promise<NalogRadnikVrijeme[]> {
   const { data, error } = await supabase
     .from('radni_nalozi_radnici')
-    .select('radnik_id, vrijeme_od, vrijeme_do, radnik:radnik_id ( id, ime, prezime )')
+    .select('radnik_id, vrijeme_od, vrijeme_do, mobile_zero_hours, radnik:radnik_id ( id, ime, prezime )')
     .eq('nalog_id', nalogId);
   if (error) throw error;
   const rows = (data ?? []) as unknown as NalogRadnikVrijeme[];
@@ -3955,10 +4006,21 @@ export async function fetchNalogRadnikVrijeme(nalogId: string): Promise<NalogRad
   return rows;
 }
 
-export async function saveNalogRadnikVrijeme(nalogId: string, radnikId: string, od: string | null, doo: string | null) {
+export async function saveNalogRadnikVrijeme(
+  nalogId: string,
+  radnikId: string,
+  od: string | null,
+  doo: string | null,
+  zeroHours = false,
+) {
   const { error } = await supabase
     .from('radni_nalozi_radnici')
-    .update({ vrijeme_od: od || null, vrijeme_do: doo || null })
+    .update({
+      vrijeme_od: zeroHours ? null : od || null,
+      vrijeme_do: zeroHours ? null : doo || null,
+      mobile_zero_hours: zeroHours,
+      ...(zeroHours ? { mobile_extra_time: [] } : {}),
+    })
     .eq('nalog_id', nalogId)
     .eq('radnik_id', radnikId);
   if (error) throw error;

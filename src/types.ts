@@ -185,6 +185,7 @@ export interface DnevniRasporedRadnik {
   datum: string;
   vozilo_id: string;
   radnik_id: string;
+  iz_ostalo?: boolean;
 }
 
                     export interface Gradiliste {

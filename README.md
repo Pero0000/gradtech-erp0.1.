@@ -10,6 +10,32 @@
 
 ESLint preskače generirane mape `build` unutar Android/iOS projekata, ali ne i izvorni kod tih projekata. Postojeće lint greške treba otkloniti, ne isključivati pravila kako bi provjera prividno prolazila.
 
+### Preklapanje sati radnih naloga
+
+Nakon prethodnih migracija primijeniti `supabase/migrations/20261110600000_provjera_sati_zakljucenih_naloga.sql` i objaviti novi web-build. Ured i dalje može ispravljati sate otvorenih/predanih naloga, uključujući ranije preklopljene unose, ali zaključivanje odbija konflikt. Na zaključenom nalogu provjera vrijedi i pri naknadnom unosu/izmjeni djelatnika, osnovne smjene, dodatnih dionica ili datuma. Osnovna smjena i dodatne dionice ne smiju se preklapati ni unutar istog naloga. Susjedni intervali dopušteni su, prelazak preko ponoći ostaje podržan, a jednaki početak i kraj znače nula sati. Opcija **Nije radio (0 sati)** ostaje dostupna.
+
+Provjera koristi isti datum kao obračun: najraniji povezani dan rasporeda, zatim rok, pa datum kreiranja naloga (UTC). Naknadna promjena/povezivanje/uklanjanje dana rasporeda također se provjerava za zaključene naloge. Otkazani nalozi i nalozi završeni bez izvršenja ne zauzimaju sate; vraćanje na izvršeni zaključeni nalog ponovno provjerava konflikt. Odbijena izmjena u prikazu osvježava spremljena vremena i prikazuje grešku; promjena statusa čeka završetak spremanja vremena.
+
+Migracija ne mijenja stare sate, obračune ni iznose. Ranije konfliktne naloge ispraviti na stvarna vremena ili označiti nula sati ako djelatnik nije radio; po potrebi ponovno otvoriti nalog, uskladiti vremena pa zaključiti. Ciljane provjere: `node --test tests/work-order-time-entries.test.mjs`. Prije produkcijske primjene na testnoj bazi provjeriti i dva istodobna korisnika te povrat podataka iz povijesti.
+
+### Predaja naloga iz portala bez potvrde strojeva
+
+Primijeniti `supabase/migrations/20261110630000_portal_predaja_bez_potvrde_strojeva.sql` nakon prethodnih migracija. Jednoparametarski `mobile_submit_nalog`, koji poziva portal, više ne zahtijeva uklonjenu zasebnu potvrdu **Strojevi**. Strojevi i upis njihovih sati ostaju na nalogu. Djelatnici označeni s **0 sati** ne trebaju početak i završetak osnovne smjene za predaju; potvrda vremena ekipe ostaje obvezna. Ne dodaju se izmišljene potvrde na postojeće naloge. Ostaju provjere dodjele/prava, statusa, poslova, fotografija, materijala, alata, primjenjivih dodatnih radova, ENC-a i kilometara. Predaja i dalje šalje nalog u ured (`mobile_status = predan`), bez završnog zaključivanja ili obračuna.
+
+Ciljano: `node --test tests/work-order-time-entries.test.mjs`. Nakon primjene u portalu predati nalog bez potvrde strojeva, ponoviti s djelatnikom označenim s 0 sati i provjeriti da izostavljena vidljiva obvezna potvrda i dalje blokira predaju. Za ovaj popravak nije potrebna promjena web-koda; dovoljan je SQL popravak nakon prethodnih migracija.
+
+### Provjera kilometara naloga i dnevnog obračuna
+
+Primijeniti `supabase/migrations/20261110610000_provjera_kilometara_naloga.sql` nakon prethodnih migracija i objaviti novi web-build. Trošak bez ručne raspodjele računa se iz razlike završnog i početnog očitanja **svakog naloga**, ne iz najvećeg završnog i najmanjeg početnog očitanja različitih naloga. Ručna postotna raspodjela ostaje dostupna i dijeli zbroj tih vožnji. Prazna polja ostaju `NULL`; nisu nula i ne ulaze u obračun. Početno očitanje može se spremiti prije završnog, ali nepotpuni par ne stvara trošak. Negativna, necjelobrojna, beskonačna i obrnuta očitanja odbijaju se bez automatskog zaokruživanja.
+
+Za više od **1.000 prijeđenih km**, ne ukupnog stanja brojila, ured i portal traže izričitu potvrdu ispravnosti. Granica nije zabrana: potvrđena vožnja može imati i više od 10.000 km. Ured dodatno potvrđuje ukupne kilometre istog vozila/dana ako više kraćih naloga zajedno prijeđe granicu. Potvrde su vezane uz točna očitanja i korisnika; izmjena očitanja poništava njihovu primjenjivost. Baza provjerava potvrdu velikih vožnji i dnevnog zbroja, te odbija kilometarski red veći od ukupne vrijednosti upisanih vožnji vozila/dana. Odustajanje ne zamjenjuje kilometre nulom niti briše postojeći obračun. Ako je status naloga već spremljen, a dnevni obračun zaustavljen, aplikacija prikazuje zasebnu grešku sinkronizacije.
+
+Migracija ne prepravlja stare kilometre ni financijske redove. Za postojeći pogrešan obračun prvo provjeriti sva očitanja vozila za taj dan i ispraviti stvarni izvor. Zatim ponovno spremiti izvršenje naloga ili pokrenuti postojeću ponovnu sinkronizaciju kilometara: atomska zamjena obračuna ponovno računa sve povezane naloge toga dana. Ne brisati pojedinačni automatski kilometarski trošak izravnim SQL-om. Ako je i stanje vozila pogrešno podignuto, provjeriti ga zasebno prema valjanim očitanjima; automatsko spuštanje stanja vozila ostaje onemogućeno.
+
+Na izričit zahtjev korisnika zasebna migracija `supabase/migrations/20261110620000_uklanjanje_pogresnog_puta_brane_stan.sql` uklanja samo trošak **22.960 € / Vivaro / 82.000 km / Brane Stan / 09.11.2026.** Mora postojati točno jedan takav red; više podudaranja zaustavlja ispravak, a bez podudaranja nema izmjene. Stvara se zapis povijesti dnevnog obračuna sa snimkom izvornog troška i naloga. Izvorna očitanja, stanje vozila, sati i svi ostali troškovi ostaju netaknuti. Izvorni nalog dobiva `km_bez_obracuna = true`, što ga isključuje iz kilometarskog obračuna i sprječava ponovno nastajanje uklonjenog troška pri sinkronizaciji ili ručnoj raspodjeli. U detaljima naloga prikazuje se razlog isključenja. Povrat pogrešnih velikih kilometara nije automatsko zaobilaženje novih provjera; prvo moraju biti provjereni i potvrđeni.
+
+Ciljano: `node --test tests/vehicleKmCosts.test.mjs tests/work-order-km-validation.test.mjs tests/work-order-settlement.test.mjs`. Na testnoj bazi provjeriti potvrdu/odustajanje u uredu i portalu, dvije vožnje od 600 km istim vozilom u danu, izmjenu potvrđenog očitanja, ručne postotke i ponovni obračun povijesnog dana. SQL testovi ne pristupaju produkcijskim podacima.
+
 ### Prikaz povijesti i vraćanja
 
 Zajedničke povijesti modula otvaraju se kroz gumb **Povijest** u gornjoj traci aplikacije, a ne zauzimaju prostor u prikazu gradilišta ni drugih modula. Detalji se prikazuju u zasebnom prozoru, a podaci se dohvaćaju tek nakon otvaranja odgovarajuće povijesti. Povijesti vezane uz pojedinačni zapis ostaju dostupne uz taj zapis. Ova UX promjena ne mijenja pravila povrata ni migracije baze i ne znači da su migracije primijenjene ili da je aplikacija objavljena.

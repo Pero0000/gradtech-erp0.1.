@@ -27,6 +27,23 @@ export interface VehicleKmAllocation {
   postotak: number;
 }
 
+export function validateWorkOrderKm(start: number | null, end: number | null): void {
+  if ([start, end].some((value) => value !== null && (!Number.isSafeInteger(value) || value < 0))) {
+    throw new Error('Očitanja kilometara moraju biti nenegativni cijeli brojevi.');
+  }
+  if (start !== null && end !== null && end < start) {
+    throw new Error('Završno stanje kilometara ne može biti manje od početnog.');
+  }
+}
+
+function orderKm(order: VehicleKmOrder): number {
+  validateWorkOrderKm(order.km_pocetak, order.km_kraj);
+  if (order.km_pocetak === null || order.km_kraj === null) {
+    throw new Error(`Nalog ${order.broj}: za obračun kilometara potrebna su oba očitanja.`);
+  }
+  return order.km_kraj - order.km_pocetak;
+}
+
 export function calculateVehicleKmCosts(
   orders: VehicleKmOrder[],
   vehicle: { marka: string; model: string | null; cijena_km: number },
@@ -35,17 +52,9 @@ export function calculateVehicleKmCosts(
   if (!Number.isFinite(cijena) || cijena <= 0 || orders.length === 0) return [];
 
   const ordered = [...orders].sort((a, b) => a.broj.localeCompare(b.broj, 'hr'));
-  const ukupno = Math.max(...ordered.map((order) => order.km_kraj))
-    - Math.min(...ordered.map((order) => order.km_pocetak));
-  const [glavni, ...ostali] = ordered;
-  const kmOstali = ostali.map((order) => Math.max(0, order.km_kraj - order.km_pocetak));
-  const kmGlavni = Math.max(0, ukupno - kmOstali.reduce((sum, km) => sum + km, 0));
   const vozilo = [vehicle.marka, vehicle.model].filter(Boolean).join(' ');
 
-  return [
-    { order: glavni, km: kmGlavni },
-    ...ostali.map((order, index) => ({ order, km: kmOstali[index] })),
-  ]
+  return ordered.map((order) => ({ order, km: orderKm(order) }))
     .filter(({ km }) => km > 0)
     .map(({ order, km }) => ({
       nalog_id: order.id,
@@ -91,8 +100,7 @@ export function calculateDailyVehicleKmCosts(
     const cijena = Number(vehicle.cijena_km);
     if (!Number.isFinite(cijena) || cijena <= 0 || vehicleOrders.length === 0) return [];
 
-    const ukupnoKm = Math.max(...vehicleOrders.map((order) => order.km_kraj))
-      - Math.min(...vehicleOrders.map((order) => order.km_pocetak));
+    const ukupnoKm = vehicleOrders.reduce((sum, order) => sum + orderKm(order), 0);
     if (ukupnoKm <= 0) return [];
 
     const groups = new Map<string, { gradiliste_id: string | null; order: VehicleKmOrder }>();

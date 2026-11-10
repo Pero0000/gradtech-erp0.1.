@@ -55,9 +55,10 @@ async function setupDatabase(t) {
     CREATE TABLE public.radni_nalozi (
       id uuid PRIMARY KEY, broj text, rok date, datum_kreiranja timestamptz DEFAULT now(),
       gradiliste_id uuid, teren boolean DEFAULT false, mobile_status text, status text,
+      bez_izvrsenja boolean DEFAULT false,
       mobile_potvrde text[] DEFAULT '{}', poslovodja_id uuid, mobile_km_na boolean DEFAULT true,
       mobile_napomena_na boolean DEFAULT true, km_pocetak integer, km_kraj integer, napomena text,
-      mobile_tasks_confirmed boolean DEFAULT true,
+      mobile_tasks_confirmed boolean DEFAULT true, enc_stanje numeric,
       mobile_foto_na boolean DEFAULT true, mobile_materijal_na boolean DEFAULT true, mobile_alat_na boolean DEFAULT true
     );
     CREATE TABLE public.radni_nalozi_radnici (
@@ -65,8 +66,10 @@ async function setupDatabase(t) {
       mobile_started_at timestamptz, mobile_finished_at timestamptz,
       vrijeme_od time, vrijeme_do time
     );
+    CREATE TABLE public.dnevni_raspored_gradilista (nalog_id uuid, datum date);
     CREATE TABLE public.radni_nalozi_foto (nalog_id uuid, created_at timestamptz);
     CREATE TABLE public.radni_nalozi_stavke (nalog_id uuid, tip text);
+    CREATE TABLE public.gradiliste_zadaci (nalog_id uuid, vrsta text);
     CREATE TABLE public.radno_vrijeme (
       nalog_id uuid, radnik_id uuid, gradiliste_id uuid, datum date, sati numeric,
       napomena text, nocni_sati numeric
@@ -87,8 +90,20 @@ async function setupDatabase(t) {
           WHERE nalog_id = p_nalog_id AND radnik_id = public.app_mobile_radnik_id() AND is_leader
         )
       $$;
+    CREATE FUNCTION public.app_mobile_editable_nalog(p_nalog_id uuid) RETURNS boolean
+      LANGUAGE sql STABLE AS $$
+        SELECT public.app_mobile_assigned_nalog(p_nalog_id) AND EXISTS (
+          SELECT 1 FROM public.radni_nalozi WHERE id = p_nalog_id
+            AND status NOT IN ('zavrsen', 'otkazan')
+            AND mobile_status IN ('dodijeljen', 'u_tijeku', 'predan')
+        )
+      $$;
     CREATE FUNCTION public.get_my_portal_vrijeme() RETURNS boolean
       LANGUAGE sql STABLE AS $$ SELECT true $$;
+    CREATE FUNCTION public.app_has_module_permission(p_module text, p_action text) RETURNS boolean
+      LANGUAGE sql STABLE AS $$
+        SELECT COALESCE(current_setting('app.allow_nalog_edit', true), 'false') = 'true'
+      $$;
     INSERT INTO public.radnici (id, ime, prezime) VALUES
       ('00000000-0000-0000-0000-000000000001', 'Ivan', 'Voditelj'),
       ('00000000-0000-0000-0000-000000000002', 'Marko', 'Radnik');
@@ -113,8 +128,85 @@ async function setupDatabase(t) {
   await db.exec(read('../supabase/migrations/20261110460000_zabrana_preklapanja_radnog_vremena.sql'));
   await db.exec(read('../supabase/migrations/20261110470000_obavijest_preklapanja_radnog_vremena.sql'));
   await db.exec(read('../supabase/migrations/20261110480000_obavijest_preklapanja_s_gradilistem.sql'));
+  await db.exec(read('../supabase/migrations/20261110540000_nalog_preklapanje_pri_zakljucenju.sql'));
+  await db.exec(read('../supabase/migrations/20261110550000_uredivanje_sati_prije_zakljucenja.sql'));
+  await db.exec(read('../supabase/migrations/20261110600000_provjera_sati_zakljucenih_naloga.sql'));
+  await db.exec(read('../supabase/migrations/20261110630000_portal_predaja_bez_potvrde_strojeva.sql'));
   return db;
 }
+
+test('portal submission accepts visible confirmations without machines, including zero-hour workers and assigned non-leaders', async (t) => {
+  const db = await setupDatabase(t);
+  const orderId = '00000000-0000-0000-0000-000000000004';
+  const secondWorker = '00000000-0000-0000-0000-000000000002';
+  await db.query(`
+    UPDATE public.radni_nalozi SET
+      mobile_potvrde = ARRAY['poslovi','foto:na','materijal:na','alat:na','vrijeme','enc:na']
+    WHERE id = $1
+  `, [orderId]);
+  await db.query(`
+    UPDATE public.radni_nalozi_radnici
+    SET mobile_zero_hours=true, vrijeme_od=NULL, vrijeme_do=NULL,
+        mobile_started_at=NULL, mobile_finished_at=NULL
+    WHERE nalog_id=$1 AND radnik_id=$2
+  `, [orderId, secondWorker]);
+  await db.query("SELECT set_config('app.worker_id', $1, false)", [secondWorker]);
+  await db.query('SELECT public.mobile_submit_nalog($1)', [orderId]);
+  const { rows } = await db.query('SELECT status, mobile_status, mobile_potvrde FROM public.radni_nalozi WHERE id=$1', [orderId]);
+  assert.equal(rows[0].status, 'u_tijeku');
+  assert.equal(rows[0].mobile_status, 'predan');
+  assert.equal(rows[0].mobile_potvrde.some((item) => item.startsWith('strojevi')), false);
+  await db.query('SELECT public.mobile_submit_nalog($1)', [orderId]);
+});
+
+test('portal submission still checks mandatory visible sections, photos, additional tasks, time, ENC and kilometres', async (t) => {
+  const db = await setupDatabase(t);
+  const orderId = '00000000-0000-0000-0000-000000000004';
+  const confirmations = ['poslovi', 'foto:na', 'materijal:na', 'alat:na', 'vrijeme', 'enc:na', 'km_kraj'];
+  await db.query(`
+    UPDATE public.radni_nalozi
+    SET mobile_potvrde=$1, mobile_km_na=false, km_pocetak=81000, km_kraj=81100 WHERE id=$2
+  `, [confirmations, orderId]);
+  for (const [missing, message] of [
+    ['poslovi', /Potvrdi dio "Poslovi"/],
+    ['foto:na', /Potvrdi dio "Fotografije"/],
+    ['materijal:na', /Potvrdi dio "Materijal"/],
+    ['alat:na', /Potvrdi dio "Alat"/],
+    ['vrijeme', /Potvrdi radno vrijeme/],
+    ['enc:na', /stanje ENC-a/],
+    ['km_kraj', /kilometre povratka/],
+  ]) {
+    await db.query('UPDATE public.radni_nalozi SET mobile_potvrde=$1 WHERE id=$2',
+      [confirmations.filter((item) => item !== missing), orderId]);
+    await assert.rejects(db.query('SELECT public.mobile_submit_nalog($1)', [orderId]), message);
+    assert.equal((await db.query('SELECT mobile_status FROM public.radni_nalozi WHERE id=$1', [orderId])).rows[0].mobile_status, 'u_tijeku');
+  }
+  await db.query('UPDATE public.radni_nalozi SET mobile_potvrde=$1 WHERE id=$2',
+    [confirmations.map((item) => item === 'foto:na' ? 'foto' : item), orderId]);
+  await assert.rejects(db.query('SELECT public.mobile_submit_nalog($1)', [orderId]), /barem jednu fotografiju/);
+  await db.query('UPDATE public.radni_nalozi SET mobile_potvrde=$1 WHERE id=$2', [confirmations, orderId]);
+  await db.query("INSERT INTO public.gradiliste_zadaci VALUES ($1,'dodatni')", [orderId]);
+  await assert.rejects(db.query('SELECT public.mobile_submit_nalog($1)', [orderId]), /Dodatni radovi/);
+  await db.query("UPDATE public.radni_nalozi SET mobile_potvrde=array_append(mobile_potvrde,'dodatni:na') WHERE id=$1", [orderId]);
+  await db.query('UPDATE public.radni_nalozi_radnici SET mobile_finished_at=NULL WHERE nalog_id=$1', [orderId]);
+  await assert.rejects(db.query('SELECT public.mobile_submit_nalog($1)', [orderId]), /Potvrdi radno vrijeme/);
+  await db.query('UPDATE public.radni_nalozi_radnici SET mobile_finished_at=now() WHERE nalog_id=$1', [orderId]);
+  await db.query('SELECT public.mobile_submit_nalog($1)', [orderId]);
+});
+
+test('portal submission rejects unassigned users and closed, cancelled or not-started orders', async (t) => {
+  const db = await setupDatabase(t);
+  const orderId = '00000000-0000-0000-0000-000000000004';
+  await db.query("SELECT set_config('app.worker_id','00000000-0000-0000-0000-000000000099',false)");
+  await assert.rejects(db.query('SELECT public.mobile_submit_nalog($1)', [orderId]), /nije dostupan/);
+  await db.query("SELECT set_config('app.worker_id','00000000-0000-0000-0000-000000000001',false)");
+  for (const status of ['zavrsen', 'otkazan']) {
+    await db.query('UPDATE public.radni_nalozi SET status=$1 WHERE id=$2', [status, orderId]);
+    await assert.rejects(db.query('SELECT public.mobile_submit_nalog($1)', [orderId]), /nije dostupan/);
+  }
+  await db.query("UPDATE public.radni_nalozi SET status='u_tijeku', mobile_status='dodijeljen' WHERE id=$1", [orderId]);
+  await assert.rejects(db.query('SELECT public.mobile_submit_nalog($1)', [orderId]), /nije spreman/);
+});
 
 test('work-order time rejects overlapping shifts across different orders for the same worker', async (t) => {
   const db = await setupDatabase(t);
@@ -185,6 +277,302 @@ test('work-order time rejects overlapping shifts across different orders for the
       napomena: null,
     }]), secondOrderId, workerId],
   ), /Potvrda nije spremljena.*RN-1/);
+});
+
+test('work-order cannot be closed when its existing hours overlap another order', async (t) => {
+  const db = await setupDatabase(t);
+  const workerId = '00000000-0000-0000-0000-000000000001';
+  const existingOrderId = '00000000-0000-0000-0000-000000000004';
+  const pendingOrderId = '00000000-0000-0000-0000-000000000008';
+
+  await db.exec(`
+    UPDATE public.radni_nalozi
+    SET rok = '2026-11-07', datum_kreiranja = '2026-11-07 08:00:00+00'
+    WHERE id IN ('${existingOrderId}', '${pendingOrderId}');
+    UPDATE public.radni_nalozi_radnici
+    SET mobile_started_at = NULL
+    WHERE nalog_id = '${existingOrderId}' AND radnik_id = '${workerId}';
+    ALTER TABLE public.radni_nalozi_radnici DISABLE TRIGGER prevent_worker_work_time_overlap;
+  `);
+  await db.query(
+    `INSERT INTO public.radni_nalozi (id, broj, gradiliste_id, rok, mobile_status, status)
+     VALUES ($1, 'RN-2', '00000000-0000-0000-0000-000000000003', '2026-11-07', 'predan', 'u_tijeku')`,
+    [pendingOrderId],
+  );
+  await db.query(
+    `INSERT INTO public.radni_nalozi_radnici (nalog_id, radnik_id, vrijeme_od, vrijeme_do)
+     VALUES ($1, $2, '10:00', '12:00')`,
+    [pendingOrderId, workerId],
+  );
+  await db.exec('ALTER TABLE public.radni_nalozi_radnici ENABLE TRIGGER prevent_worker_work_time_overlap');
+
+  await assert.rejects(
+    db.query(`UPDATE public.radni_nalozi SET status = 'zavrsen' WHERE id = $1`, [pendingOrderId]),
+    /Nalog nije zaključen: radno vrijeme za djelatnika Ivan Voditelj dana 07\.11\.2026 od 08:00 do 16:00 već je upisano na gradilištu „Gradilište” \(nalog RN-1\)/,
+  );
+
+  const { rows } = await db.query('SELECT status FROM public.radni_nalozi WHERE id = $1', [pendingOrderId]);
+  assert.equal(rows[0].status, 'u_tijeku');
+
+  await db.query("SELECT set_config('app.allow_nalog_edit', 'true', false)");
+  await db.query(
+    `UPDATE public.radni_nalozi_radnici
+     SET vrijeme_od = '17:00', vrijeme_do = '18:00'
+     WHERE nalog_id = $1 AND radnik_id = $2`,
+    [pendingOrderId, workerId],
+  );
+  await db.query(
+    `UPDATE public.radni_nalozi_radnici
+     SET vrijeme_od = NULL, vrijeme_do = NULL, mobile_zero_hours = true
+     WHERE nalog_id = $1 AND radnik_id = $2`,
+    [pendingOrderId, workerId],
+  );
+  await db.query(`UPDATE public.radni_nalozi SET status = 'zavrsen' WHERE id = $1`, [pendingOrderId]);
+
+  const { rows: closedRows } = await db.query('SELECT status FROM public.radni_nalozi WHERE id = $1', [pendingOrderId]);
+  assert.equal(closedRows[0].status, 'zavrsen');
+});
+
+test('office edits of closed orders reject overlaps and retain corrections, boundaries and zero hours', async (t) => {
+  const db = await setupDatabase(t);
+  await db.exec(`
+    SELECT set_config('app.allow_nalog_edit', 'true', false);
+    UPDATE public.radni_nalozi SET rok = '2026-11-02', status = 'zavrsen';
+    INSERT INTO public.radni_nalozi (id, broj, rok, status)
+    VALUES ('00000000-0000-0000-0000-000000000008', 'RN-2', '2026-11-02', 'u_tijeku');
+    INSERT INTO public.radni_nalozi_radnici (nalog_id, radnik_id, vrijeme_od, vrijeme_do)
+    VALUES ('00000000-0000-0000-0000-000000000008', '00000000-0000-0000-0000-000000000001', '16:00', '18:00');
+    UPDATE public.radni_nalozi SET status = 'zavrsen' WHERE broj = 'RN-2';
+  `);
+
+  await assert.rejects(db.exec(`
+    UPDATE public.radni_nalozi_radnici SET vrijeme_od = '10:00', vrijeme_do = '12:00'
+    WHERE nalog_id = '00000000-0000-0000-0000-000000000008';
+  `), /Potvrda nije spremljena.*RN-1/);
+  const { rows } = await db.query(`
+    SELECT vrijeme_od, vrijeme_do FROM public.radni_nalozi_radnici
+    WHERE nalog_id = '00000000-0000-0000-0000-000000000008'
+  `);
+  assert.equal(rows[0].vrijeme_od, '16:00:00');
+  assert.equal(rows[0].vrijeme_do, '18:00:00');
+
+  await assert.rejects(db.exec(`
+    UPDATE public.radni_nalozi_radnici
+    SET mobile_extra_time = '[{"vrijeme_od":"15:00","vrijeme_do":"16:00"}]'
+    WHERE nalog_id = '00000000-0000-0000-0000-000000000008';
+  `), /Potvrda nije spremljena.*RN-1/);
+  await assert.rejects(db.exec(`
+    INSERT INTO public.radni_nalozi_radnici (nalog_id, radnik_id, vrijeme_od, vrijeme_do)
+    VALUES ('00000000-0000-0000-0000-000000000008', '00000000-0000-0000-0000-000000000002', '10:00', '12:00');
+  `), /Potvrda nije spremljena.*RN-1/);
+
+  await db.exec(`
+    UPDATE public.radni_nalozi_radnici
+    SET vrijeme_od = '18:00', vrijeme_do = '19:00',
+        mobile_extra_time = '[{"vrijeme_od":"20:00","vrijeme_do":"21:00"}]'
+    WHERE nalog_id = '00000000-0000-0000-0000-000000000008';
+    UPDATE public.radni_nalozi_radnici
+    SET vrijeme_od = NULL, vrijeme_do = NULL, mobile_zero_hours = true, mobile_extra_time = '[]'
+    WHERE nalog_id = '00000000-0000-0000-0000-000000000008';
+    UPDATE public.radni_nalozi SET status = 'u_tijeku' WHERE broj = 'RN-2';
+    UPDATE public.radni_nalozi_radnici
+    SET vrijeme_od = '10:00', vrijeme_do = '12:00', mobile_zero_hours = false
+    WHERE nalog_id = '00000000-0000-0000-0000-000000000008';
+  `);
+  await assert.rejects(db.exec("UPDATE public.radni_nalozi SET status = 'zavrsen' WHERE broj = 'RN-2'"),
+    /Nalog nije zaključen.*RN-1/);
+  await db.exec(`
+    UPDATE public.radni_nalozi_radnici SET vrijeme_od = '16:00', vrijeme_do = '17:00'
+    WHERE nalog_id = '00000000-0000-0000-0000-000000000008';
+    UPDATE public.radni_nalozi SET status = 'zavrsen' WHERE broj = 'RN-2';
+  `);
+});
+
+test('closed orders validate date changes and overnight overlap using the settlement schedule date', async (t) => {
+  const db = await setupDatabase(t);
+  await db.exec(`
+    SELECT set_config('app.allow_nalog_edit', 'true', false);
+    UPDATE public.radni_nalozi SET rok = '2026-11-02';
+    UPDATE public.radni_nalozi_radnici SET vrijeme_od = '14:00', vrijeme_do = '01:00';
+    UPDATE public.radni_nalozi SET status = 'zavrsen';
+    INSERT INTO public.radni_nalozi (id, broj, rok, status)
+    VALUES ('00000000-0000-0000-0000-000000000008', 'RN-2', '2026-11-04', 'u_tijeku');
+    INSERT INTO public.radni_nalozi_radnici (nalog_id, radnik_id, vrijeme_od, vrijeme_do, mobile_started_at)
+    VALUES ('00000000-0000-0000-0000-000000000008', '00000000-0000-0000-0000-000000000001',
+            '00:30', '02:00', '2026-12-01 08:00:00+00');
+    UPDATE public.radni_nalozi SET status = 'zavrsen' WHERE broj = 'RN-2';
+  `);
+  await assert.rejects(db.exec("UPDATE public.radni_nalozi SET rok = '2026-11-03' WHERE broj = 'RN-2'"),
+    /Nalog nije zaključen.*14:00.*01:00 sljedeći dan.*RN-1/);
+  await assert.rejects(db.exec(`
+    INSERT INTO public.dnevni_raspored_gradilista (nalog_id, datum)
+    VALUES ('00000000-0000-0000-0000-000000000008', '2026-11-03');
+  `), /Potvrda nije spremljena.*RN-1/);
+  await db.exec(`
+    INSERT INTO public.dnevni_raspored_gradilista (nalog_id, datum)
+    VALUES ('00000000-0000-0000-0000-000000000008', '2026-11-05');
+  `);
+  await assert.rejects(db.exec(`
+    UPDATE public.dnevni_raspored_gradilista SET datum = '2026-11-03'
+    WHERE nalog_id = '00000000-0000-0000-0000-000000000008';
+  `), /Potvrda nije spremljena.*RN-1/);
+  await db.exec("UPDATE public.radni_nalozi SET rok = '2026-11-03' WHERE broj = 'RN-2'");
+  await assert.rejects(db.exec(`
+    DELETE FROM public.dnevni_raspored_gradilista
+    WHERE nalog_id = '00000000-0000-0000-0000-000000000008';
+  `), /Potvrda nije spremljena.*RN-1/);
+  const { rows } = await db.query('SELECT datum::text FROM public.dnevni_raspored_gradilista');
+  assert.equal(rows[0].datum, '2026-11-05');
+});
+
+test('cancellation and completion without execution do not block other hours or allow restoring conflicting hours', async (t) => {
+  const db = await setupDatabase(t);
+  await db.exec(`
+    SELECT set_config('app.allow_nalog_edit', 'true', false);
+    UPDATE public.radni_nalozi SET rok = '2026-11-02';
+    INSERT INTO public.radni_nalozi (id, broj, rok, status)
+    VALUES ('00000000-0000-0000-0000-000000000008', 'RN-2', '2026-11-02', 'u_tijeku');
+    INSERT INTO public.radni_nalozi_radnici (nalog_id, radnik_id, vrijeme_od, vrijeme_do)
+    VALUES ('00000000-0000-0000-0000-000000000008', '00000000-0000-0000-0000-000000000001', '10:00', '12:00');
+    UPDATE public.radni_nalozi SET status = 'zavrsen', bez_izvrsenja = true WHERE broj = 'RN-2';
+    UPDATE public.radni_nalozi SET status = 'zavrsen' WHERE broj = 'RN-1';
+  `);
+  await assert.rejects(db.exec("UPDATE public.radni_nalozi SET bez_izvrsenja = false WHERE broj = 'RN-2'"),
+    /Nalog nije zaključen.*RN-1/);
+  await db.exec(`
+    UPDATE public.radni_nalozi SET status = 'otkazan' WHERE broj = 'RN-1';
+    UPDATE public.radni_nalozi SET bez_izvrsenja = false WHERE broj = 'RN-2';
+  `);
+  await assert.rejects(db.exec("UPDATE public.radni_nalozi SET status = 'zavrsen' WHERE broj = 'RN-1'"),
+    /Nalog nije zaključen.*RN-2/);
+});
+
+test('legacy overlapping closed orders can be corrected without deleting or reopening them', async (t) => {
+  const db = await setupDatabase(t);
+  await db.exec(`
+    SELECT set_config('app.allow_nalog_edit', 'true', false);
+    UPDATE public.radni_nalozi SET rok = '2026-11-02', status = 'zavrsen';
+    INSERT INTO public.radni_nalozi (id, broj, rok, status)
+    VALUES ('00000000-0000-0000-0000-000000000008', 'RN-2', '2026-11-02', 'zavrsen');
+    ALTER TABLE public.radni_nalozi_radnici DISABLE TRIGGER prevent_worker_work_time_overlap;
+    INSERT INTO public.radni_nalozi_radnici (nalog_id, radnik_id, vrijeme_od, vrijeme_do)
+    VALUES ('00000000-0000-0000-0000-000000000008', '00000000-0000-0000-0000-000000000001', '10:00', '12:00');
+    ALTER TABLE public.radni_nalozi_radnici ENABLE TRIGGER prevent_worker_work_time_overlap;
+  `);
+  await assert.rejects(db.exec("UPDATE public.radni_nalozi SET status = 'zavrsen' WHERE broj = 'RN-2'"),
+    /Nalog nije zaključen.*RN-1/);
+  await db.exec(`
+    UPDATE public.radni_nalozi_radnici SET vrijeme_od = '16:00', vrijeme_do = '18:00'
+    WHERE nalog_id = '00000000-0000-0000-0000-000000000008';
+    UPDATE public.radni_nalozi SET status = 'zavrsen' WHERE broj = 'RN-2';
+  `);
+  const { rows } = await db.query("SELECT status FROM public.radni_nalozi ORDER BY broj");
+  assert.deepEqual(rows.map((row) => row.status), ['zavrsen', 'zavrsen']);
+});
+
+test('the three-site example cannot be closed with either of its overlapping shifts', async (t) => {
+  const db = await setupDatabase(t);
+  await db.exec(`
+    SELECT set_config('app.allow_nalog_edit', 'true', false);
+    UPDATE public.radni_nalozi SET broj = 'RN-2026-083', rok = '2026-11-02';
+    UPDATE public.radni_nalozi_radnici SET vrijeme_od = '06:00', vrijeme_do = '15:00';
+    UPDATE public.radni_nalozi SET status = 'zavrsen';
+    INSERT INTO public.radni_nalozi (id, broj, rok, status) VALUES
+      ('00000000-0000-0000-0000-000000000008', 'RN-2026-081', '2026-11-02', 'u_tijeku'),
+      ('00000000-0000-0000-0000-000000000009', 'RN-2026-084', '2026-11-02', 'u_tijeku');
+    INSERT INTO public.radni_nalozi_radnici (nalog_id, radnik_id, vrijeme_od, vrijeme_do) VALUES
+      ('00000000-0000-0000-0000-000000000008', '00000000-0000-0000-0000-000000000001', '06:00', '07:00'),
+      ('00000000-0000-0000-0000-000000000009', '00000000-0000-0000-0000-000000000001', '14:00', '01:00');
+  `);
+  for (const number of ['RN-2026-081', 'RN-2026-084']) {
+    await assert.rejects(db.query("UPDATE public.radni_nalozi SET status = 'zavrsen' WHERE broj = $1", [number]),
+      /Nalog nije zaključen.*06:00.*15:00.*RN-2026-083/);
+  }
+  await db.exec(`
+    UPDATE public.radni_nalozi_radnici SET vrijeme_od = '06:00', vrijeme_do = '06:00'
+    WHERE nalog_id = '00000000-0000-0000-0000-000000000008';
+    UPDATE public.radni_nalozi SET status = 'zavrsen' WHERE broj = 'RN-2026-081';
+    UPDATE public.radni_nalozi_radnici SET vrijeme_od = '15:00'
+    WHERE nalog_id = '00000000-0000-0000-0000-000000000009';
+    UPDATE public.radni_nalozi SET status = 'zavrsen' WHERE broj = 'RN-2026-084';
+  `);
+});
+
+test('closing and later editing reject overlapping base and additional segments within one order', async (t) => {
+  const db = await setupDatabase(t);
+  await db.exec(`
+    SELECT set_config('app.allow_nalog_edit', 'true', false);
+    UPDATE public.radni_nalozi_radnici
+    SET mobile_extra_time = '[{"vrijeme_od":"15:00","vrijeme_do":"17:00"}]'
+    WHERE radnik_id = '00000000-0000-0000-0000-000000000001';
+  `);
+  await assert.rejects(db.exec("UPDATE public.radni_nalozi SET status = 'zavrsen'"),
+    /Nalog nije zaključen.*RN-1/);
+  await db.exec(`
+    UPDATE public.radni_nalozi_radnici
+    SET mobile_extra_time = '[{"vrijeme_od":"16:00","vrijeme_do":"17:00"}]'
+    WHERE radnik_id = '00000000-0000-0000-0000-000000000001';
+    UPDATE public.radni_nalozi SET status = 'zavrsen';
+  `);
+  await assert.rejects(db.exec(`
+    UPDATE public.radni_nalozi_radnici SET vrijeme_do = '16:30'
+    WHERE radnik_id = '00000000-0000-0000-0000-000000000001';
+  `), /Potvrda nije spremljena.*RN-1/);
+  await assert.rejects(db.exec(`
+    UPDATE public.radni_nalozi_radnici
+    SET mobile_extra_time = '[{"vrijeme_od":"17:00","vrijeme_do":"19:00"},{"vrijeme_od":"18:00","vrijeme_do":"20:00"}]'
+    WHERE radnik_id = '00000000-0000-0000-0000-000000000001';
+  `), /Potvrda nije spremljena.*RN-1/);
+});
+
+test('time editing restores persisted values after rejection and serializes pending saves', async () => {
+  const source = read('../src/components/views/NalogIzvrsenje.tsx');
+  const handlers = source.slice(source.indexOf('  const saveVrijeme ='), source.indexOf('  const addZadatak ='));
+  const { outputText } = ts.transpileModule(handlers, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  });
+  for (const persistedChange of [false, true]) {
+    const previous = [{ radnik_id: 'worker', vrijeme_od: '16:00', vrijeme_do: '18:00', mobile_zero_hours: false }];
+    const persisted = persistedChange
+      ? [{ ...previous[0], vrijeme_do: '19:00' }]
+      : previous;
+    let rows = previous;
+    let saving = false;
+    let pending;
+    let rejectSave;
+    let calls = 0;
+    const errors = [];
+    const context = {
+      vremena: previous, nalog: { id: 'order' }, timeSavePending: { current: false },
+      setVremena: (value) => { rows = value; },
+      setSavingTime: (value) => { saving = value; },
+      saveNalogRadnikVrijeme: () => {
+        calls++;
+        return new Promise((resolve, reject) => { rejectSave = reject; });
+      },
+      fetchNalogRadnikVrijeme: async () => persisted,
+      errText: (reason) => reason.message,
+      guard: (action) => {
+        pending = action().catch((reason) => errors.push(reason.message));
+        return pending;
+      },
+    };
+    vm.createContext(context);
+    vm.runInContext(`${outputText}\nthis.changeTime = changeVrijeme; this.changeZero = changeZeroHours;`, context);
+    context.changeTime('worker', 'vrijeme_do', '12:00');
+    context.changeZero('worker', true);
+    assert.equal(calls, 1);
+    assert.equal(saving, true);
+    assert.equal(context.timeSavePending.current, true);
+    rejectSave(new Error(persistedChange ? 'Obračun nije spremljen' : 'Preklapanje sati'));
+    await pending;
+    await Promise.resolve();
+    assert.deepEqual(rows, persisted);
+    assert.equal(saving, false);
+    assert.equal(context.timeSavePending.current, false);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], persistedChange ? /Obračun nije spremljen/ : /Preklapanje sati/);
+  }
 });
 
 test('work-order additional time accepts workers with zero hours in the base shift', async (t) => {

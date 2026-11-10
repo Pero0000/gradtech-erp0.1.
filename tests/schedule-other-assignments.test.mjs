@@ -15,7 +15,7 @@ vm.runInNewContext(outputText, {
   require: () => ({}),
 });
 
-const { countOstaloAssignments, hasOstaloEntry } = module.exports;
+const { countOstaloAssignments, entriesForRosterDate, hasOstaloEntry, workerReturnsToOstalo } = module.exports;
 
 test('other text remains assignable and counts matching vehicle/order assignments', () => {
   const entry = { id: 'other', datum: '2026-11-05', tekst: ' Odvesti otpad ', radnik_id: null };
@@ -42,4 +42,19 @@ test('other worker count follows their assignments and keeps worker identity dis
   assert.equal(countOstaloAssignments(entry, [], workerAssignments), 2);
   assert.equal(hasOstaloEntry([entry], { tekst: null, radnik_id: 'worker-1' }, entry.datum), true);
   assert.equal(hasOstaloEntry([entry], { tekst: null, radnik_id: 'worker-2' }, entry.datum), false);
+});
+
+test('other entries are scoped to the selected day and worker return preserves their source panel', () => {
+  const entries = [
+    { id: 'today', datum: '2026-11-05', tekst: null, radnik_id: 'worker-1' },
+    { id: 'yesterday', datum: '2026-11-04', tekst: null, radnik_id: 'worker-2' },
+  ];
+
+  assert.deepEqual(
+    entriesForRosterDate(entries, '2026-11-05').map((entry) => entry.id),
+    ['today'],
+  );
+  assert.equal(workerReturnsToOstalo({ iz_ostalo: true }), true);
+  assert.equal(workerReturnsToOstalo({ iz_ostalo: false }), false);
+  assert.equal(workerReturnsToOstalo({}), false);
 });

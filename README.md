@@ -2,6 +2,16 @@
 
 ## Provjere prije objave
 
+### Jedna izvorna stavka pri pripremi naloga
+
+Pri odabiru radnih zadataka, dodatnih radova, materijala i alata za nalog iz Dnevnog rasporeda izvor i njegove povezane kopije nude se jednom. Prepoznaju se po vezama `izvor_zadatak_id`, `izvor_materijal_id`, `izvor_alat_id` i `izvor_id`, uključujući lance kopija. Prednost ima zapis već na nalogu koji se uređuje, zatim izvor. Isto pravilo primjenjuje se pri kopiranju odabranih zadataka, spremanju odabira materijala/alata i automatskom prijenosu otvorenih stavki. Zasebno unesene stavke istog naziva ostaju zasebne. Ranija povijest se ne briše niti se postojeći nalozi automatski čiste. Nova SQL migracija nije potrebna. Provjera: `node --test tests/work-order-items.test.mjs`.
+
+### Zajednički popis Ostalo u Dnevnom rasporedu
+
+Popis **Ostalo** zajednički je svim datumima i računalima unutar iste tvrtke. Čita se iz Supabase tablice `dnevni_raspored_ostalo`, uz postojeće RLS ovlasti, i osvježava svakih 15 sekundi dok je stranica vidljiva te pri povratku na prozor. Datum zapisa ostaje sačuvan, ali više ne ograničava prikaz ni odabir stavke. Dodjele stavki i djelatnika na vozila i dalje se spremaju za odabrani dan. Uklanjanje stavke iz zajedničkog popisa uklanja je za sve dane, ali ne briše ranije dodjele na vozila. Postojeći zapisi se ne brišu, ne prepisuju i ne spajaju automatski; mogu se pojaviti raniji zasebni unosi istog naziva. Neuspjelo učitavanje prikazuje upozorenje i zadržava zadnji učitani popis.
+
+Nova migracija nije potrebna; objaviti novi web-build na svim računalima. Provjera: `node --test tests/schedule-other-assignments.test.mjs`. U istoj tvrtki dodati „Dostava”, promijeniti datum i otvoriti raspored na drugom računalu: stavka mora ostati dostupna. Dodijeliti je vozilu i provjeriti da se dodjela vidi samo za odgovarajući dan. Ako starog zapisa nema ni nakon nadogradnje, provjeriti istu tvrtku, prava i postojeće retke u bazi; ovaj popravak ne vraća ranije izbrisane zapise.
+
 - `npm test` pokreće sve `tests/*.test.mjs` provjere: izolaciju lokalnih postavki tvrtki, autorizaciju pozivnica s testnim klijentima, paginaciju, obračun sati i kilometarskih troškova, očuvanje stavki naloga, preuzimanje datoteka i renderiranje prilagodljivih prikaza.
 - `npm run typecheck` provjerava TypeScript, `npm run lint` provjerava kod, a `npm run build` izrađuje produkcijsku web-aplikaciju.
 - Testovi koriste lokalne podatke i zamjene za mrežne pozive; ne pristupaju produkcijskoj bazi. Renderiranje prikaza nije zamjena za vizualnu provjeru u pregledniku ili provjeru na fizičkom mobitelu.
@@ -64,6 +74,8 @@ Ručna provjera nakon objave web-builda:
 U razvojnom React StrictModeu početni efekti namjerno se ponavljaju; moguće je vidjeti dva početna mrežna zahtjeva. To nije beskonačna petlja, a rezultat prethodnog pokretanja zanemaruje se. Testovi životnog ciklusa zahtjeva su u `tests/request-scope.test.mjs`; oni nisu zamjena za mrežnu i vizualnu provjeru stvarnog prikaza.
 
 ### Zakašnjeli unos goriva i kilometraža vozila
+
+Pri zaključivanju naloga provjera za ažuriranje kilometraže vozila koristi završno očitanje iz izvještaja koji se upravo sprema, uključujući prvi unos pri zaključivanju. Ako se izvještaj ne šalje, koristi se već spremljeno očitanje; izričito prazno završno očitanje ne preuzima staru vrijednost. Nova migracija nije potrebna. Regresijska provjera: `node --test tests/fuel-mileage.test.mjs`.
 
 Primijeniti novu migraciju `supabase/migrations/20261109180000_vozila_gorivo_zakasnjeli_unos.sql` nakon prethodnih migracija goriva i objaviti novi web-build. Unos i uređivanje točenja dopuštaju nenegativnu cjelobrojnu kilometražu manju od trenutnog stanja vozila. Web i portal djelatnika prikazuju poruku za provjeru datuma i kilometraže, ali ne blokiraju spremanje. Zapis točenja zadržava uneseno očitanje; postojeći okidač baze povisuje stanje vozila samo kada je unos veći. Zaključivanje naloga uzima najveće završno očitanje povezanih završenih naloga i ažurira vozilo samo ako je ono veće od trenutnog stanja.
 

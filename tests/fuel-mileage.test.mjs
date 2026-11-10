@@ -114,3 +114,81 @@ test('order mileage update failures remain visible to the caller', async () => {
   const { api } = setup({ orders: [order('order', 100200, '2026-11-04')], updateError: error });
   await assert.rejects(api.syncZadnjuKilometrazuVozila('vehicle'), (reason) => reason === error);
 });
+
+function setupClosing(previousKm, { syncError = null, settlementError = null } = {}) {
+  const ast = ts.createSourceFile('api.ts', source, ts.ScriptTarget.Latest, true);
+  const declaration = ast.statements.find(node =>
+    ts.isFunctionDeclaration(node) && node.name?.text === 'setNalogZavrsen');
+  const { outputText: closingJs } = ts.transpileModule(declaration.getText(ast), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  });
+  const calls = [];
+  const query = {
+    select() { return this; },
+    eq() { return this; },
+    not() { return this; },
+    single: async () => ({
+      data: { status: 'otvoren', mobile_status: 'predan', km_kraj: previousKm }, error: null,
+    }),
+    limit: async () => ({ data: [{ vozilo_id: 'vehicle' }], error: null }),
+  };
+  const module = { exports: {} };
+  vm.runInNewContext(closingJs, {
+    module, exports: module.exports, Error,
+    supabase: { from: () => query },
+    verifyWorkOrderKm: async () => {},
+    syncNalogTroskovi: async () => {
+      if (settlementError) throw settlementError;
+      calls.push('settlement');
+      return '2026-11-10';
+    },
+    syncKmGrupe: async () => { calls.push('daily costs'); },
+    syncZadnjuKilometrazuVozila: async id => {
+      calls.push(id);
+      if (syncError) throw syncError;
+    },
+  });
+  return { close: module.exports.setNalogZavrsen, calls };
+}
+
+for (const [previousKm, nextKm, expectedSync] of [
+  [null, 100200, true],
+  [100100, 100200, true],
+  [100100, null, false],
+  [null, 0, true],
+]) {
+  test(`closing uses the submitted final reading (${previousKm} -> ${nextKm}) for vehicle synchronization`, async () => {
+    const { close, calls } = setupClosing(previousKm);
+    await close('order', true, false, false, { km_pocetak: 0, km_kraj: nextKm, napomena: null });
+    assert.deepEqual(calls, ['settlement', 'daily costs', ...(expectedSync ? ['vehicle'] : [])]);
+  });
+}
+
+test('closing without a new report still synchronizes a previously saved reading', async () => {
+  const { close, calls } = setupClosing(100200);
+  await close('order', true);
+  assert.deepEqual(calls, ['settlement', 'daily costs', 'vehicle']);
+});
+
+for (const [completed, withoutExecution] of [[false, false], [true, true]]) {
+  test(`reopening or closing without execution skips vehicle synchronization (${completed}, ${withoutExecution})`, async () => {
+    const { close, calls } = setupClosing(100200);
+    await close('order', completed, false, withoutExecution);
+    assert.equal(calls.includes('vehicle'), false);
+  });
+}
+
+test('failed settlement does not synchronize vehicle mileage', async () => {
+  const failure = new Error('Settlement failed');
+  const { close, calls } = setupClosing(null, { settlementError: failure });
+  await assert.rejects(close('order', true, false, false, { km_pocetak: 100000, km_kraj: 100200, napomena: null }), error => error === failure);
+  assert.deepEqual(calls, []);
+});
+
+test('vehicle sync failure after closing with a new reading reports the saved status', async () => {
+  const { close } = setupClosing(null, { syncError: new Error('Update denied') });
+  await assert.rejects(
+    close('order', true, false, false, { km_pocetak: 100000, km_kraj: 100200, napomena: null }),
+    /Nalog je zaključen, ali kilometraža vozila nije sinkronizirana\. Update denied/,
+  );
+});

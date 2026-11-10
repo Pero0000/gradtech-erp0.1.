@@ -11,6 +11,7 @@ import { Field, TextInput, Select, Textarea } from '@/components/ui/Field';
 import type { GradilisteStavka } from '@/lib/api';
 import {
   setNalogZadaci,
+  uniqueNalogSourceRows,
   copyOpenNalogZadaci,
   addNalogZadatak,
   deleteGradilisteZadatak,
@@ -64,7 +65,7 @@ import {
 } from '@/lib/api';
 import { useAuth } from '@/auth/useAuth';
 import { DEFAULT_GRADILISTE_COLUMN_LABELS } from '@/lib/company';
-import { countOstaloAssignments, entriesForRosterDate, hasOstaloEntry, workerReturnsToOstalo } from '@/lib/rasporedOstalo';
+import { countOstaloAssignments, hasOstaloEntry, workerReturnsToOstalo } from '@/lib/rasporedOstalo';
 
 type DragPayload =
   | { type: 'gradiliste'; id: string; assignmentId?: string }
@@ -277,6 +278,7 @@ export function RasporedView() {
   const [savedColumns, setSavedColumns] = useState<string[][]>([[], [], []]);
   const layoutSaveQueue = useRef<Promise<void>>(Promise.resolve());
   const [ostalo, setOstalo] = useState<DnevniRasporedOstalo[]>([]);
+  const [ostaloError, setOstaloError] = useState<string | null>(null);
   const [nalogForm, setNalogForm] = useState<NalogForm | null>(null);
   const [nalogSaving, setNalogSaving] = useState(false);
   const [nalogStavke, setNalogStavke] = useState<GradilisteStavka[]>([]);
@@ -326,7 +328,8 @@ export function RasporedView() {
     (formGradilisteId ? fetchGradilisteZadaci(formGradilisteId) : fetchNalogZadaci(formNalogId as string))
       .then(async (list) => {
         if (cancelled) return;
-        setNalogZadaciList(list);
+        const choices = uniqueNalogSourceRows(list, formNalogId);
+        setNalogZadaciList(choices);
         setNalogForm((current) => current && current.fresh
           && current.nalogId === formNalogId
           && current.gradiliste_id === formGradilisteId
@@ -334,7 +337,7 @@ export function RasporedView() {
             ...current,
             zadatak_ids: [...new Set([
               ...current.zadatak_ids,
-              ...list.filter((task) => !task.gotovo && task.nalog_id && task.nalog_id !== current.nalogId).map((task) => task.id),
+              ...choices.filter((task) => !task.gotovo && task.nalog_id && task.nalog_id !== current.nalogId).map((task) => task.id),
             ])],
           }
           : current);
@@ -361,10 +364,11 @@ export function RasporedView() {
     fetchGradilisteStavke(formGradilisteId)
       .then((list) => {
         if (cancelled) return;
-        setNalogStavke(list);
+        const choices = uniqueNalogSourceRows(list, formNalogId);
+        setNalogStavke(choices);
         setNalogForm((current) => {
           if (!current || current.gradiliste_id !== formGradilisteId) return current;
-          const eligible = list.filter((item) => !item.gotovo && !item.uzeto && (
+          const eligible = choices.filter((item) => !item.gotovo && !item.uzeto && (
             item.nalog_id === current.nalogId
             || (current.fresh && (item.tip === 'materijal' || item.tip === 'alat')
               && Boolean(item.nalog_id) && item.nalog_id !== current.nalogId)
@@ -413,16 +417,27 @@ export function RasporedView() {
   const loadOstalo = useCallback(async () => {
     try {
       setOstalo(await fetchRasporedOstalo());
+      setOstaloError(null);
       return true;
     } catch (e) {
-      setOstalo([]);
-      setError(e instanceof Error ? e.message : 'Greška pri učitavanju popisa Ostalo');
+      setOstaloError(errMsg(e, 'Greška pri učitavanju zajedničkog popisa Ostalo.'));
       return false;
     }
   }, []);
 
   useEffect(() => {
     void loadOstalo();
+    const refresh = () => {
+      if (document.visibilityState === 'visible') void loadOstalo();
+    };
+    const timer = window.setInterval(refresh, 15_000);
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+    };
   }, [loadOstalo]);
 
   // Godišnji/bolovanje iz Obračuna sati; bez prava na modul Radnici upozorenja se jednostavno ne prikazuju.
@@ -1007,7 +1022,7 @@ export function RasporedView() {
 
   const removeSiteAssignment = async (assignmentId: string) => {
     const assignment = siteAssignments.find((item) => item.id === assignmentId);
-    if (assignment?.iz_ostalo && assignment.tekst && !hasOstaloEntry(ostalo, assignment, selectedDate)) {
+    if (assignment?.iz_ostalo && assignment.tekst && !hasOstaloEntry(ostalo, assignment)) {
       await addRasporedOstalo(selectedDate, { tekst: assignment.tekst });
     }
     await removeRasporedGradiliste(assignmentId);
@@ -1016,7 +1031,7 @@ export function RasporedView() {
   const removeWorkerAssignment = async (assignmentId: string, workerId: string) => {
     const assignment = workerAssignments.find((item) => item.id === assignmentId);
     if (assignment && workerReturnsToOstalo(assignment)
-      && !hasOstaloEntry(ostalo, { tekst: null, radnik_id: workerId }, selectedDate)) {
+      && !hasOstaloEntry(ostalo, { tekst: null, radnik_id: workerId })) {
       await addRasporedOstalo(selectedDate, { radnikId: workerId });
     }
     await removeRasporedRadnik(assignmentId);
@@ -1032,7 +1047,7 @@ export function RasporedView() {
     const payload = readPayload(event);
     if (!payload) return;
     if (payload.type === 'ostalo') {
-      const entry = ostalo.find((item) => item.id === payload.id && item.datum === selectedDate);
+      const entry = ostalo.find((item) => item.id === payload.id);
       if (entry?.radnik_id && isWorkerAssignedToLockedVehicle(entry.radnik_id)) {
         setError('Radnik je na vozilu sa zaključenim radnim nalogom i ne može se premjestiti.');
         return;
@@ -1046,7 +1061,7 @@ export function RasporedView() {
     }
     void run(async () => {
       if (payload.type === 'ostalo') {
-        const entry = ostalo.find((o) => o.id === payload.id && o.datum === selectedDate);
+        const entry = ostalo.find((o) => o.id === payload.id);
         if (!entry) return;
         if (entry.radnik_id) await assignRasporedRadnik(selectedDate, voziloId, entry.radnik_id, true);
         else if (entry.tekst) await addRasporedTekst(selectedDate, voziloId, entry.tekst, true);
@@ -1112,14 +1127,14 @@ export function RasporedView() {
     }
     void run(async () => {
       if (payload.type === 'radnik') {
-        if (!hasOstaloEntry(ostalo, { tekst: null, radnik_id: payload.id }, selectedDate)) {
+        if (!hasOstaloEntry(ostalo, { tekst: null, radnik_id: payload.id })) {
           await addRasporedOstalo(selectedDate, { radnikId: payload.id });
         }
         if (assignmentId) await removeRasporedRadnik(assignmentId);
       } else if (assignmentId) {
         const assignment = siteAssignments.find((a) => a.id === assignmentId);
         if (assignment && !assignment.gradiliste_id && assignment.tekst) {
-          if (!hasOstaloEntry(ostalo, assignment, selectedDate)) {
+          if (!hasOstaloEntry(ostalo, assignment)) {
             await addRasporedOstalo(selectedDate, { tekst: assignment.tekst });
           }
           await removeRasporedGradiliste(assignmentId);
@@ -1133,7 +1148,7 @@ export function RasporedView() {
     setDropTarget(null);
     const payload = readPayload(event);
     if (payload?.type === 'ostalo' && type === 'radnik') {
-      const entry = ostalo.find((o) => o.id === payload.id && o.datum === selectedDate);
+      const entry = ostalo.find((o) => o.id === payload.id);
       if (entry?.radnik_id) void run(() => removeRasporedOstalo(entry.id));
       return;
     }
@@ -1165,9 +1180,9 @@ export function RasporedView() {
   const sites = gradilista.filter((g) => categoryStatuses.includes(g.status));
   const columns = reconcileColumns(gradilista, savedColumns).map((column) =>
     column.filter((id) => sites.some((site) => site.id === id)));
-  const dailyOstalo = entriesForRosterDate(ostalo, selectedDate);
+  const sharedOstalo = ostalo;
   const workers = radnici.filter((r) => (r.status === 'aktivan' || workerAssignments.some((a) => a.radnik_id === r.id))
-    && !dailyOstalo.some((o) => o.radnik_id === r.id));
+    && !sharedOstalo.some((o) => o.radnik_id === r.id));
   const vehicleOf = (voziloId: string) => vozila.find((v) => v.id === voziloId);
   const workerCount = (radnikId: string) => workerAssignments.filter((a) => a.radnik_id === radnikId).length;
   const siteCount = (gradilisteId: string) => siteAssignments.filter((a) => a.gradiliste_id === gradilisteId).length;
@@ -1764,8 +1779,13 @@ export function RasporedView() {
           className={`rounded-xl border border-dashed p-3 ${dropTarget === 'panel-ostalo' ? 'border-sky-400 bg-sky-50/70' : 'border-slate-200 bg-slate-50/50'}`}
         >
           <h2 className="mb-2 text-xs font-semibold uppercase text-slate-500">Ostalo</h2>
+          <p className="mb-2 text-xs text-slate-500">Zajednički popis za sve dane i sva računala u tvrtki. Dodjele na vozila vrijede za odabrani dan.</p>
+          {ostaloError && <div role="alert" className="mb-2 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+            <p>{ostaloError}</p>
+            <button type="button" onClick={() => void loadOstalo()} className="mt-1 font-semibold underline">Ponovi učitavanje popisa</button>
+          </div>}
           <div className="space-y-1.5">
-            {dailyOstalo.map((entry) => {
+            {sharedOstalo.map((entry) => {
               const worker = entry.radnik_id ? radnici.find((r) => r.id === entry.radnik_id) : null;
               return (
                 <div
@@ -1794,7 +1814,8 @@ export function RasporedView() {
                   <button
                     type="button"
                     onClick={() => void run(() => removeRasporedOstalo(entry.id))}
-                    aria-label="Ukloni"
+                    aria-label="Ukloni iz zajedničkog popisa Ostalo"
+                    title="Ukloni iz zajedničkog popisa za sve dane"
                     className="flex-shrink-0 text-slate-300 hover:text-red-600"
                   >
                     <X className="h-3.5 w-3.5" />

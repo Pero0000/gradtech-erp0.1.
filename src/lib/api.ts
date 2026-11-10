@@ -2148,9 +2148,12 @@ export async function removeRasporedGradiliste(id: string) {
 }
 
 export async function fetchRasporedOstalo() {
-  const { data, error } = await supabase.from('dnevni_raspored_ostalo').select('*').order('created_at');
-  if (error) throw ostaloError(error);
-  return (data ?? []) as DnevniRasporedOstalo[];
+  return fetchAllRows<DnevniRasporedOstalo>((from, to) => supabase
+    .from('dnevni_raspored_ostalo')
+    .select('*')
+    .order('created_at')
+    .order('id')
+    .range(from, to));
 }
 
 function ostaloError(error: { message?: string }) {
@@ -3384,6 +3387,49 @@ export async function saveDailyVehicleKmAllocations(
 }
 
 // Neriješeni materijal i alat s ranijih naloga istog gradilišta kopiraju se na novi nalog.
+interface NalogSourceRow {
+  id: string;
+  nalog_id?: string | null;
+  izvor_zadatak_id?: string | null;
+  izvor_materijal_id?: string | null;
+  izvor_alat_id?: string | null;
+  izvor_id?: string | null;
+}
+
+export function uniqueNalogSourceRows<T extends NalogSourceRow>(
+  rows: T[],
+  nalogId?: string,
+  selectedIds?: readonly string[],
+): T[] {
+  const parents = new Map<string, string>();
+  const root = (id: string): string => {
+    const parent = parents.get(id);
+    if (!parent || parent === id) return id;
+    const result = root(parent);
+    parents.set(id, result);
+    return result;
+  };
+  const sourceOf = (row: T) => row.izvor_zadatak_id ?? row.izvor_materijal_id ?? row.izvor_alat_id ?? row.izvor_id;
+  for (const row of rows) {
+    const source = sourceOf(row);
+    if (source) parents.set(root(row.id), root(source));
+  }
+  const selectedGroups = selectedIds
+    ? new Set(selectedIds.map(root))
+    : null;
+  const groups = new Map<string, T>();
+  for (const row of rows) {
+    const key = root(row.id);
+    if (selectedGroups && !selectedGroups.has(key)) continue;
+    const current = groups.get(key);
+    const priority = (item: T) => (
+      nalogId && item.nalog_id === nalogId ? 2 : !sourceOf(item) ? 1 : 0
+    );
+    if (!current || priority(row) > priority(current)) groups.set(key, row);
+  }
+  return [...groups.values()];
+}
+
 export async function prenesiOtvoreneStavke(nalogId: string, gradilisteId: string | null) {
   if (!gradilisteId) return;
   const { data: stari, error: oldOrdersError } = await supabase
@@ -3397,8 +3443,8 @@ export async function prenesiOtvoreneStavke(nalogId: string, gradilisteId: strin
   if (ids.length === 0) return;
   const { data: stavke, error } = await supabase
     .from('radni_nalozi_stavke')
-    .select('id, tip, naziv, oprema_id')
-    .in('nalog_id', ids)
+    .select('id, nalog_id, tip, naziv, oprema_id, izvor_id, izvor_materijal_id, izvor_alat_id')
+    .in('nalog_id', [...ids, nalogId])
     .eq('gotovo', false)
     .eq('preneseno', false);
   if (error) throw error;
@@ -3424,10 +3470,10 @@ export async function prenesiOtvoreneStavke(nalogId: string, gradilisteId: strin
       throw copyMaterialsError;
     }
   };
-  const sourceItems = stavke as { id: string; tip: string; naziv: string; oprema_id: string | null }[];
+  const sourceItems = uniqueNalogSourceRows(stavke, nalogId).filter((item) => item.nalog_id !== nalogId);
   await copyItems(sourceItems.filter((item) => item.tip === 'materijal'), 'izvor_materijal_id');
   await copyItems(sourceItems.filter((item) => item.tip === 'alat'), 'izvor_alat_id');
-  const transferable = (stavke as { id: string; tip: string; naziv: string; oprema_id: string | null }[])
+  const transferable = sourceItems
     .filter((item) => item.tip !== 'materijal' && item.tip !== 'alat');
   if (transferable.length === 0) return;
   const { error: insertError } = await supabase
@@ -3567,7 +3613,8 @@ export async function setNalogZavrsen(
       `Nalog je ${zavrsen ? 'zaključen' : 'ponovno otvoren'}, ali dnevni kilometarski troškovi nisu sinkronizirani.${message}`,
     );
   }
-  if (zavrsen && !bezIzvrsenja && nalog.km_kraj !== null) {
+  const kmKraj = izvrsenje ? izvrsenje.km_kraj : nalog.km_kraj;
+  if (zavrsen && !bezIzvrsenja && kmKraj !== null) {
     try {
       const { data: assignments, error: assignmentsError } = await supabase
         .from('dnevni_raspored_gradilista')
@@ -4322,7 +4369,9 @@ export async function setNalogStavke(nalogId: string, gradilisteId: string | nul
   const siteRows = gradilisteId ? await fetchGradilisteStavke(gradilisteId) : [];
   const availableRows = siteRows.filter((item) => !item.gotovo && !item.uzeto);
   const availableById = new Map(availableRows.map((item) => [item.id, item]));
-  const selectedIds = new Set(stavkaIds.filter((id) => availableById.has(id)));
+  const selectedIds = new Set(uniqueNalogSourceRows(
+    availableRows, nalogId, stavkaIds.filter((id) => availableById.has(id)),
+  ).map((item) => item.id));
 
   for (const item of (currentRows ?? []) as {
     id: string;
@@ -4609,7 +4658,7 @@ export async function copyOpenNalogZadaci(
   gradilisteId: string,
   tasks: GradilisteZadatak[],
 ) {
-  const copies = tasks
+  const copies = uniqueNalogSourceRows(tasks, nalogId)
     .filter((task) => !task.gotovo && task.gradiliste_id === gradilisteId && Boolean(task.nalog_id) && task.nalog_id !== nalogId)
     .map((task) => ({
       nalog_id: nalogId,

@@ -24,17 +24,11 @@ export function countOstaloAssignments(
 export function hasOstaloEntry(
   entries: DnevniRasporedOstalo[],
   entry: { tekst?: string | null; radnik_id?: string | null },
-  date: string,
 ) {
   return entries.some((candidate) =>
-    candidate.datum === date
-    && (entry.radnik_id
+    (entry.radnik_id
       ? candidate.radnik_id === entry.radnik_id
       : !candidate.radnik_id && normalizeText(candidate.tekst) === normalizeText(entry.tekst)));
-}
-
-export function entriesForRosterDate(entries: DnevniRasporedOstalo[], date: string) {
-  return entries.filter((entry) => entry.datum === date);
 }
 
 export function workerReturnsToOstalo(assignment: Pick<DnevniRasporedRadnik, 'iz_ostalo'>) {

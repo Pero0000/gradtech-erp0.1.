@@ -111,13 +111,12 @@ function emptyGradilisteSortModes(): GradilisteSortMode[] {
 }
 
 function reconcileGradilisteColumns(items: Gradiliste[], savedColumns: string[][]): string[][] {
-  const validIds = new Set(items.map((item) => item.id));
   const assignedIds = new Set<string>();
   const columns = emptyGradilisteColumns();
 
   savedColumns.forEach((savedColumn, columnIndex) => {
     for (const id of savedColumn) {
-      if (validIds.has(id) && !assignedIds.has(id)) {
+      if (!assignedIds.has(id)) {
         columns[columnIndex].push(id);
         assignedIds.add(id);
       }
@@ -126,9 +125,7 @@ function reconcileGradilisteColumns(items: Gradiliste[], savedColumns: string[][
 
   for (const item of items) {
     if (assignedIds.has(item.id)) continue;
-    const shortestColumn = columns.reduce((shortest, column, index) =>
-      column.length < columns[shortest].length ? index : shortest, 0);
-    columns[shortestColumn].push(item.id);
+    columns[2].push(item.id);
     assignedIds.add(item.id);
   }
 
@@ -155,6 +152,7 @@ export function GradilistaView({
   const canEditBoard = canAccess('gradilista', 'edit');
   const layoutSaveQueue = useRef<Promise<void>>(Promise.resolve());
   const layoutVersion = useRef(0);
+  const boardRevision = useRef<number | null>(null);
   const loadScope = useRequestScope();
   const rokoviScope = useRequestScope();
   const [items, setItems] = useState<Gradiliste[]>([]);
@@ -191,8 +189,9 @@ export function GradilistaView({
   const persistBoardLayout = useCallback((columns: string[][], sortModes: GradilisteSortMode[]) => {
     layoutVersion.current += 1;
     const save = layoutSaveQueue.current
-      .catch(() => undefined)
-      .then(() => saveGradilisteBoardLayout({ columns, sortModes }));
+      .then(async () => {
+        boardRevision.current = await saveGradilisteBoardLayout({ columns, sortModes }, boardRevision.current);
+      });
     layoutSaveQueue.current = save;
     return save;
   }, []);
@@ -227,18 +226,16 @@ export function GradilistaView({
       setInvestitori(nextInvestitori);
       const nextColumns = reconcileGradilisteColumns(nextItems, savedLayout?.columns ?? emptyGradilisteColumns());
       const nextSortModes = savedLayout?.sortModes ?? emptyGradilisteSortModes();
+      boardRevision.current = savedLayout?.revision ?? null;
       setColumnIds(nextColumns);
       setColumnSortModes(nextSortModes);
-      if (canEditBoard && (!savedLayout || JSON.stringify(savedLayout.columns) !== JSON.stringify(nextColumns))) {
-        await persistBoardLayout(nextColumns, nextSortModes);
-      }
     } catch (e) {
       if (isCurrent()) setError(getErrorMessage(e, 'Greška pri učitavanju'));
       if (rethrow) throw e;
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, [canEditBoard, loadRokovi, loadScope, persistBoardLayout]);
+  }, [loadRokovi, loadScope]);
 
   useEffect(() => {
     void load();
@@ -263,6 +260,7 @@ export function GradilistaView({
         if (cancelled || version !== layoutVersion.current) return;
         const layout = await fetchGradilisteBoardLayout();
         if (cancelled || version !== layoutVersion.current || !layout) return;
+        boardRevision.current = layout.revision ?? null;
         const nextColumns = reconcileGradilisteColumns(items, layout.columns);
         setColumnIds((current) => JSON.stringify(current) === JSON.stringify(nextColumns) ? current : nextColumns);
         setColumnSortModes((current) => JSON.stringify(current) === JSON.stringify(layout.sortModes) ? current : layout.sortModes);

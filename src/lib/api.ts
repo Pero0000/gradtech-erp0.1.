@@ -292,6 +292,7 @@ export type GradilisteBoardSortMode = 'manual' | 'datum_pocetka' | 'datum_zavrse
 export interface GradilisteBoardLayout {
   columns: string[][];
   sortModes: GradilisteBoardSortMode[];
+  revision?: number;
 }
 
 const defaultGradilisteBoardLayout: GradilisteBoardLayout = {
@@ -321,23 +322,36 @@ function throwGradilisteBoardMigrationError(error: { code?: string }) {
 export async function fetchGradilisteBoardLayout(): Promise<GradilisteBoardLayout | null> {
   const { data, error } = await supabase
     .from('gradiliste_board_layout')
-    .select('columns, sort_modes')
+    .select('columns, sort_modes, revision')
     .eq('id', true)
     .maybeSingle();
   if (error) throwGradilisteBoardMigrationError(error);
   if (!data) return null;
-  return normalizeGradilisteBoardLayout(data.columns, data.sort_modes);
+  return { ...normalizeGradilisteBoardLayout(data.columns, data.sort_modes), revision: data.revision };
 }
 
-export async function saveGradilisteBoardLayout(layout: GradilisteBoardLayout) {
-  const { error } = await supabase.from('gradiliste_board_layout').upsert({
+export async function saveGradilisteBoardLayout(layout: GradilisteBoardLayout, revision: number | null): Promise<number> {
+  const payload = {
     id: true,
     company_id: requireCompany().id,
     columns: layout.columns,
     sort_modes: layout.sortModes,
     updated_at: new Date().toISOString(),
-  }, { onConflict: 'company_id,id' });
+  };
+  const query = revision === null
+    ? supabase.from('gradiliste_board_layout').insert(payload)
+    : supabase.from('gradiliste_board_layout').update(payload)
+      .eq('company_id', payload.company_id).eq('id', true).eq('revision', revision);
+  const { data, error } = await query.select('revision').maybeSingle();
+  if (error?.code === '23505' || !data && !error) {
+    throw new Error('Raspored kategorija je u međuvremenu promijenjen na drugom ekranu ili računalu. Osvježi prikaz pa ponovi premještanje; stariji raspored nije spremljen.');
+  }
+  if (error?.code === '42703' || error?.code === 'PGRST204') {
+    throw new Error('Primijeni migraciju 20261110650000_gradiliste_board_revision.sql za zaštitu kategorija gradilišta.');
+  }
   if (error) throwGradilisteBoardMigrationError(error);
+  if (!data) throw new Error('Spremanje kategorija gradilišta nije potvrđeno.');
+  return data.revision;
 }
 
 export async function createGradiliste(g: Omit<Gradiliste, 'id' | 'created_at' | 'updated_at'>) {

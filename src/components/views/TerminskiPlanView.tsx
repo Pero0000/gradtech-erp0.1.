@@ -1,5 +1,5 @@
 import { formatHrDate } from '@/lib/localization';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { AlertCircle, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Clock3, FileDown, Pencil, Plus, RefreshCw } from 'lucide-react';
 import type { Gradiliste, GradilisteZadatak, Kooperant, KooperantAngazman, Rok } from '@/types';
 import { createRok, fetchGradilista, fetchKooperantAngazmani, fetchKooperanti, fetchRokovi, fetchTerminskiPlanZadaci, updateKooperantTimelineColor, updateRok } from '@/lib/api';
@@ -99,6 +99,16 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
   const [statusFilter, setStatusFilter] = useState<RokFilter>('svi');
   const [viewWeeks, setViewWeeks] = useState<ViewWeeks>(2);
   const [rangeStart, setRangeStart] = useState(() => dateKey(new Date()));
+  const timelineDrag = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startDate: string;
+    dayWidth: number;
+    active: boolean;
+  } | null>(null);
+  const suppressTimelineClick = useRef(false);
+  const [panning, setPanning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deadlineModalOpen, setDeadlineModalOpen] = useState(false);
@@ -145,6 +155,43 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
   }, []);
 
   const windowDays = viewWeeks * 7;
+  const startTimelineDrag = (event: PointerEvent<HTMLDivElement>) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    suppressTimelineClick.current = false;
+    const target = event.target;
+    if (!(target instanceof Element) || target.closest('input, select, textarea, a, [data-timeline-label]')) return;
+    const day = event.currentTarget.querySelector('.terminski-plan-day-header');
+    const dayWidth = day?.getBoundingClientRect().width;
+    if (!dayWidth) return;
+    timelineDrag.current = {
+      pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
+      startDate: rangeStart, dayWidth, active: false,
+    };
+  };
+  const moveTimelineDrag = (event: PointerEvent<HTMLDivElement>) => {
+    const drag = timelineDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (!drag.active) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < 6) return;
+      if (Math.abs(dy) > Math.abs(dx)) {
+        timelineDrag.current = null;
+        return;
+      }
+      drag.active = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setPanning(true);
+      suppressTimelineClick.current = true;
+    }
+    setRangeStart(shiftDate(drag.startDate, -Math.round(dx / drag.dayWidth)));
+  };
+  const endTimelineDrag = (event: PointerEvent<HTMLDivElement>) => {
+    if (timelineDrag.current?.pointerId !== event.pointerId) return;
+    timelineDrag.current = null;
+    setPanning(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
   const days = useMemo(() => Array.from({ length: windowDays }, (_, index) => shiftDate(rangeStart, index)), [rangeStart, windowDays]);
   const holidays = useMemo(() => {
     const years = new Set(days.map((day) => Number(day.slice(0, 4))));
@@ -417,7 +464,7 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
     }[color];
     return (
       <div key={id} className="terminski-plan-task-row grid min-h-12 border-b border-slate-100 last:border-b-0" style={{ gridTemplateColumns: 'var(--terminski-site-column-width) minmax(0, 1fr)' }}>
-        <div className="sticky left-0 z-10 flex min-w-0 items-center border-r border-slate-200 bg-white shadow-[4px_0_6px_-4px_rgba(15,23,42,0.3)]">
+        <div data-timeline-label className="sticky left-0 z-10 flex min-w-0 items-center border-r border-slate-200 bg-white shadow-[4px_0_6px_-4px_rgba(15,23,42,0.3)]">
           <button type="button" onClick={() => onOpenGradiliste(siteId)} className="min-w-0 flex-1 px-2 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 sm:px-3" title={`${title} · ${subtitle}`}>
             <span className="block break-words font-medium">{title}</span>
             <span className="block break-words text-[10px] text-slate-500">{subtitle}</span>
@@ -574,14 +621,28 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
       {error && <div role="alert" className="terminski-plan-hide-print flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
       {loading ? (
         <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">Učitavanje rokova i kooperanata…</div>
-      ) : groupedTimeline.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center">
-          <Clock3 className="mx-auto h-8 w-8 text-slate-400" />
-          <p className="mt-2 font-medium text-slate-700">Nema datiranih gradilišta, rokova ni angažmana za odabrane filtre i razdoblje.</p>
-          <p className="mt-1 text-sm text-slate-500">Pomakni razdoblje ili promijeni filtre za prikaz drugih aktivnosti.</p>
-        </div>
       ) : (
-        <div className="terminski-plan-grid overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div
+          className={`terminski-plan-grid touch-pan-y select-none overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm ${panning ? 'cursor-grabbing' : 'cursor-grab'}`}
+          onPointerDown={startTimelineDrag}
+          onPointerMove={moveTimelineDrag}
+          onPointerUp={endTimelineDrag}
+          onPointerCancel={endTimelineDrag}
+          onLostPointerCapture={endTimelineDrag}
+          onClickCapture={(event) => {
+            if (!suppressTimelineClick.current || event.detail === 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            suppressTimelineClick.current = false;
+          }}
+        >
+          {groupedTimeline.length === 0 && (
+            <div className="border-b border-dashed border-slate-300 p-6 text-center">
+              <Clock3 className="mx-auto h-8 w-8 text-slate-400" />
+              <p className="mt-2 font-medium text-slate-700">Nema datiranih gradilišta, rokova ni angažmana za odabrane filtre i razdoblje.</p>
+              <p className="mt-1 text-sm text-slate-500">Pomakni razdoblje ili promijeni filtre za prikaz drugih aktivnosti.</p>
+            </div>
+          )}
           <div className="terminski-plan-grid-inner" style={{ minWidth: `${timelineMinWidth}px` }}>
             <div className="terminski-plan-grid-header grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: 'var(--terminski-site-column-width) minmax(0, 1fr)' }}>
               <div className="sticky left-0 z-20 flex items-center border-r border-slate-200 bg-slate-50 px-2 py-3 text-[10px] font-semibold uppercase tracking-wide text-slate-500 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.3)] sm:px-3">Gradilište / aktivnost</div>
@@ -616,6 +677,7 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
               <div key={site.id} className="border-b-2 border-slate-300 last:border-b-0">
                 <div className="terminski-plan-site-row grid bg-sky-100/70" style={{ gridTemplateColumns: 'var(--terminski-site-column-width) minmax(0, 1fr)' }}>
                   <button
+                    data-timeline-label
                     type="button"
                     onClick={() => toggleSiteExpanded(site.id)}
                     aria-expanded={expandedSiteIds.includes(site.id)}
@@ -738,7 +800,7 @@ export function TerminskiPlanView({ onOpenGradiliste }: { onOpenGradiliste: (id:
           </div>
         </div>
       )}
-      {!loading && <p className="terminski-plan-hide-print text-xs text-slate-500">Prikazano {groupedTimeline.length} gradilišta, {visibleDeadlines.length} rokova i {visibleAngazmani.length} angažmana kooperanata s unesenim datumima · tanka siva isprekidana crta označava razdoblje gradilišta i ostaje kao orijentir neovisno o filtrima aktivnosti · nedjelje i blagdani označeni su rozo, subote blago sivo · razdoblje {displayDate(rangeStart)} – {displayDate(shiftDate(rangeEnd, -1))}. Klikni naziv ili traku za otvaranje gradilišta.</p>}
+      {!loading && <p className="terminski-plan-hide-print text-xs text-slate-500">Prikazano {groupedTimeline.length} gradilišta, {visibleDeadlines.length} rokova i {visibleAngazmani.length} angažmana kooperanata s unesenim datumima · tanka siva isprekidana crta označava razdoblje gradilišta i ostaje kao orijentir neovisno o filtrima aktivnosti · nedjelje i blagdani označeni su rozo, subote blago sivo · razdoblje {displayDate(rangeStart)} – {displayDate(shiftDate(rangeEnd, -1))}. Povuci kalendar lijevo/desno za pomicanje datuma bez promjene rokova. Klikni naziv ili traku za otvaranje gradilišta.</p>}
       <Modal
         open={deadlineModalOpen}
         onClose={() => { if (!savingDeadline && !deadlineRestoring) setDeadlineModalOpen(false); }}

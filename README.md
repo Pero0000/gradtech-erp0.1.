@@ -2,6 +2,14 @@
 
 ## Provjere prije objave
 
+### Pomicanje datuma na Terminskom planu
+
+Kalendar se može povlačiti mišem ili prstom: lijevo prikazuje kasnije, desno ranije datume. Pomak prati širinu dana pri odabranom broju tjedana. Povlačenje ne mijenja rokove ni podatke gradilišta; običan klik i dalje otvara gradilište, a strelice i gumb za današnji datum ostaju dostupni. Okomito pomicanje na dodir ostaje omogućeno. Nova migracija nije potrebna. Provjera: `node --test tests/timeline-site-periods.test.mjs`.
+
+### Stabilne kategorije gradilišta na više računala
+
+Primijeniti `supabase/migrations/20261110650000_gradiliste_board_revision.sql` i objaviti novi web-build na svim računalima. Gradilišta bez spremljene kategorije prikazuju se u trećem stupcu (zadano „ostala gradilišta”), a ne u najkraćem stupcu. Samo otvaranje pregleda više ne sprema automatsku preraspodjelu. Spremljene kategorije zadržavaju se i za gradilišta koja trenutačni odgovor nije učitao. Oba ekrana, Gradilišta i Dnevni raspored, spremaju prema učitanoj verziji rasporeda; zastarjelo spremanje se odbija. Nakon konflikta osvježiti cijelu stranicu i ponoviti namjernu izmjenu. Potrebno je ažurirati sve otvorene/starije klijente: stari kod koji bezuvjetno prepisuje raspored ne koristi ovu provjeru. Migracija ne vraća kategorije koje su ranije pogrešno spremljene; njih treba ručno provjeriti. Test: `node --test tests/site-board-categories.test.mjs`.
+
 ### Jedna izvorna stavka pri pripremi naloga
 
 Pri odabiru radnih zadataka, dodatnih radova, materijala i alata za nalog iz Dnevnog rasporeda izvor i njegove povezane kopije nude se jednom. Prepoznaju se po vezama `izvor_zadatak_id`, `izvor_materijal_id`, `izvor_alat_id` i `izvor_id`, uključujući lance kopija. Prednost ima zapis već na nalogu koji se uređuje, zatim izvor. Isto pravilo primjenjuje se pri kopiranju odabranih zadataka, spremanju odabira materijala/alata i automatskom prijenosu otvorenih stavki. Zasebno unesene stavke istog naziva ostaju zasebne. Ranija povijest se ne briše niti se postojeći nalozi automatski čiste. Nova SQL migracija nije potrebna. Provjera: `node --test tests/work-order-items.test.mjs`.

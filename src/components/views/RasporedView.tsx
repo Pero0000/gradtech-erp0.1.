@@ -184,13 +184,12 @@ function formatDate(d: string) {
 
 // Raspored stupaca dijeli se s pregledom Gradilišta preko tablice gradiliste_board_layout.
 function reconcileColumns(items: Gradiliste[], saved: string[][]): string[][] {
-  const valid = new Set(items.map((item) => item.id));
   const assigned = new Set<string>();
   const columns: string[][] = [[], [], []];
   saved.forEach((column, index) => {
     if (index > 2) return;
     for (const id of column) {
-      if (valid.has(id) && !assigned.has(id)) {
+      if (!assigned.has(id)) {
         columns[index].push(id);
         assigned.add(id);
       }
@@ -198,8 +197,7 @@ function reconcileColumns(items: Gradiliste[], saved: string[][]): string[][] {
   });
   for (const item of items) {
     if (assigned.has(item.id)) continue;
-    const shortest = columns.reduce((best, column, index) => column.length < columns[best].length ? index : best, 0);
-    columns[shortest].push(item.id);
+    columns[2].push(item.id);
   }
   return columns;
 }
@@ -277,6 +275,8 @@ export function RasporedView() {
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [savedColumns, setSavedColumns] = useState<string[][]>([[], [], []]);
   const layoutSaveQueue = useRef<Promise<void>>(Promise.resolve());
+  const layoutVersion = useRef(0);
+  const boardRevision = useRef<number | null>(null);
   const [ostalo, setOstalo] = useState<DnevniRasporedOstalo[]>([]);
   const [ostaloError, setOstaloError] = useState<string | null>(null);
   const [nalogForm, setNalogForm] = useState<NalogForm | null>(null);
@@ -387,9 +387,11 @@ export function RasporedView() {
     };
   }, [formGradilisteId, formNalogId]);
   const persistLayout = (columns: string[][], modes: SortMode[]) => {
+    layoutVersion.current += 1;
     const save = layoutSaveQueue.current
-      .catch(() => undefined)
-      .then(() => saveGradilisteBoardLayout({ columns, sortModes: modes }));
+      .then(async () => {
+        boardRevision.current = await saveGradilisteBoardLayout({ columns, sortModes: modes }, boardRevision.current);
+      });
     layoutSaveQueue.current = save;
     save.catch((e: unknown) => setError(errMsg(e, 'Greška pri spremanju redoslijeda gradilišta')));
   };
@@ -462,7 +464,7 @@ export function RasporedView() {
       fetchRadnici(),
       fetchVozila(),
       fetchRokovi().catch(() => [] as Rok[]),
-      fetchGradilisteBoardLayout().catch(() => null),
+      fetchGradilisteBoardLayout(),
     ])
       .then(([nextGradilista, nextRadnici, nextVozila, nextRokovi, layout]) => {
         if (cancelled) return;
@@ -471,6 +473,7 @@ export function RasporedView() {
         setVozila(nextVozila.filter((v) => v.u_rasporedu !== false));
         setRokovi(nextRokovi);
         if (layout) {
+          boardRevision.current = layout.revision ?? null;
           setSavedColumns(layout.columns);
           setSortModes(layout.sortModes);
         }
@@ -487,16 +490,28 @@ export function RasporedView() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
     const timer = window.setInterval(() => {
-      fetchGradilisteBoardLayout()
+      if (inFlight || document.visibilityState !== 'visible') return;
+      inFlight = true;
+      const version = layoutVersion.current;
+      layoutSaveQueue.current.then(() => fetchGradilisteBoardLayout())
         .then((layout) => {
-          if (!layout) return;
+          if (cancelled || version !== layoutVersion.current || !layout) return;
+          boardRevision.current = layout.revision ?? null;
           setSavedColumns((current) => JSON.stringify(current) === JSON.stringify(layout.columns) ? current : layout.columns);
           setSortModes((current) => JSON.stringify(current) === JSON.stringify(layout.sortModes) ? current : layout.sortModes);
         })
-        .catch(() => undefined);
+        .catch((reason: unknown) => {
+          if (!cancelled) setError(errMsg(reason, 'Osvježavanje kategorija gradilišta nije uspjelo.'));
+        })
+        .finally(() => { inFlight = false; });
     }, 30_000);
-    return () => window.clearInterval(timer);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {

@@ -3000,7 +3000,7 @@ test('timeline exposes deadline recovery and clears stale editor and filters bef
   const component = load('../src/components/views/TerminskiPlanView.tsx', {
     react: {
       useState: (value) => [typeof value === 'function' ? value() : value, (next) => states.push(next)],
-      useEffect() {}, useMemo: (fn) => fn(),
+      useEffect() {}, useMemo: (fn) => fn(), useRef: (current) => ({ current }),
     },
     'react/jsx-runtime': jsxRuntime,
     'lucide-react': { AlertCircle() {}, CalendarDays() {}, ChevronDown() {}, ChevronLeft() {}, ChevronRight() {}, Clock3() {}, FileDown() {}, Pencil() {}, Plus() {}, RefreshCw() {} },
@@ -3249,7 +3249,7 @@ test('deleting site/order documents and photos retains original files and thumbn
           const sharedMocks = {
             react: {
               useState: (value) => [typeof value === 'function' ? value() : value, (next) => states.push(next)],
-              useEffect() {}, useMemo: (fn) => fn(),
+              useEffect() {}, useMemo: (fn) => fn(), useRef: (current) => ({ current }),
             },
             'react/jsx-runtime': jsxRuntime,
             'lucide-react': new Proxy({}, { get: () => () => null }),

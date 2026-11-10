@@ -22,20 +22,22 @@ function text(node) {
 function render(overrides = {}) {
   let index = 0;
   let pdf;
+  class Element { closest() { return null; } }
   const states = {
     gradilista: [site], loading: false, rangeStart: '2026-11-06', statusFilter: 'prekoraceni',
     selectedKooperantIds: [], includeUnassigned: false, ...overrides,
   };
   const module = { exports: {} };
   vm.runInNewContext(compiled, {
-    module, exports: module.exports, Date,
+    module, exports: module.exports, Date, Element,
     require(name) {
       if (name === 'react/jsx-runtime') return jsxRuntime;
       if (name === 'react') return {
-        useEffect() {}, useMemo: (fn) => fn(),
+        useEffect() {}, useMemo: (fn) => fn(), useRef: (current) => ({ current }),
         useState(initial) {
           const key = stateNames[index++];
-          return [key in states ? states[key] : typeof initial === 'function' ? initial() : initial, () => {}];
+          return [key in states ? states[key] : typeof initial === 'function' ? initial() : initial,
+            (value) => { states[key] = typeof value === 'function' ? value(states[key]) : value; }];
         },
       };
       if (name === '@/auth/useAuth') return { useAuth: () => ({ canAccess: () => true }) };
@@ -46,8 +48,83 @@ function render(overrides = {}) {
     },
   });
   const tree = module.exports.TerminskiPlanView({ onOpenGradiliste() {} });
-  return { tree, pdf: () => pdf, markers: nodes(tree).filter((node) => node.props.role === 'img') };
+  return {
+    tree, states, pdf: () => pdf, markers: nodes(tree).filter((node) => node.props.role === 'img'),
+    element: new Element(),
+  };
 }
+
+function dragHarness(dayWidth = 42, overrides = {}) {
+  const view = render(overrides);
+  const grid = nodes(view.tree).find((node) => node.props.onPointerDown);
+  let captured = false;
+  const currentTarget = {
+    querySelector: () => ({ getBoundingClientRect: () => ({ width: dayWidth }) }),
+    setPointerCapture() { captured = true; },
+    hasPointerCapture() { return captured; },
+    releasePointerCapture() { captured = false; },
+  };
+  const event = (x, y = 0, extra = {}) => ({
+    isPrimary: true, button: 0, pointerId: 1, clientX: x, clientY: y,
+    currentTarget, target: view.element, ...extra,
+  });
+  return { ...view, handlers: grid.props, event, captured: () => captured };
+}
+
+test('drag pans dates in both directions using actual day width without cumulative drift', () => {
+  for (const width of [42, 75]) {
+    const h = dragHarness(width, { viewWeeks: 4 });
+    h.handlers.onPointerDown(h.event(300));
+    h.handlers.onPointerMove(h.event(300 - width * 2));
+    assert.equal(h.states.rangeStart, '2026-11-08');
+    assert.equal(h.captured(), true);
+    h.handlers.onPointerMove(h.event(300 + width));
+    assert.equal(h.states.rangeStart, '2026-11-05');
+    h.handlers.onPointerUp(h.event(300 + width));
+    assert.equal(h.captured(), false);
+    assert.equal(h.states.panning, false);
+    h.handlers.onPointerMove(h.event(0));
+    assert.equal(h.states.rangeStart, '2026-11-05');
+  }
+});
+
+test('small movements, vertical gestures, secondary buttons and labels do not pan', () => {
+  for (const scenario of ['small', 'vertical', 'secondary', 'label']) {
+    const h = dragHarness();
+    if (scenario === 'label') h.element.closest = () => ({});
+    h.handlers.onPointerDown(h.event(100, 0, { button: scenario === 'secondary' ? 2 : 0 }));
+    if (scenario === 'vertical') h.handlers.onPointerMove(h.event(101, 30));
+    h.handlers.onPointerMove(h.event(scenario === 'small' ? 103 : 0));
+    assert.equal(h.states.rangeStart, '2026-11-06', scenario);
+    assert.equal(h.captured(), false, scenario);
+  }
+});
+
+test('drag blocks accidental bar clicks, preserves keyboard activation and resets for next click', () => {
+  const h = dragHarness();
+  let prevented = false;
+  const click = { detail: 1, preventDefault() { prevented = true; }, stopPropagation() {} };
+  h.handlers.onPointerDown(h.event(100));
+  h.handlers.onPointerMove(h.event(0));
+  h.handlers.onPointerCancel(h.event(0));
+  h.handlers.onClickCapture({ ...click, detail: 0 });
+  assert.equal(prevented, false);
+  h.handlers.onClickCapture(click);
+  assert.equal(prevented, true);
+  prevented = false;
+  h.handlers.onPointerDown(h.event(100));
+  h.handlers.onPointerUp(h.event(100));
+  h.handlers.onClickCapture(click);
+  assert.equal(prevented, false);
+});
+
+test('empty date ranges keep the calendar available for dragging back to activities', () => {
+  const h = dragHarness(42, { gradilista: [] });
+  assert.ok(nodes(h.tree).some((node) => node.props.className?.includes('terminski-plan-day-header')));
+  h.handlers.onPointerDown(h.event(100));
+  h.handlers.onPointerMove(h.event(142));
+  assert.equal(h.states.rangeStart, '2026-11-05');
+});
 
 test('dated sites without activities remain as subtle planning references despite activity filters', () => {
   const view = render();

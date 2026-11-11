@@ -1333,7 +1333,11 @@ export async function updateVozilaGorivoAnomalyThreshold(threshold: number): Pro
 }
 
 export async function fetchOpenVozilaGorivoAnomalije(): Promise<VoziloGorivoAnomalija[]> {
-  const { data, error } = await supabase.rpc('refresh_vozila_gorivo_anomalije');
+  const { data, error } = await supabase.from('vozila_gorivo_anomalije')
+    .select('*')
+    .is('rijeseno_at', null)
+    .order('datum', { ascending: false })
+    .order('created_at', { ascending: false });
   if (error) {
     const missingDatabaseObject = ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error.code ?? '');
     if (missingDatabaseObject && String(error.message ?? '').toLowerCase().includes('vozila_gorivo_anomalije')) {
@@ -1342,6 +1346,16 @@ export async function fetchOpenVozilaGorivoAnomalije(): Promise<VoziloGorivoAnom
     throw error;
   }
   return (data ?? []) as VoziloGorivoAnomalija[];
+}
+
+export async function recalculateVozilaGorivoAnomalije(): Promise<void> {
+  const { error } = await supabase.rpc('recalculate_vozila_gorivo_anomalije');
+  if (error) {
+    if (['42883', 'PGRST202'].includes(error.code ?? '')) {
+      throw new Error('Primijenite migraciju 20261110680000_gorivo_anomalije_samo_pri_promjeni.sql za ponovni izračun anomalija goriva.');
+    }
+    throw error;
+  }
 }
 
 export async function resolveVoziloGorivoAnomalija(id: string) {

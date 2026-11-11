@@ -7,6 +7,7 @@ import {
   fetchVoziloGorivo,
   fetchVozilaGorivoAnomalyThreshold,
   fetchVozilaGorivoWorkers,
+  recalculateVozilaGorivoAnomalije,
   updateVoziloGorivo,
   updateVozilaGorivoAnomalyThreshold,
   type VoziloGorivoInput,
@@ -92,6 +93,8 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
   const [thresholdPercent, setThresholdPercent] = useState(50);
   const [thresholdDraft, setThresholdDraft] = useState('50');
   const [savingThreshold, setSavingThreshold] = useState(false);
+  const [recalculating, setRecalculating] = useState(false);
+  const [recalculationNotice, setRecalculationNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [historyVersion, setHistoryVersion] = useState(0);
 
@@ -221,6 +224,22 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
     }
   };
 
+  const recalculate = async () => {
+    if (recalculating) return;
+    setRecalculating(true);
+    setRecalculationNotice(null);
+    setError(null);
+    try {
+      await recalculateVozilaGorivoAnomalije();
+      setRecalculationNotice('Anomalije goriva ponovno su izračunate za sva vozila tvrtke.');
+      window.dispatchEvent(new Event('vozila-obavijest-updated'));
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setRecalculating(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {canEdit && <FuelChangeHistory key={vozilo.id} vehicleId={vozilo.id} refreshVersion={historyVersion} onRestore={async () => {
@@ -259,6 +278,14 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
             </button>
           )}
         </div>
+        {canEdit && (
+          <button type="button" onClick={() => void recalculate()}
+            disabled={recalculating || saving || savingThreshold}
+            className="mt-3 min-h-10 rounded-lg border border-sky-300 px-4 py-2 text-sm font-medium text-sky-800 disabled:opacity-50">
+            {recalculating ? 'Izračunavanje…' : 'Ponovno izračunaj anomalije'}
+          </button>
+        )}
+        {recalculationNotice && <p role="status" className="mt-2 text-sm text-emerald-700">{recalculationNotice}</p>}
       </section>
       <section className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 shadow-sm">
         <h3 className="mb-3 flex items-center gap-2 font-semibold text-slate-900">

@@ -2,6 +2,16 @@
 
 ## Provjere prije objave
 
+### Pasivno čitanje obavijesti i obračun anomalija goriva pri promjeni
+
+Primijeniti `supabase/migrations/20261110680000_gorivo_anomalije_samo_pri_promjeni.sql` i objaviti novi web-build. Svih devet izvora obavijesti koristi isključivo SELECT: gradilišta, djelatnici, vozila, rokovi, fakture, dokumenti djelatnika/vozila, prijave vozila i spremljene otvorene anomalije. Otvaranje dashboarda, obavijesti, bočnih brojača ili modula Vozila ne obračunava niti upisuje anomalije. Stari RPC `refresh_vozila_gorivo_anomalije` ostaje kompatibilan, ali sada je STABLE/read-only, tako da ni stariji otvoreni klijent ne pokreće obračun tijekom čitanja.
+
+Triggeri u istoj transakciji preračunavaju anomalije nakon unosa, relevantne izmjene, brisanja i vraćanja točenja te promjene praga odstupanja. To pokriva uredski unos, portal i postojeći povrat iz povijesti bez dodatnih klijentskih obračuna. Interni obračun koristi tvrtku promijenjenog retka, materijalizira rezultat jednom, uklanja zastarjele anomalije i ažurira samo stvarno promijenjene rezultate. Oznake „riješeno” postojećih anomalija ostaju sačuvane. Neuspješan obračun vraća cijelu promjenu podataka, umjesto spremanja netočnog stanja.
+
+U **Vozila → odabrano vozilo → Gorivo** korisnik s pravom uređivanja vozila ima gumb **Ponovno izračunaj anomalije**, koji namjerno preračunava sva vozila njegove tvrtke i obavještava prikaze da ponovno pročitaju rezultate. Migracija ne pokreće početni obračun: postojeći spremljeni rezultati ostaju, a za usklađivanje cijele ranije evidencije nakon nadogradnje jednom ručno pokrenuti taj gumb. Izračun, pragovi i tekstovi obavijesti ostaju isti; postojeća prava čitanja i označavanja riješenim nisu proširena.
+
+Provjera: `node --test tests/fuel-anomalies-readonly.test.mjs tests/fuel-mileage.test.mjs`. Testovi provjeravaju svih devet stvarnih API izvora bez dopuštenih upisnih/RPC metoda, otvaranje kartice i ručni gumb, PostgreSQL READ ONLY transakciju za čitanje i stari RPC, jednaku formulu kao prije, unos iz portala, izmjene/brisanje/povrat, prag, tvrtke/prava i rollback pri grešci.
+
 ### Provjera ovlasti bez globalnog ponovnog učitavanja
 
 AuthContext i dalje provjerava profil, tvrtku i ovlasti svakih 60 sekundi dok je stranica vidljiva te pri povratku na stranicu. Nepromijenjeni podaci zadržavaju reference profila, tvrtke i prava; usporedba ne ovisi o redoslijedu ključeva objekata ili redoslijedu redaka prava. Time ostaje stabilna i referenca `canAccess`, pa sama provjera ovlasti ne pokreće ponovno učitavanje obavijesti i bočnih brojača niti njihovih lista gradilišta, naloga, vozila i troškova. Stvarne promjene prava, postavki tvrtke i uloga i dalje se primjenjuju; greška provjere i odjava i dalje uklanjaju pristup. Navigacija i postojeći namjenski timeri osvježavanja ostaju nepromijenjeni.

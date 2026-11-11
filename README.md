@@ -2,6 +2,14 @@
 
 ## Provjere prije objave
 
+### Trajne poslovne greške bez PostgREST retry petlje
+
+Nakon prethodnih migracija primijeniti `supabase/migrations/20261110690000_poslovne_greske_bez_serialization_retry.sql`. Migracija u instaliranim PL/pgSQL funkcijama shema `public` i `private` zamjenjuje samo eksplicitne dodjele `ERRCODE = '40001'` s `P0001`. Inventar trenutačnih definicija sadrži 30 funkcija i 43 takve dodjele: zaštitu ekipe naloga, povrat iz povijesti, zaštite povezanih stavki i potvrdu dnevnih kilometara. Koristi se instalirana definicija funkcije kako se ne bi vratila starija verzija iz povijesne migracije. Uvjeti, poruke, potpisi, vlasnici, ovlasti, sigurnosne postavke i triggeri ostaju sačuvani. Stare migracije ostaju nepromijenjene.
+
+`40001` je rezerviran za stvarnu prolaznu serialization grešku; PostgREST 14 može beskonačno ponavljati transakciju ako ga poslovno pravilo ručno vraća. Stvarne PostgreSQL serialization greške i njihovi exception handleri nisu promijenjeni. Novi web-build nije potreban. Već aktivna retry petlja može preživjeti primjenu migracije: administrator mora svježe potvrditi PID, početak sesije, korisnika i problematični upit prije prekidanja isključivo tog zahtjeva; ne prekidati procese samo prema starom PID-u.
+
+Provjera: `node --test tests/business-error-codes.test.mjs tests/work-order-team-guard.test.mjs tests/work-order-team-history.test.mjs tests/work-order-republish.test.mjs tests/work-order-team-api.test.mjs`. Testovi izvršavaju migraciju u PostgreSQL-u, uspoređuju sva inventarizirana tijela i metapodatke prije/poslije te provjeravaju dopuštene promjene ekipe i trajni `P0001` pri zabranjenim promjenama bez djelomičnog spremanja. Lokalni SQL test nije zamjena za produkcijsku provjeru PostgREST odgovora i novih logova nakon primjene.
+
 ### Pasivno čitanje obavijesti i obračun anomalija goriva pri promjeni
 
 Primijeniti `supabase/migrations/20261110680000_gorivo_anomalije_samo_pri_promjeni.sql` i objaviti novi web-build. Svih devet izvora obavijesti koristi isključivo SELECT: gradilišta, djelatnici, vozila, rokovi, fakture, dokumenti djelatnika/vozila, prijave vozila i spremljene otvorene anomalije. Otvaranje dashboarda, obavijesti, bočnih brojača ili modula Vozila ne obračunava niti upisuje anomalije. Stari RPC `refresh_vozila_gorivo_anomalije` ostaje kompatibilan, ali sada je STABLE/read-only, tako da ni stariji otvoreni klijent ne pokreće obračun tijekom čitanja.

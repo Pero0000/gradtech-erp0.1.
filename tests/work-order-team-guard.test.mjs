@@ -33,6 +33,17 @@ test('work-order team membership cannot change after execution or recorded time'
   `);
   await db.exec(migration);
   await db.exec(migration);
+  const permanentErrors = readFileSync(new URL(
+    '../supabase/migrations/20261110690000_poslovne_greske_bez_serialization_retry.sql',
+    import.meta.url,
+  ), 'utf8');
+  await db.exec(permanentErrors);
+  await db.exec(permanentErrors);
+  const permanentTeamError = (reason) => {
+    assert.equal(reason.code, 'P0001');
+    assert.match(reason.message, /Ekipa se ne može mijenjati/);
+    return true;
+  };
   const order = '00000000-0000-0000-0000-000000000001';
   const worker = '00000000-0000-0000-0000-000000000002';
   const replacement = '00000000-0000-0000-0000-000000000003';
@@ -50,11 +61,11 @@ test('work-order team membership cannot change after execution or recorded time'
   await db.query("UPDATE public.radni_nalozi SET status='u_tijeku',mobile_status='u_tijeku' WHERE id=$1", [order]);
   await assert.rejects(
     db.query('DELETE FROM public.radni_nalozi_radnici WHERE nalog_id=$1 AND radnik_id=$2', [order, worker]),
-    /Ekipa se ne može mijenjati/,
+    permanentTeamError,
   );
   await assert.rejects(
     db.query('INSERT INTO public.radni_nalozi_radnici(nalog_id,radnik_id) VALUES ($1,$2)', [order, replacement]),
-    /Ekipa se ne može mijenjati/,
+    permanentTeamError,
   );
   assert.equal((await db.query('SELECT count(*)::int AS count FROM public.radni_nalozi_radnici WHERE nalog_id=$1', [order])).rows[0].count, 1);
 
@@ -62,16 +73,34 @@ test('work-order team membership cannot change after execution or recorded time'
   await db.query('UPDATE public.radni_nalozi_radnici SET mobile_started_at=now() WHERE nalog_id=$1 AND radnik_id=$2', [order, worker]);
   await assert.rejects(
     db.query('DELETE FROM public.radni_nalozi_radnici WHERE nalog_id=$1 AND radnik_id=$2', [order, worker]),
-    /Ekipa se ne može mijenjati/,
+    permanentTeamError,
   );
   await db.query('UPDATE public.radni_nalozi_radnici SET mobile_started_at=NULL WHERE nalog_id=$1 AND radnik_id=$2', [order, worker]);
   await db.query("INSERT INTO public.radno_vrijeme(nalog_id,sati) VALUES ($1,8)", [order]);
   await assert.rejects(
     db.query('DELETE FROM public.radni_nalozi_radnici WHERE nalog_id=$1 AND radnik_id=$2', [order, worker]),
-    /Ekipa se ne može mijenjati/,
+    permanentTeamError,
   );
 
   await db.query('DELETE FROM public.radno_vrijeme WHERE nalog_id=$1', [order]);
+  for (const [status, mobileStatus] of [
+    ['zavrsen', 'odobren'], ['otkazan', 'nije_poslan'], ['otvoren', 'predan'],
+  ]) {
+    await db.query('UPDATE public.radni_nalozi SET status=$2,mobile_status=$3 WHERE id=$1', [order, status, mobileStatus]);
+    await assert.rejects(
+      db.query('DELETE FROM public.radni_nalozi_radnici WHERE nalog_id=$1', [order]),
+      permanentTeamError,
+    );
+    await assert.rejects(
+      db.query('INSERT INTO public.radni_nalozi_radnici(nalog_id,radnik_id) VALUES ($1,$2)', [order, replacement]),
+      permanentTeamError,
+    );
+    await assert.rejects(
+      db.query('UPDATE public.radni_nalozi_radnici SET radnik_id=$3 WHERE nalog_id=$1 AND radnik_id=$2', [order, worker, replacement]),
+      permanentTeamError,
+    );
+    await db.query('UPDATE public.radni_nalozi_radnici SET vrijeme_do=$3 WHERE nalog_id=$1 AND radnik_id=$2', [order, worker, '16:00']);
+  }
   await db.query('DELETE FROM public.radni_nalozi WHERE id=$1', [order]);
   assert.equal((await db.query('SELECT count(*)::int AS count FROM public.radni_nalozi_radnici WHERE nalog_id=$1', [order])).rows[0].count, 0,
     'Cascading order deletion remains available to the protected parent recovery flow');

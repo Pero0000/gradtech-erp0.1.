@@ -70,6 +70,10 @@ async function setup(t) {
   await db.exec(guardMigration);
   await db.exec(historyMigration);
   await db.exec(historyMigration);
+  await db.exec(readFileSync(new URL(
+    '../supabase/migrations/20261110690000_poslovne_greske_bez_serialization_retry.sql',
+    import.meta.url,
+  ), 'utf8'));
   await db.exec('SET ROLE authenticated');
   return db;
 }

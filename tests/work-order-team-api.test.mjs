@@ -54,6 +54,24 @@ const input = {
   prioritet: 'srednji', rok: null, radnik_ids: ['replacement'],
 };
 
+test('pre-work team save and republishing use one RPC and surface its failure without partial client writes', async () => {
+  const failure = new Error('Spremanje ekipe nije uspjelo');
+  const loaded = loadApi({
+    order: { status: 'otvoren', mobile_status: 'nije_poslan', poslovodja_id: 'worker' },
+    team: [{ radnik_id: 'worker', mobile_started_at: null, mobile_finished_at: null }],
+    hours: [],
+    rpcError: failure,
+  });
+  await assert.rejects(loaded.api.updateRadniNalog('order', { ...input, zakljucen: true }), /Spremanje ekipe nije uspjelo/);
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.calls.filter(([kind]) => kind === 'rpc'))), [
+    ['rpc', 'save_work_order_preparation', {
+      p_nalog_id: 'order', p_gradiliste_id: null, p_naslov: 'Nalog', p_opis: null,
+      p_status: 'otvoren', p_prioritet: 'srednji', p_rok: null,
+      p_radnik_ids: ['replacement'], p_zakljucen: true,
+    }],
+  ]);
+});
+
 test('work-order API blocks team changes before any writes when execution has started or hours exist', async () => {
   const started = loadApi({
     order: { status: 'otvoren', mobile_status: 'u_tijeku', poslovodja_id: null },

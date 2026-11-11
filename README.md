@@ -2,6 +2,12 @@
 
 ## Provjere prije objave
 
+### Provjera ovlasti bez globalnog ponovnog učitavanja
+
+AuthContext i dalje provjerava profil, tvrtku i ovlasti svakih 60 sekundi dok je stranica vidljiva te pri povratku na stranicu. Nepromijenjeni podaci zadržavaju reference profila, tvrtke i prava; usporedba ne ovisi o redoslijedu ključeva objekata ili redoslijedu redaka prava. Time ostaje stabilna i referenca `canAccess`, pa sama provjera ovlasti ne pokreće ponovno učitavanje obavijesti i bočnih brojača niti njihovih lista gradilišta, naloga, vozila i troškova. Stvarne promjene prava, postavki tvrtke i uloga i dalje se primjenjuju; greška provjere i odjava i dalje uklanjaju pristup. Navigacija i postojeći namjenski timeri osvježavanja ostaju nepromijenjeni.
+
+Objaviti novi web-build; SQL migracija nije potrebna. Provjera: `node --test tests/auth-refresh.test.mjs tests/auth-onboarding.test.mjs`. Regresijski test izvršava stvarne globalne podatkovne efekte iz aplikacije tijekom tri simulirane periodične provjere i provjerava da nema novih poziva poslovnih dohvata.
+
 ### Pomicanje datuma na Terminskom planu
 
 Kalendar se može povlačiti mišem ili prstom: lijevo prikazuje kasnije, desno ranije datume. Pomak prati širinu dana pri odabranom broju tjedana. Povlačenje ne mijenja rokove ni podatke gradilišta; običan klik i dalje otvara gradilište, a strelice i gumb za današnji datum ostaju dostupni. Okomito pomicanje na dodir ostaje omogućeno. Nova migracija nije potrebna. Provjera: `node --test tests/timeline-site-periods.test.mjs`.
@@ -41,6 +47,22 @@ Migracija ne mijenja stare sate, obračune ni iznose. Ranije konfliktne naloge i
 Primijeniti `supabase/migrations/20261110630000_portal_predaja_bez_potvrde_strojeva.sql` nakon prethodnih migracija. Jednoparametarski `mobile_submit_nalog`, koji poziva portal, više ne zahtijeva uklonjenu zasebnu potvrdu **Strojevi**. Strojevi i upis njihovih sati ostaju na nalogu. Djelatnici označeni s **0 sati** ne trebaju početak i završetak osnovne smjene za predaju; potvrda vremena ekipe ostaje obvezna. Ne dodaju se izmišljene potvrde na postojeće naloge. Ostaju provjere dodjele/prava, statusa, poslova, fotografija, materijala, alata, primjenjivih dodatnih radova, ENC-a i kilometara. Predaja i dalje šalje nalog u ured (`mobile_status = predan`), bez završnog zaključivanja ili obračuna.
 
 Ciljano: `node --test tests/work-order-time-entries.test.mjs`. Nakon primjene u portalu predati nalog bez potvrde strojeva, ponoviti s djelatnikom označenim s 0 sati i provjeriti da izostavljena vidljiva obvezna potvrda i dalje blokira predaju. Za ovaj popravak nije potrebna promjena web-koda; dovoljan je SQL popravak nakon prethodnih migracija.
+
+### Odustajanje od zaključenog naloga u jednom koraku
+
+Primijeniti `supabase/migrations/20261110660000_otkazivanje_zakljucenog_naloga.sql` nakon prethodnih migracija i objaviti novi web-build. **Odustani od naloga** dostupan je i za završene naloge na popisu Radnih naloga. U dnevnom rasporedu ista radnja na završenom nalogu otkazuje ga umjesto brisanja; postojeće odustajanje od nezavršenog nacrta i dalje koristi zaštićeno brisanje. Odabir statusa **Otkazan** u uređivanju prolazi istu provjeru baze.
+
+Promjena statusa, uklanjanje obračunatih sati/troškova rada i opreme, uklanjanje kilometarskih redova tog naloga i odvezivanje rasporeda odvijaju se u istoj transakciji. Postojeće funkcije obračuna bilježe snimke u povijest, a aktivnost naloga bilježi otkazivanje. Ako nedostaju potrebna prava na naloge, radno vrijeme ili troškove, odnosno bilo koji dio ne uspije, sve se poništava. Kilometarski iznosi drugih naloga ostaju nepromijenjeni (ne raspodjeljuju se ponovno); izvorna vremena, očitanja, dokumenti, materijal i dovršeni zadaci ostaju na otkazanom nalogu. Stanje kilometraže vozila ne spušta se. Nalog se ne mora prethodno ponovno otvoriti.
+
+Ciljano: `node --test tests/work-order-settlement.test.mjs tests/work-order-schedule-cancel.test.mjs`. Na testnoj bazi potvrditi odustajanje iz oba prikaza, očuvanje ostalih naloga i odbijanje bez potrebnih prava.
+
+### Promjena ekipe prije rada i ponovno slanje
+
+Primijeniti `supabase/migrations/20261110670000_nalog_ekipa_ponovno_slanje.sql` i objaviti novi web-build. Nakon **Vrati u nacrt**, dodavanja/uklanjanja djelatnika i **Zaključi nalog**, ažurira se isti nalog, ne stvara kopija. Nacrt prikazuje točno spremljenu ekipu: djelatnici vozila ostaju ponuđeni za odabir, ali se ne dodaju automatski natrag. Ekipa i ponovno slanje spremaju se u jednoj transakciji uz postojeći RLS. Poslovođa ostaje ako je još dodijeljen; jedini djelatnik automatski postaje poslovođa. Ako ukloniš poslovođu i ostane više djelatnika, spremi nacrt i u detaljima odaberi novog poslovođu prije slanja. Uklonjeni vozač više nije vozač naloga. Nakon početka rada ili evidentiranih sati izmjena ekipe i dalje je zabranjena.
+
+Portal pri redovitom osvježavanju popisa (do 30 sekundi u vidljivoj kartici) ili ručnom osvježavanju uklanja nedostupne naloge, prikazuje nalog novim djelatnicima i ponovno učitava otvorene detalje nakon promjene vremena slanja. Kasni odgovor starog učitavanja ne smije prepisati novu ekipu. Push obavijest šalje se postojećim mehanizmom nakon uspješne objave.
+
+Ciljano: `node --test tests/work-order-republish.test.mjs tests/work-order-team-api.test.mjs tests/work-order-team-guard.test.mjs`. Na testnim računima provjeriti uklonjenog, zadržanog i dodanog djelatnika, ponovno slanje istog ID-a te odbijanje izmjene nakon početka rada.
 
 ### Provjera kilometara naloga i dnevnog obračuna
 

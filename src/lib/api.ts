@@ -2912,6 +2912,26 @@ export async function updateRadniNalog(
     }
   }
 
+  if ((workersChanged || input.zakljucen !== undefined)
+    && !['u_tijeku', 'zavrsen', 'otkazan'].includes(currentOrder.status)
+    && !['u_tijeku', 'predan', 'odobren', 'zakljucen_bez_potvrde'].includes(currentOrder.mobile_status)
+    && !['u_tijeku', 'zavrsen', 'otkazan'].includes(input.status)) {
+    const { error } = await supabase.rpc('save_work_order_preparation', {
+      p_nalog_id: id,
+      p_gradiliste_id: input.gradiliste_id,
+      p_naslov: input.naslov,
+      p_opis: input.opis,
+      p_status: input.status,
+      p_prioritet: input.prioritet,
+      p_rok: input.rok,
+      p_radnik_ids: input.radnik_ids,
+      p_zakljucen: input.zakljucen ?? null,
+    });
+    if (error) throw error;
+    await syncNalogTroskovi(id);
+    return;
+  }
+
   if (input.zakljucen === true) {
     if (input.radnik_ids.length === 0) throw new Error('Dodijeli barem jednog djelatnika prije zaključivanja naloga.');
     const autoLeader = input.radnik_ids.length === 1;
@@ -2985,7 +3005,16 @@ export async function updateRadniNalog(
     if (resetError) throw resetError;
   }
 
-  await syncNalogTroskovi(id);
+  if (input.status !== 'otkazan') await syncNalogTroskovi(id);
+}
+
+export async function cancelRadniNalog(nalogId: string) {
+  const { error } = await supabase.from('radni_nalozi')
+    .update({ status: 'otkazan', bez_izvrsenja: false })
+    .eq('id', nalogId)
+    .select('id')
+    .single();
+  if (error) throw error;
 }
 
 export async function notifyLockedNalogWorkers(nalogId: string) {
@@ -3672,6 +3701,7 @@ export async function retryNalogKilometrazaSync(nalogId: string): Promise<void> 
 
 export interface MobileRadniNalog {
   id: string;
+  zakljucen_at?: string | null;
   broj: string;
   gradiliste_naziv: string | null;
   gradiliste_adresa: string | null;

@@ -6,6 +6,20 @@ import type { AppProfile } from '@/auth/profile';
 import { type AppModule, type ModuleAction, type ModulePermissions } from '@/auth/permissions';
 import { normalizeTvrtkaPostavke, setCurrentCompany, type Tvrtka } from '@/lib/company';
 
+function sameAccessData(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => sameAccessData(value, right[index]));
+  }
+  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return false;
+  const leftEntries = Object.entries(left);
+  const rightEntries = new Map(Object.entries(right));
+  return leftEntries.length === rightEntries.size
+    && leftEntries.every(([key, value]) => rightEntries.has(key) && sameAccessData(value, rightEntries.get(key)));
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<AppProfile | null>(null);
@@ -17,6 +31,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [company, setCompany] = useState<Tvrtka | null>(null);
   const accessVersion = useRef(0);
   const currentUserId = useRef<string | null>(null);
+  const currentCompany = useRef<Tvrtka | null>(null);
+
+  const updateCompany = useCallback((next: Tvrtka | null) => {
+    if (sameAccessData(currentCompany.current, next)) return;
+    setCurrentCompany(next);
+    currentCompany.current = next;
+    setCompany(next);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -27,8 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         accessVersion.current += 1;
         setProfile(null);
         setPermissions({});
-        setCompany(null);
-        setCurrentCompany(null);
+        updateCompany(null);
         setAccessLoading(false);
         setAccessError(null);
         if (!nextSession) setRecoveryMode(false);
@@ -57,7 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       active = false;
       listener.subscription.unsubscribe();
     };
-  }, []);
+  }, [updateCompany]);
 
   const refreshAccess = useCallback(async () => {
     const version = ++accessVersion.current;
@@ -65,8 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(null);
       setPermissions({});
       setAccessError(null);
-      setCompany(null);
-      setCurrentCompany(null);
+      updateCompany(null);
       setAccessLoading(false);
       return;
     }
@@ -114,21 +134,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
       if (version !== accessVersion.current) return;
-      setCurrentCompany(companyWithSettings);
-      setCompany(companyWithSettings);
-      setProfile(profileData as AppProfile);
-      setPermissions(nextPermissions);
+      updateCompany(companyWithSettings);
+      setProfile((current) => sameAccessData(current, profileData) ? current : profileData);
+      setPermissions((current) => sameAccessData(current, nextPermissions) ? current : nextPermissions);
     } catch (error) {
       if (version !== accessVersion.current) return;
       setProfile(null);
-      setCompany(null);
-      setCurrentCompany(null);
+      updateCompany(null);
       setPermissions({});
       setAccessError(error instanceof Error ? error.message : 'Ovlasti korisnika se nisu mogle učitati.');
     } finally {
       if (version === accessVersion.current) setAccessLoading(false);
     }
-  }, [session?.user.id]);
+  }, [session?.user.id, updateCompany]);
 
   useEffect(() => {
     if (!sessionReady) return;
@@ -152,11 +170,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
     setProfile(null);
-    setCompany(null);
-    setCurrentCompany(null);
+    updateCompany(null);
     setPermissions({});
     setRecoveryMode(false);
-  }, []);
+  }, [updateCompany]);
 
   const updatePassword = useCallback(async (password: string) => {
     const { error } = await supabase.auth.updateUser({ password, data: { gradtech_set_password: false } });

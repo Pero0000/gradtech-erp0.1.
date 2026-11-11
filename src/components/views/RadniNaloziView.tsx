@@ -621,7 +621,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                     >
                       <Pencil className="h-4 w-4" />
                     </button>
-                    {n.status !== 'zavrsen' && n.status !== 'otkazan' && (
+                    {n.status !== 'otkazan' && (
                       <button
                         type="button"
                         onClick={() => setCancelTarget(n)}
@@ -911,7 +911,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
         onClose={() => setCancelTarget(null)}
         onConfirm={handleCancelOrder}
         title="Odustati od radnog naloga?"
-        message={`Nalog ${cancelTarget?.broj ?? ''} bit će označen kao otkazan i odvezan od dnevnog rasporeda kako bi se za tu stavku mogao otvoriti novi nalog. Otkazani nalog i povezani podaci ostaju sačuvani u povijesti.`}
+        message={`Nalog ${cancelTarget?.broj ?? ''} bit će označen kao otkazan i odvezan od dnevnog rasporeda. Uklonit će se njegov obračun sati, rada/opreme i kilometarski troškovi, bez mijenjanja troškova drugih naloga. Nalog, izvorna vremena, očitanja i dovršeni zadaci ostaju sačuvani; obračun se bilježi u povijesti. Nije potrebno prethodno ponovno otvaranje.`}
         confirmLabel="Otkazati nalog"
       />
       <ConfirmDialog

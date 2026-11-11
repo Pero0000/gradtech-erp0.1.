@@ -2,8 +2,42 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
+import vm from 'node:vm';
+import ts from 'typescript';
 
 const migration = readFileSync(new URL('../supabase/migrations/20261110430000_nalozi_radnici_brisanje_fk.sql', import.meta.url), 'utf8');
+
+test('schedule cancels a closed order without deleting it and keeps the editor open on failure', async () => {
+  const source = readFileSync(new URL('../src/components/views/RasporedView.tsx', import.meta.url), 'utf8');
+  const handler = source.slice(source.indexOf('const discardNalog = async'), source.indexOf('const saveNalog = async'));
+  for (const status of ['zavrsen', 'novi']) {
+    for (const failure of [false, true]) {
+      const calls = [];
+      const operation = async (type) => {
+        calls.push(type);
+        if (failure) throw new Error('Nedostaju prava za obračun');
+      };
+      const context = {
+        nalogForm: { nalogId: 'order', status }, selectedDate: '2026-11-11',
+        setNalogSaving: () => {}, setError: (message) => { if (message) calls.push(message); },
+        cancelRadniNalog: () => operation('cancel'),
+        discardRasporedNalog: () => operation('delete'),
+        closeNalog: () => calls.push('close'),
+        loadDay: async () => calls.push('load'),
+        errMsg: (reason) => reason.message,
+      };
+      vm.createContext(context);
+      vm.runInContext(ts.transpileModule(`${handler}\nthis.discard = discardNalog;`, {
+        compilerOptions: { target: ts.ScriptTarget.ES2022 },
+      }).outputText, context);
+      await context.discard();
+      assert.deepEqual(calls, [
+        status === 'zavrsen' ? 'cancel' : 'delete',
+        ...(failure ? ['Nedostaju prava za obračun'] : ['close', 'load']),
+      ]);
+    }
+  }
+});
 
 test('failed discard leaves the schedule editor open and surfaces the error', () => {
   const source = readFileSync(new URL('../src/components/views/RasporedView.tsx', import.meta.url), 'utf8');

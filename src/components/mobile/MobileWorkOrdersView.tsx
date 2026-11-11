@@ -211,6 +211,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
   const [personalCarAccessError, setPersonalCarAccessError] = useState<string | null>(null);
   const [personalCarAccessRetry, setPersonalCarAccessRetry] = useState(0);
   const selectedIdRef = useRef(selectedId);
+  const detailsRequest = useRef(0);
   selectedIdRef.current = selectedId;
 
   const selected = orders.find((order) => order.id === selectedId) ?? null;
@@ -322,6 +323,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
   }, []);
 
   const loadDetails = useCallback(async (order: MobileRadniNalog, showLoading = true) => {
+    const request = ++detailsRequest.current;
     if (showLoading) {
       setLoading(true);
       setError(null);
@@ -362,9 +364,6 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
       const routesResult = await fetchMobileNalogVoznje(order.id)
         .then((voznje) => ({ voznje, error: null as unknown }))
         .catch((reason: unknown) => ({ voznje: [] as MobileNalogVoznja[], error: reason }));
-      setRouteLoadError(routesResult.error
-        ? errorMessage(routesResult.error, 'Evidenciju vožnji nije moguće učitati.')
-        : null);
       const [alatiResult, strojeviResult] = await Promise.allSettled([
         fetchOprema('alat'),
         fetchOprema('stroj'),
@@ -379,11 +378,6 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
           ? `strojeve: ${errorMessage(strojeviResult.reason, 'nije moguće učitati')}`
           : null,
       ].filter((message): message is string => message !== null);
-      setEquipmentLoadError(
-        equipmentErrors.length > 0
-          ? `Popis opreme nije moguće učitati (${equipmentErrors.join('; ')}). Nalog je otvoren, ali opremu trenutačno nije moguće odabrati.`
-          : null,
-      );
       const { foto, error: photoError } = await photoRequest;
       const { dokumenti, error: documentError } = await documentRequest;
       const siteDocuments = await (nalog.gradiliste_id
@@ -393,6 +387,15 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         (reason: unknown) => ({ documents: [] as GradilisteDokument[], error: reason }),
       );
 
+      if (request !== detailsRequest.current || selectedIdRef.current !== order.id) return;
+      setRouteLoadError(routesResult.error
+        ? errorMessage(routesResult.error, 'Evidenciju vožnji nije moguće učitati.')
+        : null);
+      setEquipmentLoadError(
+        equipmentErrors.length > 0
+          ? `Popis opreme nije moguće učitati (${equipmentErrors.join('; ')}). Nalog je otvoren, ali opremu trenutačno nije moguće odabrati.`
+          : null,
+      );
       setDetails({
         gradilisteId: nalog.gradiliste_id,
         vozacId: nalog.vozac_id,
@@ -456,10 +459,11 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         encStanje: nalog.enc_stanje?.toString() ?? '',
       });
     } catch (reason) {
+      if (request !== detailsRequest.current || selectedIdRef.current !== order.id) return;
       setError(`Detalje radnog naloga nije moguće ${showLoading ? 'učitati' : 'osvježiti'}. ${errorMessage(reason, 'Pokušaj ponovno.')}`);
       if (showLoading) setDetails(null);
     } finally {
-      if (showLoading) setLoading(false);
+      if (showLoading && request === detailsRequest.current) setLoading(false);
     }
   }, []);
 
@@ -477,9 +481,13 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     }
   };
 
+  const selectedPublication = orders.find((order) => order.id === selectedId)?.zakljucen_at;
   useEffect(() => {
+    const requestCounter = detailsRequest;
     if (!selectedId) {
+      detailsRequest.current++;
       setDetails(null);
+      setLoading(false);
       return;
     }
     let active = true;
@@ -496,8 +504,8 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
       .catch((reason: unknown) => {
         if (active) setError(errorMessage(reason, 'Radni nalog nije moguće osvježiti.'));
       });
-    return () => { active = false; };
-  }, [selectedId, loadDetails]);
+    return () => { active = false; requestCounter.current++; };
+  }, [selectedId, selectedPublication, loadDetails]);
 
   const runAction = async (action: () => Promise<void>, success?: string) => {
     setWorking(true);

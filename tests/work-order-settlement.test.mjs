@@ -758,4 +758,37 @@ test('settlement migration atomically replaces hours and operating costs, restor
     /već vraćena/,
   );
   await db.exec('RESET ROLE');
+
+  await db.exec(`
+    CREATE TABLE public.dnevni_raspored_gradilista (nalog_id uuid);
+    INSERT INTO public.dnevni_raspored_gradilista VALUES ('00000000-0000-0000-0000-000000000005');
+    UPDATE public.radni_nalozi SET status='zavrsen' WHERE id='00000000-0000-0000-0000-000000000005';
+    INSERT INTO public.radni_nalozi (id,company_id,broj,status)
+    VALUES ('00000000-0000-0000-0000-000000000099','00000000-0000-0000-0000-000000000001','RN-other','zavrsen');
+  `);
+  const preservedDaily = { ...dailyCosts[0], nalog_id: '00000000-0000-0000-0000-000000000099', opis: 'Kilometri: drugi nalog', iznos: 7 };
+  await db.query('SELECT public.replace_daily_vehicle_km_settlement($1,$2)', ['2026-11-05', JSON.stringify([dailyCosts[0], preservedDaily])]);
+  await db.exec(read('../supabase/migrations/20261110560000_odvezivanje_otkazanog_naloga_iz_rasporeda.sql'));
+  await db.exec(read('../supabase/migrations/20261110660000_otkazivanje_zakljucenog_naloga.sql'));
+  const beforeCancel = (await db.query("SELECT km_pocetak,km_kraj,napomena FROM public.radni_nalozi WHERE broj='RN-1'")).rows[0];
+  const tasksBeforeCancel = (await db.query('SELECT * FROM public.gradiliste_zadaci ORDER BY id')).rows;
+  await db.exec("UPDATE public.app_user_permissions SET can_edit=false WHERE module='troskovi'");
+  await assert.rejects(db.exec("UPDATE public.radni_nalozi SET status='otkazan' WHERE broj='RN-1'"), /prava uređivanja/);
+  assert.equal((await db.query("SELECT status FROM public.radni_nalozi WHERE broj='RN-1'")).rows[0].status, 'zavrsen');
+  assert.notEqual((await db.query('SELECT nalog_id FROM public.dnevni_raspored_gradilista')).rows[0].nalog_id, null);
+  assert.ok((await db.query("SELECT count(*)::int count FROM public.radno_vrijeme WHERE nalog_id='00000000-0000-0000-0000-000000000005'")).rows[0].count > 0);
+  await db.exec("UPDATE public.app_user_permissions SET can_edit=true WHERE module='troskovi'");
+  await db.exec('SET ROLE authenticated');
+  await db.exec("UPDATE public.radni_nalozi SET status='otkazan' WHERE broj='RN-1'");
+  const cancelled = (await db.query("SELECT status,km_pocetak,km_kraj,napomena FROM public.radni_nalozi WHERE broj='RN-1'")).rows[0];
+  assert.deepEqual(cancelled, { ...beforeCancel, status: 'otkazan' });
+  assert.equal((await db.query("SELECT count(*)::int count FROM public.radno_vrijeme WHERE nalog_id='00000000-0000-0000-0000-000000000005'")).rows[0].count, 0);
+  assert.equal((await db.query("SELECT count(*)::int count FROM public.troskovi WHERE nalog_id='00000000-0000-0000-0000-000000000005'")).rows[0].count, 0);
+  assert.equal((await db.query("SELECT iznos::int amount FROM public.troskovi WHERE nalog_id='00000000-0000-0000-0000-000000000099'")).rows[0].amount, 7);
+  await db.exec('RESET ROLE');
+  assert.equal((await db.query('SELECT nalog_id FROM public.dnevni_raspored_gradilista')).rows[0].nalog_id, null);
+  assert.deepEqual((await db.query('SELECT * FROM public.gradiliste_zadaci ORDER BY id')).rows, tasksBeforeCancel);
+  assert.equal((await db.query("SELECT count(*)::int count FROM public.mobile_work_order_audit WHERE action='office_order_cancelled'")).rows[0].count, 1);
+  await db.exec("UPDATE public.radni_nalozi SET status='otkazan' WHERE broj='RN-1'");
+  assert.equal((await db.query("SELECT count(*)::int count FROM public.mobile_work_order_audit WHERE action='office_order_cancelled'")).rows[0].count, 1);
 });

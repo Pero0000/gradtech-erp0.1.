@@ -27,6 +27,7 @@ import {
   fetchZakljuceniNalozi,
   fetchRadniNalozi,
   updateRadniNalog,
+  cancelRadniNalog,
   notifyLockedNalogWorkers,
   addRasporedOstalo,
   copyLatestDnevniRaspored,
@@ -873,7 +874,6 @@ export function RasporedView() {
       const carIds = workerAssignments
         .filter((w) => w.vozilo_id === siteAssignments.find((s) => s.id === assignmentId)?.vozilo_id)
         .map((w) => w.radnik_id);
-      const isDraft = !nalog.zakljucen_at;
       const linkedZadaci = (nalog.gradiliste_id
         ? (await fetchGradilisteZadaci(nalog.gradiliste_id).catch(() => [] as GradilisteZadatak[]))
         : await fetchNalogZadaci(nalogId).catch(() => [] as GradilisteZadatak[])
@@ -891,7 +891,7 @@ export function RasporedView() {
         status: nalog.status,
         prioritet: nalog.prioritet,
         rok: nalog.rok ?? '',
-        radnik_ids: isDraft ? [...new Set([...savedIds, ...carIds])] : savedIds,
+        radnik_ids: savedIds,
         radnik_options: [...new Set([...savedIds, ...carIds])],
         zadatak_ids: linkedZadaci.map((z) => z.id),
         novi_zadaci: [],
@@ -934,7 +934,8 @@ export function RasporedView() {
     setNalogSaving(true);
     setError(null);
     try {
-      await discardRasporedNalog(nalogForm.nalogId);
+      if (nalogForm.status === 'zavrsen') await cancelRadniNalog(nalogForm.nalogId);
+      else await discardRasporedNalog(nalogForm.nalogId);
       closeNalog();
       await loadDay(selectedDate);
     } catch (e) {
@@ -1011,7 +1012,6 @@ export function RasporedView() {
       await loadDay(selectedDate);
     } catch (e) {
       setError(errMsg(e, 'Greška pri spremanju naloga'));
-      closeNalog();
     } finally {
       setNalogSaving(false);
     }
@@ -1867,7 +1867,11 @@ export function RasporedView() {
               <div className="mr-auto flex items-center gap-2">
                 {confirmDiscard ? (
                   <>
-                    <span className="text-xs text-slate-600">Obrisati nalog {nalogForm.broj}? Povrat 30 dana u Radnim nalozima.</span>
+                    <span className="text-xs text-slate-600">
+                      {nalogForm.status === 'zavrsen'
+                        ? `Otkazati nalog ${nalogForm.broj} i ukloniti njegov obračun sati i troškova? Nalog i izvorni podaci ostaju u povijesti.`
+                        : `Obrisati nalog ${nalogForm.broj}? Povrat 30 dana u Radnim nalozima.`}
+                    </span>
                     <button
                       onClick={() => void discardNalog()}
                       disabled={nalogSaving}

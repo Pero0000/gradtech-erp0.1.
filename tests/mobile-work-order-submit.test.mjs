@@ -137,7 +137,7 @@ test('site document query filters linked IDs before requesting any Storage URLs'
     select() { return this; },
     eq(...args) { calls.push(['eq', ...args]); return this; },
     in(...args) { calls.push(['in', ...args]); return this; },
-    async order() { return { data: [{ id: 'linked-doc', putanja: 'linked.pdf', thumbnail_path: null }], error: null }; },
+    async order() { return { data: [{ id: 'linked-doc', vrsta: 'dokument', putanja: 'linked.pdf', thumbnail_path: null }], error: null }; },
   };
   const module = { exports: {} };
   vm.runInNewContext(apiJs, {

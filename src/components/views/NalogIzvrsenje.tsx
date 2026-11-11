@@ -3,6 +3,7 @@ import { useAuth } from '@/auth/useAuth';
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from 'react';
 import { useDeferredFiles } from '@/lib/useDeferredFiles';
 import { createPortal } from 'react-dom';
+import { PrivateImage, PrivateFileLink } from '@/components/ui/PrivateImage';
 import { Camera, Check, ChevronLeft, ChevronRight, Clock, FileText, Gauge, Hammer, Package, Plus, Trash2, X, ListChecks, Wrench } from 'lucide-react';
 import type { GradilisteZadatak, Oprema, RadniNalog, ZadatakVrsta } from '@/types';
 import { zadatakVrsta } from '@/types';
@@ -1276,7 +1277,7 @@ export function NalogIzvrsenje({
               <label key={d.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-sky-100 bg-white px-3 py-1.5 text-sm">
                 <input type="checkbox" checked={gradLinked.includes(d.id)} onChange={(e) => void toggleGradDok(d.id, e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-sky-600" />
                 {d.vrsta === 'slika' ? <img loading="lazy" src={d.thumbnailUrl} alt="" className="h-6 w-6 rounded object-cover" /> : <FileText className="h-4 w-4 flex-shrink-0 text-slate-400" />}
-                <a href={d.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-sky-700 hover:underline">{d.naziv}</a>
+                <PrivateFileLink path={d.putanja} className="min-w-0 flex-1 truncate text-left text-sky-700 hover:underline">{d.naziv}</PrivateFileLink>
               </label>
             ))}
           </div>
@@ -1377,9 +1378,8 @@ export function NalogIzvrsenje({
             </button>
           )}
           <div className="flex max-h-full max-w-full flex-col items-center gap-3" onClick={(event) => event.stopPropagation()}>
-            <img
-              loading="lazy"
-              src={selectedFoto.url}
+            <PrivateImage
+              path={selectedFoto.putanja}
               alt={selectedFoto.naziv ?? 'Fotografija radnog naloga'}
               className="max-h-[82dvh] max-w-[85vw] object-contain"
             />

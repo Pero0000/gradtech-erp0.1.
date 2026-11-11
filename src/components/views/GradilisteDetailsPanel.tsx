@@ -5,6 +5,7 @@ import { useAuth } from '@/auth/useAuth';
 import { DeadlineChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
 import { companyStorage, getUniversalHourlyRate } from '@/lib/company';
 import { downloadFile } from '@/lib/downloadFile';
+import { PrivateImage } from '@/components/ui/PrivateImage';
 import {
   Calendar,
   Camera,
@@ -274,7 +275,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     setDownloadingPhotoId(foto.id);
     setError(null);
     try {
-      await downloadFile(foto.url, foto.naziv ?? `${foto.nalog_broj}-${foto.id}.jpg`);
+      await downloadFile(await getPrivateFileUrl(foto.putanja), foto.naziv ?? `${foto.nalog_broj}-${foto.id}.jpg`);
     } catch (reason) {
       setError(errText(reason, 'Greška pri preuzimanju fotografije.'));
     } finally {
@@ -323,7 +324,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
       const { default: JSZip } = await import('jszip');
       const zip = new JSZip();
       await Promise.all(sortedRadniNalogFoto.map(async (foto, index) => {
-        const response = await fetch(foto.url);
+        const response = await fetch(await getPrivateFileUrl(foto.putanja));
         if (!response.ok) throw new Error(`Preuzimanje fotografije naloga ${foto.nalog_broj} nije uspjelo.`);
         const baseName = `${foto.naziv ?? `fotografija-${index + 1}`}`
           .replace(/[^\p{L}\p{N}_. -]/gu, '_');
@@ -1852,9 +1853,8 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
-            <img
-              loading="lazy"
-              src={sortedRadniNalogFoto[activePhotoIndex].url}
+            <PrivateImage
+              path={sortedRadniNalogFoto[activePhotoIndex].putanja}
               alt={sortedRadniNalogFoto[activePhotoIndex].naziv ?? `Fotografija naloga ${sortedRadniNalogFoto[activePhotoIndex].nalog_broj}`}
               className="mx-auto max-h-[78vh] max-w-full rounded-lg object-contain"
             />

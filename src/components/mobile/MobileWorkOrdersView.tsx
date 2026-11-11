@@ -43,6 +43,7 @@ import {
   type NalogStavka,
 } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
+import { PrivateFileLink } from '@/components/ui/PrivateImage';
 import { useDeferredFiles } from '@/lib/useDeferredFiles';
 import type { GradilisteZadatak, Oprema, ZadatakVrsta } from '@/types';
 import { zadatakVrsta } from '@/types';
@@ -1207,10 +1208,10 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                       {documentError != null && <p role="alert">{errorMessage(documentError, String(documentError))}</p>}
                       {photoFiles.error != null && <p role="alert">{errorMessage(photoFiles.error, 'Fotografije nije moguće učitati.')}</p>}
                       <ReviewBlock title="Prilozi">
-                        {details.dokumenti.length ? details.dokumenti.map((document) => <a key={document.id} href={document.url} target="_blank" rel="noreferrer" className="block min-h-10 py-2 text-sm font-medium text-sky-700 underline">{document.naziv}</a>) : <p className="text-sm text-slate-500">Nema priloženih dokumenata.</p>}
+                        {details.dokumenti.length ? details.dokumenti.map((document) => <PrivateFileLink key={document.id} path={document.putanja} className="block min-h-10 py-2 text-left text-sm font-medium text-sky-700 underline">{document.naziv}</PrivateFileLink>) : <p className="text-sm text-slate-500">Nema priloženih dokumenata.</p>}
                         {details.foto.length > 0 && (
                           <div className="mt-2 grid min-w-0 grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 xl:grid-cols-2 2xl:grid-cols-4">
-                            {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" className="block min-w-0 overflow-hidden rounded-lg"><img loading="lazy" src={photo.thumbnailUrl} alt={photo.naziv ?? 'Slika naloga'} className="aspect-square w-full object-cover" /></a>)}
+                            {details.foto.map((photo) => <PrivateFileLink key={photo.id} path={photo.putanja} className="block min-w-0 overflow-hidden rounded-lg"><img loading="lazy" src={photo.thumbnailUrl} alt={photo.naziv ?? 'Slika naloga'} className="aspect-square w-full object-cover" /></PrivateFileLink>)}
                           </div>
                         )}
                       </ReviewBlock>
@@ -1273,7 +1274,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                             </button>
                             {documentError != null && <p role="alert">{errorMessage(documentError, String(documentError))}</p>}
                             {details.dokumenti.length
-                              ? details.dokumenti.map((document) => <a key={document.id} href={document.url} target="_blank" rel="noreferrer" className="block min-h-10 py-2 text-sm font-medium text-sky-700 underline">{document.naziv}</a>)
+                              ? details.dokumenti.map((document) => <PrivateFileLink key={document.id} path={document.putanja} className="block min-h-10 py-2 text-left text-sm font-medium text-sky-700 underline">{document.naziv}</PrivateFileLink>)
                               : <p className="text-sm text-slate-500">Nema priloženih dokumenata.</p>}
                           </WorkOrderPanel>
                         </WorkOrderPanel>
@@ -1346,10 +1347,12 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                       {photoFiles.error != null && <p role="alert">{errorMessage(photoFiles.error, 'Fotografije nije moguće učitati.')}</p>}
                       {details.foto.length > 0 && (
                         <div className="grid min-w-0 grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 xl:grid-cols-2 2xl:grid-cols-3">
-                          {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" className="block min-w-0 overflow-hidden rounded-lg"><img loading="lazy" src={photo.thumbnailUrl} alt={photo.naziv ?? 'Fotografija naloga'} onError={() => {
-                            failedPhotoPaths.current.add(photo.thumbnail_path ?? photo.putanja);
+                          {details.foto.map((photo) => <PrivateFileLink key={photo.id} path={photo.putanja} className="block min-w-0 overflow-hidden rounded-lg"><img loading="lazy" src={photo.thumbnailUrl} alt={photo.naziv ?? 'Fotografija naloga'} onError={() => {
+                            if (photo.thumbnail_path && photo.thumbnail_path !== photo.putanja) {
+                              failedPhotoPaths.current.add(photo.thumbnail_path);
+                            }
                             setPhotoLoadError('Neke fotografije nije moguće prikazati. Pokušaj ih ponovno učitati ili provjeri internetsku vezu.');
-                          }} className="aspect-square w-full object-cover" /></a>)}
+                          }} className="aspect-square w-full object-cover" /></PrivateFileLink>)}
                         </div>
                       )}
                       {photoLoadError && (

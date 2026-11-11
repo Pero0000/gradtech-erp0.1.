@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, ChevronLeft, ChevronRight, Download, FileText, Hammer, Package, Plus, Trash2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { downloadFile } from '@/lib/downloadFile';
+import { PrivateImage, PrivateFileLink } from '@/components/ui/PrivateImage';
 import { useDeferredFiles } from '@/lib/useDeferredFiles';
 import {
   addGradilisteStavka,
@@ -9,6 +10,7 @@ import {
   deleteNalogStavka,
   fetchGradilisteDokumenti,
   fetchGradilisteStavke,
+  getPrivateFileUrl,
   updateNalogStavka,
   uploadGradilisteDokument,
   withPrivateFileUrls,
@@ -267,7 +269,7 @@ export function GradilisteMaterijalDokumenti({
   const downloadPhoto = async (photo: GradilisteDokument) => {
     if (downloadingPhotoId) return;
     setDownloadingPhotoId(photo.id);
-    await guard(() => downloadFile(photo.url, photo.naziv), 'Greška pri preuzimanju slike.');
+    await guard(async () => downloadFile(await getPrivateFileUrl(photo.putanja), photo.naziv), 'Greška pri preuzimanju slike.');
     setDownloadingPhotoId(null);
   };
 
@@ -301,7 +303,7 @@ export function GradilisteMaterijalDokumenti({
             {docs.map((d) => (
               <div key={d.id} className="flex items-center gap-2 rounded-md border border-slate-200 px-2.5 py-1.5 text-xs">
                 <FileText className="h-4 w-4 flex-shrink-0 text-slate-400" />
-                <a href={d.url} target="_blank" rel="noreferrer" download={d.naziv} className="min-w-0 flex-1 truncate text-sky-700 hover:underline">{d.naziv}</a>
+                <PrivateFileLink path={d.putanja} className="min-w-0 flex-1 truncate text-left text-sky-700 hover:underline">{d.naziv}</PrivateFileLink>
                 <span className="flex-shrink-0 text-[10px] text-slate-400">{formatSize(d.velicina)}</span>
                 <button type="button" onClick={() => removeDokument(d)} className="flex-shrink-0 text-slate-300 hover:text-red-600" aria-label="Obriši dokument">
                   <Trash2 className="h-3.5 w-3.5" />
@@ -387,7 +389,7 @@ export function GradilisteMaterijalDokumenti({
                 <ChevronRight className="h-5 w-5" />
               </button>
             </div>
-            <img loading="lazy" src={activePhoto.url} alt={activePhoto.naziv} className="mx-auto max-h-[70vh] max-w-full rounded-lg object-contain" />
+            <PrivateImage path={activePhoto.putanja} alt={activePhoto.naziv} className="mx-auto max-h-[70vh] max-w-full rounded-lg object-contain" />
             <div className="flex justify-end">
               <button type="button" onClick={() => void downloadPhoto(activePhoto)} disabled={downloadingPhotoId !== null} className="inline-flex items-center gap-2 rounded-lg border border-sky-200 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50">
                 <Download className="h-4 w-4" />

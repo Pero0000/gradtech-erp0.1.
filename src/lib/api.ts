@@ -4159,30 +4159,33 @@ export interface NalogFoto {
   putanja: string;
   thumbnail_path: string | null;
   naziv: string | null;
-  url: string;
+  url: string | null;
   thumbnailUrl: string;
 }
+
+const PHOTO_PLACEHOLDER = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="160" height="120" viewBox="0 0 160 120"%3E%3Crect width="160" height="120" fill="%23e2e8f0"/%3E%3Cpath d="M25 90 60 45 85 75 105 55 140 90Z" fill="%2394a3b8"/%3E%3C/svg%3E';
 
 export async function fetchNalogFoto(nalogId: string, refreshUrls = false): Promise<NalogFoto[]> {
   const { data, error } = await supabase.from('radni_nalozi_foto').select('*').eq('nalog_id', nalogId).order('created_at');
   if (error) throw error;
   return Promise.all((data ?? []).map(async (foto: NalogFoto) => {
-    const [url, thumbnailUrl] = await Promise.all([
-      getPrivateFileUrl(foto.putanja, 3600, refreshUrls),
-      getPrivateFileUrl(foto.thumbnail_path ?? foto.putanja, 3600, refreshUrls),
-    ]);
-    return { ...foto, url, thumbnailUrl };
+    const thumbnailUrl = foto.thumbnail_path && foto.thumbnail_path !== foto.putanja
+      ? await getPrivateFileUrl(foto.thumbnail_path, 3600, refreshUrls)
+      : PHOTO_PLACEHOLDER;
+    return { ...foto, url: null, thumbnailUrl };
   }));
 }
 
 export async function withPrivateFileUrls<T extends { putanja: string; thumbnail_path: string | null }>(
   file: T,
-): Promise<T & { url: string; thumbnailUrl: string }> {
-  const [url, thumbnailUrl] = await Promise.all([
-    getPrivateFileUrl(file.putanja),
-    getPrivateFileUrl(file.thumbnail_path ?? file.putanja),
-  ]);
-  return { ...file, url, thumbnailUrl };
+): Promise<T & { url: string | null; thumbnailUrl: string }> {
+  const isDocument = 'vrsta' in file && file.vrsta === 'dokument';
+  const thumbnailUrl = isDocument
+    ? await getPrivateFileUrl(file.putanja)
+    : file.thumbnail_path && file.thumbnail_path !== file.putanja
+      ? await getPrivateFileUrl(file.thumbnail_path)
+      : PHOTO_PLACEHOLDER;
+  return { ...file, url: isDocument ? thumbnailUrl : null, thumbnailUrl };
 }
 
 export interface GradilisteRadniNalogFoto extends NalogFoto {
@@ -4211,8 +4214,10 @@ export async function fetchGradilisteRadniNalogFoto(gradilisteId: string): Promi
     ...foto,
     nalog_broj: brojNaloga.get(foto.nalog_id)?.broj ?? '',
     nalog_naslov: brojNaloga.get(foto.nalog_id)?.naslov ?? null,
-    url: await getPrivateFileUrl(foto.putanja),
-    thumbnailUrl: await getPrivateFileUrl(foto.thumbnail_path ?? foto.putanja),
+    url: null,
+    thumbnailUrl: foto.thumbnail_path && foto.thumbnail_path !== foto.putanja
+      ? await getPrivateFileUrl(foto.thumbnail_path)
+      : PHOTO_PLACEHOLDER,
   })));
 }
 
@@ -4525,7 +4530,7 @@ export interface GradilisteDokument {
   thumbnail_path: string | null;
   naziv: string;
   velicina: number | null;
-  url: string;
+  url: string | null;
   thumbnailUrl: string;
 }
 
@@ -4535,13 +4540,7 @@ export async function fetchGradilisteDokumenti(gradilisteId: string, dokumentIds
   if (dokumentIds) query = query.in('id', [...dokumentIds]);
   const { data, error } = await query.order('created_at');
   if (error) throw error;
-  return Promise.all((data ?? []).map(async (document: GradilisteDokument) => {
-    const [url, thumbnailUrl] = await Promise.all([
-      getPrivateFileUrl(document.putanja),
-      getPrivateFileUrl(document.thumbnail_path ?? document.putanja),
-    ]);
-    return { ...document, url, thumbnailUrl };
-  }));
+  return Promise.all((data ?? []).map((document: GradilisteDokument) => withPrivateFileUrls(document)));
 }
 
 export async function uploadGradilisteDokument(

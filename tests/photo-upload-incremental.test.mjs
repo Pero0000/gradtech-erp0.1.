@@ -69,11 +69,12 @@ test('upload returns only the new photo; signing uses cache and never touches ex
   assert.equal(result.warning, null);
   assert.equal(calls.filter(([kind]) => kind === 'sign').length, 1);
   const photo = await api.withPrivateFileUrls(result.foto);
-  assert.equal(photo.url, `signed:${photo.putanja}`);
+  assert.equal(photo.url, null);
   assert.equal(photo.thumbnailUrl, `signed:${photo.thumbnail_path}`);
   await api.withPrivateFileUrls(result.foto);
   await api.getPrivateFileUrl('existing.webp');
-  assert.equal(calls.filter(([kind]) => kind === 'sign').length, 3);
+  assert.equal(calls.filter(([kind]) => kind === 'sign').length, 2);
+  assert.equal(calls.some(([kind, path]) => kind === 'sign' && path === photo.putanja), false);
   assert.equal(calls.filter(([kind]) => kind === 'upload').length, 2);
 });
 
@@ -99,7 +100,7 @@ for (const vrsta of ['slika', 'dokument']) {
     assert.equal(row.vrsta, vrsta);
     await api.withPrivateFileUrls(row);
     await api.withPrivateFileUrls(row);
-    assert.equal(calls.filter(([kind]) => kind === 'sign').length, vrsta === 'slika' ? 2 : 1);
+    assert.equal(calls.filter(([kind]) => kind === 'sign').length, 1);
   });
 }
 

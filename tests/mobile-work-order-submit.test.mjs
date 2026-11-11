@@ -26,6 +26,8 @@ function setupDetails({ documentFailure = false, siteFailure = false } = {}) {
   const state = {};
   const calls = [];
   const context = {
+    detailsRequest: { current: 0 },
+    selectedIdRef: { current: 'order-138' },
     useCallback: callback => callback,
     errorMessage: (reason, fallback) => reason?.message ?? fallback,
     DEFAULT_POCETAK_RADA: '06:00',
@@ -63,20 +65,19 @@ for (const options of [{ documentFailure: true }, { siteFailure: true }, { docum
     await callback({ id: 'order-138' });
     assert.equal(state.Error, null);
     assert.equal(state.Details.ekipa[0].radnik_id, 'worker');
-    assert.match(state.DocumentLoadError, /Object not found/);
-    assert.match(state.DocumentLoadError, /ne sprječava predaju naloga/);
     assert.equal(state.Loading, false);
-    assert.deepEqual(JSON.parse(JSON.stringify(calls)), [['site', ['linked-doc']]]);
-    assert.equal(state.Details.dokumenti.length, Number(!options.documentFailure) + Number(!options.siteFailure));
+    assert.deepEqual(calls, []);
+    assert.equal(state.Details.dokumenti.length, 0);
+    assert.equal(state.Details.foto.length, 0);
   });
 }
 
-test('attachment retry clears the previous warning after recovery', async () => {
+test('ordinary details refresh does not fetch attachments or clear an independent attachment warning', async () => {
   const { callback, state } = setupDetails();
   state.DocumentLoadError = 'Previous error';
   await callback({ id: 'order-138' }, false);
-  assert.equal(state.DocumentLoadError, null);
-  assert.equal(state.Details.dokumenti.length, 2);
+  assert.equal(state.DocumentLoadError, 'Previous error');
+  assert.equal(state.Details.dokumenti.length, 0);
 });
 
 function setupAction({ refreshFailure = false } = {}) {

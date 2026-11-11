@@ -1,5 +1,6 @@
 import { formatHrDate, formatHrDateTime } from '@/lib/localization';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredFiles } from '@/lib/useDeferredFiles';
 import { ChevronLeft, ChevronRight, Clock3, FileText, Paperclip, Truck } from 'lucide-react';
 import {
   fetchMojeRadnoVrijeme,
@@ -10,7 +11,6 @@ import {
   type MobileRadniNalog,
   type MojeRadnoVrijeme,
   type MojiObracunPodaci,
-  type NalogDokument,
   type RasporedObjava,
   type RasporedObjavaVozilo,
 } from '@/lib/api';
@@ -302,37 +302,27 @@ function documentStatus(document: RadnikDokument) {
 }
 
 export function WorkerDocumentsTab({ radnikId, orders }: { radnikId: string; orders: MobileRadniNalog[] }) {
-  const [personal, setPersonal] = useState<RadnikDokument[]>([]);
-  const [orderDocs, setOrderDocs] = useState<Array<{ order: MobileRadniNalog; docs: NalogDokument[] }>>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const orderKey = orders.map((order) => order.id).join(',');
+  const ordersRef = useRef(orders);
+  ordersRef.current = orders;
 
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setError(null);
-    void Promise.all([
+  const loadDocuments = useCallback(async () => {
+    const [personal, byOrder] = await Promise.all([
       fetchRadnikDokumenti(radnikId),
-      Promise.all(orders.map(async (order) => ({ order, docs: await fetchNalogDokumenti(order.id) }))),
-    ])
-      .then(([own, byOrder]) => {
-        if (!active) return;
-        setPersonal(own);
-        setOrderDocs(byOrder.filter((entry) => entry.docs.length > 0));
-      })
-      .catch((reason: unknown) => { if (active) setError(errText(reason, 'Dokumente nije moguće učitati.')); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-    // orderKey prati promjenu popisa naloga bez ponovnog učitavanja pri svakom osvježavanju.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [radnikId, orderKey]);
-
-  if (loading) return <Empty text="Učitavanje dokumenata…" />;
-  if (error) return <ErrorBox text={error} />;
+      Promise.all(ordersRef.current.map(async (order) => ({ order, docs: await fetchNalogDokumenti(order.id) }))),
+    ]);
+    return [{ personal, orderDocs: byOrder.filter((entry) => entry.docs.length > 0) }];
+  }, [radnikId]);
+  const files = useDeferredFiles(`${radnikId}:${orderKey}`, true, loadDocuments);
+  const personal = files.data[0]?.personal ?? [];
+  const orderDocs = files.data[0]?.orderDocs ?? [];
 
   return (
     <div className="space-y-4">
+      <button type="button" disabled={files.loading} onClick={() => void files.refresh()} className="min-h-10 rounded-xl border border-slate-300 px-3 text-sm font-semibold">
+        {files.loading ? 'Učitavanje dokumenata…' : 'Osvježi dokumente'}
+      </button>
+      {files.error != null && <ErrorBox text={errText(files.error, 'Dokumente nije moguće učitati.')} />}
       <section className="space-y-2">
         <h3 className="px-1 text-sm font-bold uppercase tracking-wide text-slate-500">Osobni dokumenti</h3>
         {personal.length === 0 ? <Empty text="Nema osobnih dokumenata." /> : personal.map((document) => {

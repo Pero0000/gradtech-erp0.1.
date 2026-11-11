@@ -4175,6 +4175,16 @@ export async function fetchNalogFoto(nalogId: string, refreshUrls = false): Prom
   }));
 }
 
+export async function withPrivateFileUrls<T extends { putanja: string; thumbnail_path: string | null }>(
+  file: T,
+): Promise<T & { url: string; thumbnailUrl: string }> {
+  const [url, thumbnailUrl] = await Promise.all([
+    getPrivateFileUrl(file.putanja),
+    getPrivateFileUrl(file.thumbnail_path ?? file.putanja),
+  ]);
+  return { ...file, url, thumbnailUrl };
+}
+
 export interface GradilisteRadniNalogFoto extends NalogFoto {
   nalog_broj: string;
   nalog_naslov: string | null;
@@ -4233,7 +4243,10 @@ async function removeUploadedPhotoFiles(paths: (string | null | undefined)[]) {
   if (error) throw error;
 }
 
-export async function uploadNalogFoto(nalogId: string, file: File, copyToGradiliste = true): Promise<string | null> {
+export async function uploadNalogFoto(nalogId: string, file: File, copyToGradiliste = true): Promise<{
+  foto: Omit<NalogFoto, 'url' | 'thumbnailUrl'>;
+  warning: string | null;
+}> {
   const compressed = await compressPhotoForUpload(file);
   const basePath = `${nalogId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const imageExtension = compressed.image.type === 'image/webp' ? 'webp' : 'jpg';
@@ -4252,12 +4265,12 @@ export async function uploadNalogFoto(nalogId: string, file: File, copyToGradili
     }
     throw thumbnailError;
   }
-  const { error } = await supabase.from('radni_nalozi_foto').insert({
+  const { data, error } = await supabase.from('radni_nalozi_foto').insert({
     nalog_id: nalogId,
     putanja,
     thumbnail_path: thumbnailPath,
     naziv: file.name,
-  });
+  }).select('*').single();
   if (error) {
     try {
       await removeUploadedPhotoFiles([putanja, thumbnailPath]);
@@ -4266,17 +4279,17 @@ export async function uploadNalogFoto(nalogId: string, file: File, copyToGradili
     }
     throw error;
   }
-  if (copyToGradiliste) {
-    return spremiNaGradiliste(
+  const warning = copyToGradiliste
+    ? await spremiNaGradiliste(
       nalogId,
       putanja,
       file.name,
       compressed.image.size + compressed.thumbnail.size,
       'slika',
       thumbnailPath,
-    );
-  }
-  return null;
+    )
+    : null;
+  return { foto: data as Omit<NalogFoto, 'url' | 'thumbnailUrl'>, warning };
 }
 
 export async function deleteNalogFoto(foto: NalogFoto) {
@@ -4531,7 +4544,9 @@ export async function fetchGradilisteDokumenti(gradilisteId: string, dokumentIds
   }));
 }
 
-export async function uploadGradilisteDokument(gradilisteId: string, file: File, vrsta: 'dokument' | 'slika') {
+export async function uploadGradilisteDokument(
+  gradilisteId: string, file: File, vrsta: 'dokument' | 'slika',
+): Promise<Omit<GradilisteDokument, 'url' | 'thumbnailUrl'>> {
   const optimized = vrsta === 'slika' ? await compressPhotoForUpload(file) : null;
   const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
   const uniquePath = `gradiliste/${gradilisteId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -4556,14 +4571,14 @@ export async function uploadGradilisteDokument(gradilisteId: string, file: File,
       throw thumbnailError;
     }
   }
-  const { error } = await supabase.from('gradiliste_dokumenti').insert({
+  const { data, error } = await supabase.from('gradiliste_dokumenti').insert({
     gradiliste_id: gradilisteId,
     vrsta,
     putanja,
     thumbnail_path: thumbnailPath,
     naziv: file.name,
     velicina: optimized ? optimized.image.size + optimized.thumbnail.size : file.size,
-  });
+  }).select('*').single();
   if (error) {
     try {
       await removeUploadedPhotoFiles([putanja, thumbnailPath]);
@@ -4572,6 +4587,7 @@ export async function uploadGradilisteDokument(gradilisteId: string, file: File,
     }
     throw error;
   }
+  return data as Omit<GradilisteDokument, 'url' | 'thumbnailUrl'>;
 }
 
 export async function deleteGradilisteDokument(d: GradilisteDokument) {

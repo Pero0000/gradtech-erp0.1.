@@ -3250,6 +3250,7 @@ test('deleting site/order documents and photos retains original files and thumbn
             react: {
               useState: (value) => [typeof value === 'function' ? value() : value, (next) => states.push(next)],
               useEffect() {}, useMemo: (fn) => fn(), useRef: (current) => ({ current }),
+              useCallback: (fn) => fn,
             },
             'react/jsx-runtime': jsxRuntime,
             'lucide-react': new Proxy({}, { get: () => () => null }),
@@ -3266,6 +3267,7 @@ test('deleting site/order documents and photos retains original files and thumbn
           };
           const mocks = owner === 'site' ? {
             ...sharedMocks,
+            '@/lib/useDeferredFiles': { useDeferredFiles: () => ({ data: [], setData() {}, loading: false, error: null, refresh() {} }) },
             '@/lib/company': { companyStorage: { getItem: () => null }, getUniversalHourlyRate: () => 10 },
             '@/lib/downloadFile': {}, '@/types': {},
             '@/lib/ponude': {},

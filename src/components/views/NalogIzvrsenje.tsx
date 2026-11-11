@@ -1,6 +1,7 @@
 import { formatHrDateTime } from '@/lib/localization';
 import { useAuth } from '@/auth/useAuth';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from 'react';
+import { useDeferredFiles } from '@/lib/useDeferredFiles';
 import { createPortal } from 'react-dom';
 import { Camera, Check, ChevronLeft, ChevronRight, Clock, FileText, Gauge, Hammer, Package, Plus, Trash2, X, ListChecks, Wrench } from 'lucide-react';
 import type { GradilisteZadatak, Oprema, RadniNalog, ZadatakVrsta } from '@/types';
@@ -39,6 +40,7 @@ import {
   updateNalogStavka,
   uploadNalogDokument,
   uploadNalogFoto,
+  withPrivateFileUrls,
   type NalogDokument,
   type GradilisteDokument,
   type NalogFoto,
@@ -432,7 +434,32 @@ export function NalogIzvrsenje({
   const [alati, setAlati] = useState<Oprema[]>([]);
   const [strojevi, setStrojevi] = useState<Oprema[]>([]);
   const [napomena, setNapomena] = useState('');
-  const [dokumenti, setDokumenti] = useState<NalogDokument[]>([]);
+  const [filesSelection, setFilesSelection] = useState<{ id: string; tab: 'foto' | 'dokumenti' | null }>({ id: nalog.id, tab: null });
+  const filesTab = filesSelection.id === nalog.id ? filesSelection.tab : null;
+  const setFilesTab = (tab: 'foto' | 'dokumenti') => setFilesSelection({ id: nalog.id, tab });
+  const fetchPhotos = useCallback(() => fetchNalogFoto(nalog.id), [nalog.id]);
+  const { data: foto, setData: setFoto, loading: photosLoading, error: photosError, refresh: refreshPhotos } =
+    useDeferredFiles(nalog.id, filesTab === 'foto', fetchPhotos);
+  const fetchDocuments = useCallback(async () => {
+    const [documents, siteDocuments, linked] = await Promise.allSettled([
+      fetchNalogDokumenti(nalog.id),
+      nalog.gradiliste_id ? fetchGradilisteDokumenti(nalog.gradiliste_id) : Promise.resolve([]),
+      fetchNalogGradilisteDokumentIds(nalog.id),
+    ]);
+    return [{
+      documents: documents.status === 'fulfilled' ? documents.value : [],
+      siteDocuments: siteDocuments.status === 'fulfilled' ? siteDocuments.value : [],
+      linked: linked.status === 'fulfilled' ? linked.value : [],
+      error: [documents, siteDocuments, linked].flatMap((result) =>
+        result.status === 'rejected' ? [errText(result.reason, 'Greška pri učitavanju dokumenata.')] : []).join(' '),
+    }];
+  }, [nalog.id, nalog.gradiliste_id]);
+  const documentFiles = useDeferredFiles(nalog.id, filesTab === 'dokumenti', fetchDocuments);
+  const loadedSiteDocuments = documentFiles.data[0]?.siteDocuments;
+  const loadedLinkedDocuments = documentFiles.data[0]?.linked;
+  const dokumenti = documentFiles.data[0]?.documents ?? [];
+  const setDokumenti = (update: SetStateAction<NalogDokument[]>) => documentFiles.setData((current) =>
+    current.map((item) => ({ ...item, documents: typeof update === 'function' ? update(item.documents) : update })));
   const [gradDokumenti, setGradDokumenti] = useState<GradilisteDokument[]>([]);
   const [gradLinked, setGradLinked] = useState<string[]>([]);
   const docRef = useRef<HTMLInputElement>(null);
@@ -443,7 +470,6 @@ export function NalogIzvrsenje({
   const [savingCompletion, setSavingCompletion] = useState(false);
   const completionDisabled = savingCompletion || zavrsen || nalog.status === 'zavrsen' || nalog.status === 'otkazan';
   const [newZadatak, setNewZadatak] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
-  const [foto, setFoto] = useState<NalogFoto[]>([]);
   const [selectedFotoId, setSelectedFotoId] = useState<string | null>(null);
   const [audit, setAudit] = useState<MobileWorkOrderAuditEntry[]>([]);
   const [auditOpen, setAuditOpen] = useState(false);
@@ -475,13 +501,11 @@ export function NalogIzvrsenje({
 
   const load = useCallback(async () => {
     setError(null);
-    const [izv, vr, zad, fo, st, dok, inventory, machines] = await Promise.allSettled([
+    const [izv, vr, zad, st, inventory, machines] = await Promise.allSettled([
       fetchNalogIzvrsenje(nalog.id),
       fetchNalogRadnikVrijeme(nalog.id),
       fetchNalogZadaci(nalog.id),
-      fetchNalogFoto(nalog.id),
       fetchNalogStavke(nalog.id),
-      fetchNalogDokumenti(nalog.id),
       fetchOprema('alat'),
       fetchOprema('stroj'),
     ]);
@@ -506,8 +530,6 @@ export function NalogIzvrsenje({
     if (inventory.status === 'fulfilled') setAlati(inventory.value.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'));
     else setError((e) => e ?? errText(inventory.reason, 'Greška pri učitavanju popisa alata.'));
     if (machines.status === 'fulfilled') setStrojevi(machines.value.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'));
-    if (dok.status === 'fulfilled') setDokumenti(dok.value);
-    else setError((e) => e ?? errText(dok.reason, 'Greška pri učitavanju dokumenata.') + hint2);
     if (vr.status === 'fulfilled') {
       const withDefault = vr.value.map((v) => (v.mobile_zero_hours || v.vrijeme_od ? v : { ...v, vrijeme_od: '06:00:00' }));
       setVremena(withDefault);
@@ -518,11 +540,18 @@ export function NalogIzvrsenje({
     else setError((e) => e ?? errText(vr.reason, 'Greška pri učitavanju radnika.') + hint);
     if (zad.status === 'fulfilled') setZadaci(zad.value);
     else setError((e) => e ?? errText(zad.reason, 'Greška pri učitavanju zadataka.') + ' Pokreni migraciju 20261015220000_zadaci_nalog_veza.sql.');
-    if (fo.status === 'fulfilled') setFoto(fo.value);
-    else setError((e) => e ?? errText(fo.reason, 'Greška pri učitavanju fotografija.') + hint);
-    if (nalog.gradiliste_id) setGradDokumenti(await fetchGradilisteDokumenti(nalog.gradiliste_id).catch(() => []));
-    setGradLinked(await fetchNalogGradilisteDokumentIds(nalog.id).catch(() => []));
-  }, [nalog.id, nalog.gradiliste_id]);
+  }, [nalog.id]);
+
+  useEffect(() => {
+    if (loadedSiteDocuments) setGradDokumenti(loadedSiteDocuments);
+    if (loadedLinkedDocuments) setGradLinked(loadedLinkedDocuments);
+  }, [loadedSiteDocuments, loadedLinkedDocuments]);
+
+  useEffect(() => {
+    setGradDokumenti([]);
+    setGradLinked([]);
+    setFilesSelection({ id: nalog.id, tab: null });
+  }, [nalog.id]);
 
   const loadAudit = useCallback(async (isCurrent: () => boolean = () => true) => {
     const page = await fetchMobileWorkOrderAudit(nalog.id);
@@ -635,7 +664,7 @@ export function NalogIzvrsenje({
   };
 
   const ownPaths = new Set([...dokumenti.map((d) => d.putanja), ...foto.map((f) => f.putanja)]);
-  const pickerDocs = gradDokumenti.filter((d) => !ownPaths.has(d.putanja));
+  const pickerDocs = gradDokumenti.filter((d) => !ownPaths.has(d.putanja) && !d.putanja.startsWith(`${nalog.id}/`));
   const toggleGradDok = async (id: string, on: boolean) => {
     setGradLinked((prev) => (on ? [...prev, id] : prev.filter((x) => x !== id)));
     try {
@@ -818,10 +847,13 @@ export function NalogIzvrsenje({
     await guard(async () => {
       const warnings: string[] = [];
       for (const file of Array.from(files)) {
-        const warning = await uploadNalogFoto(nalog.id, file);
+        const { foto: uploaded, warning } = await uploadNalogFoto(nalog.id, file);
         if (warning) warnings.push(warning);
+        const photo = await withPrivateFileUrls(uploaded).catch((reason: unknown) => {
+          throw new Error(`Fotografija je spremljena, ali prikaz nije moguće učitati: ${errText(reason, 'Pokušaj ponovno otvoriti nalog.')}`);
+        });
+        setFoto((prev) => [...prev.filter((item) => item.id !== photo.id), photo]);
       }
-      setFoto(await fetchNalogFoto(nalog.id));
       if (warnings.length > 0) setError(warnings.join('\n'));
     }, 'Greška pri učitavanju fotografije.');
     setUploading(false);
@@ -1218,6 +1250,24 @@ export function NalogIzvrsenje({
       </div>
 
       <div>
+      <div className="mb-3 flex gap-2" role="tablist" aria-label="Prilozi naloga">
+        {(['dokumenti', 'foto'] as const).map((tab) => (
+          <button key={tab} type="button" role="tab" aria-selected={filesTab === tab}
+            onClick={() => setFilesTab(tab)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold">
+            {tab === 'foto' ? 'Fotografije' : 'Dokumenti'}
+          </button>
+        ))}
+      </div>
+      {filesTab && (
+        <button type="button" disabled={photosLoading || documentFiles.loading || uploading}
+          onClick={() => void (filesTab === 'foto' ? refreshPhotos() : documentFiles.refresh())}
+          className="mb-3 rounded-lg border px-3 py-2 text-sm">
+          {photosLoading || documentFiles.loading ? 'Učitavanje…' : 'Osvježi'}
+        </button>
+      )}
+      {photosError != null && filesTab === 'foto' && <p role="alert" className="text-sm text-red-700">{errText(photosError, 'Greška pri učitavanju fotografija.')}</p>}
+      {(documentFiles.error != null || documentFiles.data[0]?.error) && filesTab === 'dokumenti' && <p role="alert" className="text-sm text-red-700">{documentFiles.data[0]?.error || errText(documentFiles.error, 'Greška pri učitavanju dokumenata.')}</p>}
+      <div hidden={filesTab !== 'dokumenti'}>
       {pickerDocs.length > 0 && (
         <div className={visualSections ? modulePanelCls : 'rounded-xl border border-sky-200 bg-sky-50/60 p-3'}>
           <SectionTitle icon={<FileText className="h-4 w-4" />}>Dokumenti i slike gradilišta — označi one koji se prikazuju na ovom nalogu ({gradLinked.length}/{pickerDocs.length})</SectionTitle>
@@ -1252,7 +1302,7 @@ export function NalogIzvrsenje({
         </div>
         <button
           onClick={() => docRef.current?.click()}
-          disabled={uploading}
+          disabled={uploading || documentFiles.loading}
           className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
         >
           <Plus className="h-4 w-4" />
@@ -1260,12 +1310,13 @@ export function NalogIzvrsenje({
         </button>
       </div>
 
-      <div className={modulePanelCls}>
+      </div>
+      <div hidden={filesTab !== 'foto'} className={modulePanelCls}>
         <SectionTitle icon={<Camera className="h-4 w-4" />}>Fotografije ({foto.length})</SectionTitle>
         <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onFiles(e.target.files)} />
         <button
           onClick={() => fileRef.current?.click()}
-          disabled={uploading}
+          disabled={uploading || photosLoading}
           className="mb-3 inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
         >
           <Plus className="h-4 w-4" />

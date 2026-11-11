@@ -1,5 +1,6 @@
 import { formatHrDate, formatHrDateTime } from '@/lib/localization';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useDeferredFiles } from '@/lib/useDeferredFiles';
 import { useAuth } from '@/auth/useAuth';
 import { DeadlineChangeHistoryPanel } from '@/components/views/FuelChangeHistory';
 import { companyStorage, getUniversalHourlyRate } from '@/lib/company';
@@ -179,8 +180,12 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
   const overviewLayout = useOverviewLayout();
   const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>('pregled');
   const [details, setDetails] = useState<GradilisteDetails | null>(null);
-  const [radniNalogFoto, setRadniNalogFoto] = useState<GradilisteRadniNalogFoto[]>([]);
-  const [loadingRadniNalogFoto, setLoadingRadniNalogFoto] = useState(true);
+  const filesVisible = activeDetailTab === 'dokumenti';
+  const fetchPhotos = useCallback(() => fetchGradilisteRadniNalogFoto(gradiliste.id), [gradiliste.id]);
+  const {
+    data: radniNalogFoto, setData: setRadniNalogFoto, loading: loadingRadniNalogFoto,
+    error: photoError, refresh: refreshRadniNalogFoto,
+  } = useDeferredFiles(gradiliste.id, filesVisible, fetchPhotos);
   const [activePhotoIndex, setActivePhotoIndex] = useState<number | null>(null);
   const [downloadingPhotos, setDownloadingPhotos] = useState(false);
   const [pendingPhotoDelete, setPendingPhotoDelete] = useState<string | 'all' | null>(null);
@@ -397,43 +402,16 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
     };
   }, [gradiliste.id]);
 
-  const loadRadniNalogFoto = async (showLoading = false) => {
-    if (showLoading) setLoadingRadniNalogFoto(true);
-    try {
-      const photos = await fetchGradilisteRadniNalogFoto(gradiliste.id);
-      setRadniNalogFoto(photos);
-    } catch (reason) {
-      setError(errText(reason, 'Greška pri učitavanju fotografija radnih naloga.'));
-    } finally {
-      if (showLoading) setLoadingRadniNalogFoto(false);
-    }
-  };
-
   useEffect(() => {
-    let cancelled = false;
-    const refreshPhotos = async () => {
-      try {
-        const photos = await fetchGradilisteRadniNalogFoto(gradiliste.id);
-        if (!cancelled) setRadniNalogFoto(photos);
-      } catch (reason) {
-        if (!cancelled) setError(errText(reason, 'Greška pri učitavanju fotografija radnih naloga.'));
-      } finally {
-        if (!cancelled) setLoadingRadniNalogFoto(false);
-      }
-    };
-
-    setLoadingRadniNalogFoto(true);
-    void refreshPhotos();
+    if (!filesVisible) return;
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void refreshPhotos();
+      if (document.visibilityState === 'visible') void refreshRadniNalogFoto();
     }, 30_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [gradiliste.id]);
+    return () => window.clearInterval(timer);
+  }, [filesVisible, refreshRadniNalogFoto]);
 
   useEffect(() => {
+    if (activeDetailTab !== 'radovi') return;
     const documents = (details?.ugovoreniRadovi ?? []) as UgovoreniRad[];
     const withDocuments = documents.filter((item) => item.dokument_putanja);
     setVtrDocumentUrls({});
@@ -450,7 +428,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
         if (!cancelled) setError(errText(reason, 'VTR dokument nije moguće otvoriti.'));
       });
     return () => { cancelled = true; };
-  }, [details?.ugovoreniRadovi]);
+  }, [activeDetailTab, details?.ugovoreniRadovi]);
 
   useEffect(() => {
     setFinancialForm({
@@ -1291,7 +1269,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
 
         {!loading && details && (
           <>
-            {overviewLayout && (
+            {(
               <div className="gradiliste-details-tabs mb-4 grid grid-cols-2 gap-2 xl:grid-cols-4" role="tablist" aria-label="Pregled gradilišta">
                 {detailTabs.map((tab) => {
                   const active = activeDetailTab === tab.id;
@@ -1509,14 +1487,14 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
             })}
             </div>
 
-            <GradilisteMaterijalDokumenti gradilisteId={gradiliste.id}>
+            <GradilisteMaterijalDokumenti gradilisteId={gradiliste.id} filesVisible={filesVisible}>
               {({ documents, materials }) => (
                 <>
                   <div
                     id="gradiliste-details-panel-dokumenti"
                     role={overviewLayout ? 'tabpanel' : undefined}
                     aria-labelledby={overviewLayout ? 'gradiliste-details-tab-dokumenti' : undefined}
-                    hidden={overviewLayout && activeDetailTab !== 'dokumenti'}
+                    hidden={!filesVisible}
                     className={`gradiliste-details-tab-panel ${overviewLayout ? 'is-overview' : ''}`}
                   >
                     {documents}
@@ -1718,7 +1696,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
 
                   <div
                     className={`gradiliste-details-tab-panel ${overviewLayout ? 'is-overview' : ''}`}
-                    hidden={overviewLayout && activeDetailTab !== 'dokumenti'}
+                    hidden={!filesVisible}
                   >
                   <Section
                     title={`Fotografije radnika (${radniNalogFoto.length})`}
@@ -1746,7 +1724,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                         </button>
                         <button
                           type="button"
-                          onClick={() => void loadRadniNalogFoto(true)}
+                          onClick={() => void refreshRadniNalogFoto()}
                           disabled={loadingRadniNalogFoto}
                           className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50"
                         >
@@ -1756,6 +1734,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
                       </div>
                     )}
                   >
+                    {photoError != null && <p role="alert" className="text-sm text-red-700">{errText(photoError, 'Greška pri učitavanju fotografija.')}</p>}
                     {loadingRadniNalogFoto && radniNalogFoto.length === 0 ? (
                       <p className="text-xs text-slate-400">Učitavanje fotografija…</p>
                     ) : radniNalogFoto.length === 0 ? (

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, ChevronLeft, ChevronRight, Download, FileText, Hammer, Package, Plus, Trash2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { downloadFile } from '@/lib/downloadFile';
+import { useDeferredFiles } from '@/lib/useDeferredFiles';
 import {
   addGradilisteStavka,
   deleteGradilisteDokument,
@@ -10,6 +11,7 @@ import {
   fetchGradilisteStavke,
   updateNalogStavka,
   uploadGradilisteDokument,
+  withPrivateFileUrls,
   type GradilisteDokument,
   type GradilisteStavka,
 } from '@/lib/api';
@@ -146,14 +148,20 @@ function StavkeList({
 
 export function GradilisteMaterijalDokumenti({
   gradilisteId,
+  filesVisible,
   children,
 }: {
   gradilisteId: string;
+  filesVisible: boolean;
   children: (sections: { documents: React.ReactNode; materials: React.ReactNode }) => React.ReactNode;
 }) {
   const [stavke, setStavke] = useState<GradilisteStavka[]>([]);
   const [savingCompletion, setSavingCompletion] = useState(false);
-  const [dokumenti, setDokumenti] = useState<GradilisteDokument[]>([]);
+  const fetchDocuments = useCallback(() => fetchGradilisteDokumenti(gradilisteId), [gradilisteId]);
+  const {
+    data: dokumenti, setData: setDokumenti, loading: documentsLoading,
+    error: documentsError, refresh: refreshDocuments,
+  } = useDeferredFiles(gradilisteId, filesVisible, fetchDocuments);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [activePhotoId, setActivePhotoId] = useState<string | null>(null);
@@ -163,11 +171,9 @@ export function GradilisteMaterijalDokumenti({
 
   const load = useCallback(async () => {
     setError(null);
-    const [st, dok] = await Promise.allSettled([fetchGradilisteStavke(gradilisteId), fetchGradilisteDokumenti(gradilisteId)]);
+    const [st] = await Promise.allSettled([fetchGradilisteStavke(gradilisteId)]);
     if (st.status === 'fulfilled') setStavke(st.value);
     else setError(errText(st.reason, 'Greška pri učitavanju materijala i alata.') + MIGRATION_HINT);
-    if (dok.status === 'fulfilled') setDokumenti(dok.value);
-    else setError((e) => e ?? errText(dok.reason, 'Greška pri učitavanju dokumenata.') + MIGRATION_HINT);
   }, [gradilisteId]);
 
   useEffect(() => {
@@ -231,8 +237,13 @@ export function GradilisteMaterijalDokumenti({
     if (!files || files.length === 0) return;
     setUploading(true);
     await guard(async () => {
-      for (const file of Array.from(files)) await uploadGradilisteDokument(gradilisteId, file, vrsta);
-      setDokumenti(await fetchGradilisteDokumenti(gradilisteId));
+      for (const file of Array.from(files)) {
+        const uploaded = await uploadGradilisteDokument(gradilisteId, file, vrsta);
+        const document = await withPrivateFileUrls(uploaded).catch((reason: unknown) => {
+          throw new Error(`Datoteka je spremljena, ali prikaz nije moguće učitati: ${errText(reason, 'Pokušaj ponovno otvoriti gradilište.')}`);
+        });
+        setDokumenti((prev) => [...prev.filter((item) => item.id !== document.id), document]);
+      }
     }, 'Greška pri učitavanju datoteke.');
     setUploading(false);
     if (docRef.current) docRef.current.value = '';
@@ -276,6 +287,11 @@ export function GradilisteMaterijalDokumenti({
 
   const documentsSection = (
     <>
+      <button type="button" disabled={documentsLoading || uploading} onClick={() => void refreshDocuments()}
+        className="mb-3 rounded-lg border px-3 py-2 text-sm">
+        {documentsLoading ? 'Učitavanje…' : 'Osvježi dokumente i slike'}
+      </button>
+      {documentsError != null && <p role="alert" className="text-sm text-red-700">{errText(documentsError, 'Greška pri učitavanju dokumenata.')}</p>}
       {error && <p className="my-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
       <div className="grid min-w-0 gap-x-4 xl:grid-cols-2">
         <SectionBox title={`Dokumenti (${docs.length})`} icon={<FileText className="h-4 w-4" />} tone="slate">
@@ -296,7 +312,7 @@ export function GradilisteMaterijalDokumenti({
           <button
             type="button"
             onClick={() => docRef.current?.click()}
-            disabled={uploading}
+            disabled={uploading || documentsLoading}
             className="inline-flex max-w-full items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             <Plus className="h-3.5 w-3.5" />
@@ -339,7 +355,7 @@ export function GradilisteMaterijalDokumenti({
           <button
             type="button"
             onClick={() => imgRef.current?.click()}
-            disabled={uploading}
+            disabled={uploading || documentsLoading}
             className="inline-flex max-w-full items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             <Plus className="h-3.5 w-3.5" />

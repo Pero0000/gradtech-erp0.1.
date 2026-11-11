@@ -24,6 +24,7 @@ import {
   fetchNalogStavke,
   fetchNalogZadaci,
   fetchOprema,
+  getPrivateFileUrl,
   deleteMobileNalogVoznja,
   saveMobileNalogIzvjestaj,
   saveMobileNalogTimeEntries,
@@ -32,6 +33,7 @@ import {
   startMobileWorkerTime,
   submitMobileNalog,
   uploadNalogFoto,
+  withPrivateFileUrls,
   type GradilisteDokument,
   type MobileRadniNalog,
   type MobileNalogVoznja,
@@ -41,6 +43,7 @@ import {
   type NalogStavka,
 } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
+import { useDeferredFiles } from '@/lib/useDeferredFiles';
 import type { GradilisteZadatak, Oprema, ZadatakVrsta } from '@/types';
 import { zadatakVrsta } from '@/types';
 import { WorkerDocumentsTab, WorkerScheduleTab, WorkerTimeTab, type WorkerPortalTab } from '@/components/mobile/WorkerPortalTabs';
@@ -179,7 +182,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
   const [workerName, setWorkerName] = useState<string | null>(null);
   const [orders, setOrders] = useState<MobileRadniNalog[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [details, setDetails] = useState<MobileDetails | null>(null);
+  const [detailsState, setDetails] = useState<MobileDetails | null>(null);
   const [report, setReport] = useState<MobileReport>(emptyReport);
   const [potvrde, setPotvrde] = useState<string[]>([]);
   const [prep, setPrep] = useState<PrepKey[]>([]);
@@ -190,8 +193,6 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
   const [photoLoadError, setPhotoLoadError] = useState<string | null>(null);
   const [routeLoadError, setRouteLoadError] = useState<string | null>(null);
   const [equipmentLoadError, setEquipmentLoadError] = useState<string | null>(null);
-  const [documentLoadError, setDocumentLoadError] = useState<string | null>(null);
-  const [refreshingPhotos, setRefreshingPhotos] = useState(false);
   const [newMaterial, setNewMaterial] = useState('');
   const [newTool, setNewTool] = useState('');
   const [newTask, setNewTask] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
@@ -212,6 +213,50 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
   const [personalCarAccessRetry, setPersonalCarAccessRetry] = useState(0);
   const selectedIdRef = useRef(selectedId);
   const detailsRequest = useRef(0);
+  const failedPhotoPaths = useRef(new Set<string>());
+  const [fileSections, setFileSections] = useState({ key: '', photos: false, documents: false });
+  const filesKey = selectedId ?? '';
+  useEffect(() => {
+    setFileSections({ key: filesKey, photos: false, documents: false });
+  }, [filesKey]);
+  const photosOpen = fileSections.key === filesKey && fileSections.photos;
+  const documentsOpen = fileSections.key === filesKey && fileSections.documents;
+  const fetchPhotos = useCallback(async () => {
+    const failedPaths = [...failedPhotoPaths.current];
+    await Promise.all(failedPaths.map((path) => getPrivateFileUrl(path, 3600, true)));
+    const photos = await fetchNalogFoto(filesKey);
+    failedPaths.forEach((path) => failedPhotoPaths.current.delete(path));
+    return photos;
+  }, [filesKey]);
+  const photoFiles = useDeferredFiles(filesKey, photosOpen && Boolean(detailsState), fetchPhotos);
+  const setUploadedPhotos = photoFiles.setData;
+  const fetchDocuments = useCallback(async () => {
+    const [documents, siteDocuments] = await Promise.allSettled([
+      fetchNalogDokumenti(filesKey),
+      (async () => {
+        if (!detailsState?.gradilisteId) return [];
+        const linkedIds = await fetchNalogGradilisteDokumentIds(filesKey);
+        return fetchGradilisteDokumenti(detailsState.gradilisteId, linkedIds);
+      })(),
+    ]);
+    return [{
+      documents: [
+        ...(documents.status === 'fulfilled' ? documents.value : []),
+        ...(siteDocuments.status === 'fulfilled' ? siteDocuments.value : []),
+      ],
+      error: [documents, siteDocuments].flatMap((result) =>
+        result.status === 'rejected' ? [errorMessage(result.reason, 'Dokumente nije moguće učitati.')] : []).join(' '),
+    }];
+  }, [filesKey, detailsState?.gradilisteId]);
+  const documentFiles = useDeferredFiles(filesKey, documentsOpen && Boolean(detailsState), fetchDocuments);
+  const documentError = documentFiles.error ?? (documentFiles.data[0]?.error || null);
+  const details = detailsState ? { ...detailsState, foto: photoFiles.data, dokumenti: documentFiles.data[0]?.documents ?? [] } : null;
+  const refreshingPhotos = photoFiles.loading;
+  const openFiles = (photos: boolean, documents: boolean) => setFileSections((current) => ({
+    key: filesKey,
+    photos: photos || (current.key === filesKey && current.photos),
+    documents: documents || (current.key === filesKey && current.documents),
+  }));
   selectedIdRef.current = selectedId;
 
   const selected = orders.find((order) => order.id === selectedId) ?? null;
@@ -331,7 +376,6 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
       setPhotoLoadError(null);
       setRouteLoadError(null);
       setEquipmentLoadError(null);
-      setDocumentLoadError(null);
       setPrep([]);
     }
     try {
@@ -347,18 +391,9 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         throw nalogError;
       }
 
-      const photoRequest = fetchNalogFoto(order.id).then(
-        (foto) => ({ foto, error: null as unknown }),
-        (reason: unknown) => ({ foto: [] as NalogFoto[], error: reason }),
-      );
-      const documentRequest = fetchNalogDokumenti(order.id).then(
-        (dokumenti) => ({ dokumenti, error: null as unknown }),
-        (reason: unknown) => ({ dokumenti: [] as NalogDokument[], error: reason }),
-      );
-      const [zadaci, stavke, linkedIds, ekipa] = await Promise.all([
+      const [zadaci, stavke, ekipa] = await Promise.all([
         fetchNalogZadaci(order.id),
         fetchNalogStavke(order.id),
-        fetchNalogGradilisteDokumentIds(order.id),
         fetchMobileNalogTeam(order.id),
       ]);
       const routesResult = await fetchMobileNalogVoznje(order.id)
@@ -378,14 +413,6 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
           ? `strojeve: ${errorMessage(strojeviResult.reason, 'nije moguće učitati')}`
           : null,
       ].filter((message): message is string => message !== null);
-      const { foto, error: photoError } = await photoRequest;
-      const { dokumenti, error: documentError } = await documentRequest;
-      const siteDocuments = await (nalog.gradiliste_id
-        ? fetchGradilisteDokumenti(nalog.gradiliste_id, linkedIds)
-        : Promise.resolve([] as GradilisteDokument[])).then(
-        (documents) => ({ documents, error: null as unknown }),
-        (reason: unknown) => ({ documents: [] as GradilisteDokument[], error: reason }),
-      );
 
       if (request !== detailsRequest.current || selectedIdRef.current !== order.id) return;
       setRouteLoadError(routesResult.error
@@ -404,8 +431,8 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         stavke,
         alati: alati.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'),
         strojevi: strojevi.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'),
-        dokumenti: [...dokumenti, ...siteDocuments.documents],
-        foto,
+        dokumenti: [],
+        foto: [],
         ekipa,
         voznje: routesResult.voznje,
       });
@@ -429,16 +456,6 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
       }
       setExtraTimeRows([...extraRows.values()]);
       setBezSatiRadnici(ekipa.filter((worker) => worker.bez_sati_na_gradilistu).map((worker) => worker.radnik_id));
-      setPhotoLoadError(photoError
-        ? errorMessage(photoError, 'Fotografije naloga nije moguće učitati.')
-        : null);
-      const documentErrors = [
-        documentError ? `Dokumenti naloga: ${errorMessage(documentError, 'Učitavanje nije uspjelo.')}` : null,
-        siteDocuments.error ? `Dokumenti gradilišta: ${errorMessage(siteDocuments.error, 'Učitavanje nije uspjelo.')}` : null,
-      ].filter(Boolean);
-      setDocumentLoadError(documentErrors.length > 0
-        ? `Neke dokumente nije moguće učitati. To ne sprječava predaju naloga. ${documentErrors.join(' ')}`
-        : null);
       const savedPotvrde = (nalog.mobile_potvrde as string[] | null) ?? [];
       const timeConfirmed = savedPotvrde.includes('vrijeme');
       // Dok vrijeme nije potvrđeno pretpostavka je uvijek 06:00–16:00; ručne izmjene se čuvaju između osvježavanja.
@@ -468,22 +485,15 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
   }, []);
 
   const refreshPhotos = async () => {
-    if (!selected) return;
-    setRefreshingPhotos(true);
-    try {
-      const foto = await fetchNalogFoto(selected.id, true);
-      setDetails((current) => current ? { ...current, foto } : current);
-      setPhotoLoadError(null);
-    } catch (reason) {
-      setPhotoLoadError(errorMessage(reason, 'Fotografije naloga nije moguće učitati.'));
-    } finally {
-      setRefreshingPhotos(false);
-    }
+    if (photoQueue.some((photo) => photo.nalogId === selectedId && photo.status !== 'greska')) return;
+    await photoFiles.refresh();
+    setPhotoLoadError(null);
   };
 
   const selectedPublication = orders.find((order) => order.id === selectedId)?.zakljucen_at;
   useEffect(() => {
     const requestCounter = detailsRequest;
+    failedPhotoPaths.current.clear();
     if (!selectedId) {
       detailsRequest.current++;
       setDetails(null);
@@ -659,16 +669,21 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     setPhotoQueue((current) => current.map((photo) => photo.id === next.id ? { ...photo, status: 'salje' } : photo));
     void (async () => {
       try {
-        await uploadNalogFoto(next.nalogId, next.file, false);
-        removeQueuedPhoto(next.id);
+        const { foto: uploaded } = await uploadNalogFoto(next.nalogId, next.file, false);
         try {
-          const foto = await fetchNalogFoto(next.nalogId, true);
           if (selectedIdRef.current === next.nalogId) {
-            setDetails((current) => current ? { ...current, foto } : current);
-            setPhotoLoadError(null);
+            const foto = await withPrivateFileUrls(uploaded);
+            if (selectedIdRef.current === next.nalogId) {
+              setUploadedPhotos((current) => [...current.filter((item) => item.id !== foto.id), foto]);
+              setPhotoLoadError(null);
+            }
           }
         } catch (reason) {
-          setPhotoLoadError(errorMessage(reason, 'Fotografija je poslana, ali popis fotografija nije moguće osvježiti.'));
+          if (selectedIdRef.current === next.nalogId) {
+            setPhotoLoadError(errorMessage(reason, 'Fotografija je poslana, ali prikaz nije moguće učitati.'));
+          }
+        } finally {
+          removeQueuedPhoto(next.id);
         }
       } catch (reason) {
         setPhotoQueue((current) => current.map((photo) => photo.id === next.id
@@ -676,7 +691,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
           : photo));
       }
     })();
-  }, [photoQueue]);
+  }, [photoQueue, setUploadedPhotos]);
 
   const toggleTask = async (task: GradilisteZadatak) => {
     await runAction(() => updateGradilisteZadatak(task.id, { gotovo: !task.gotovo }));
@@ -1002,11 +1017,6 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         {pushError && <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{pushError}</p>}
         {error && !isWorkTimeOverlapError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
         {notice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
-        {selected && documentLoadError && <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          <p>{documentLoadError}</p>
-          <button type="button" disabled={working || loading} onClick={() => void loadDetails(selected, false)} className="mt-2 min-h-10 font-semibold underline disabled:opacity-50">Ponovi učitavanje dokumenata</button>
-        </div>}
-
         {selected ? (
           <section className="space-y-4">
             <button type="button" onClick={() => { setSelectedId(null); setNotice(null); setError(null); }} className="inline-flex min-h-10 items-center gap-1 rounded-lg px-2 text-sm font-semibold text-sky-800">
@@ -1189,7 +1199,13 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                       />
                     </WorkOrderPanel>
 
-                    <WorkOrderPanel title="Dokumenti i slike" icon={<FileText className="h-5 w-5" />} tone="slate">
+                    <WorkOrderPanel key={`documents-${selected.id}`} title="Dokumenti i slike" icon={<FileText className="h-5 w-5" />} tone="slate" onOpen={() => openFiles(true, true)}>
+                      <button type="button" disabled={photoFiles.loading || documentFiles.loading}
+                        onClick={() => { void refreshPhotos(); void documentFiles.refresh(); }} className="min-h-10 font-semibold text-sky-700">
+                        {photoFiles.loading || documentFiles.loading ? 'Učitavanje…' : 'Osvježi dokumente i slike'}
+                      </button>
+                      {documentError != null && <p role="alert">{errorMessage(documentError, String(documentError))}</p>}
+                      {photoFiles.error != null && <p role="alert">{errorMessage(photoFiles.error, 'Fotografije nije moguće učitati.')}</p>}
                       <ReviewBlock title="Prilozi">
                         {details.dokumenti.length ? details.dokumenti.map((document) => <a key={document.id} href={document.url} target="_blank" rel="noreferrer" className="block min-h-10 py-2 text-sm font-medium text-sky-700 underline">{document.naziv}</a>) : <p className="text-sm text-slate-500">Nema priloženih dokumenata.</p>}
                         {details.foto.length > 0 && (
@@ -1251,11 +1267,15 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                               ? <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">{details.stavke.filter((item) => !item.gotovo).map((item) => <li key={item.id}>{item.naziv}</li>)}</ul>
                               : <p className="text-sm text-slate-500">Nema unaprijed upisanog materijala ni alata.</p>}
                           </ReviewBlock>
-                          <ReviewBlock title="Dokumenti">
+                          <WorkOrderPanel key={`closed-documents-${selected.id}`} title="Dokumenti" icon={<FileText className="h-5 w-5" />} onOpen={() => openFiles(false, true)}>
+                            <button type="button" disabled={documentFiles.loading} onClick={() => void documentFiles.refresh()} className="min-h-10 font-semibold text-sky-700">
+                              {documentFiles.loading ? 'Učitavanje…' : 'Osvježi dokumente'}
+                            </button>
+                            {documentError != null && <p role="alert">{errorMessage(documentError, String(documentError))}</p>}
                             {details.dokumenti.length
                               ? details.dokumenti.map((document) => <a key={document.id} href={document.url} target="_blank" rel="noreferrer" className="block min-h-10 py-2 text-sm font-medium text-sky-700 underline">{document.naziv}</a>)
                               : <p className="text-sm text-slate-500">Nema priloženih dokumenata.</p>}
-                          </ReviewBlock>
+                          </WorkOrderPanel>
                         </WorkOrderPanel>
                       </>
                     )}
@@ -1319,16 +1339,23 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                     </WorkOrderPanel>
                     ))}
 
-                    <WorkOrderPanel title="Fotografije izvedenog rada" icon={<Camera className="h-5 w-5" />} tone="rose" summary={`${details.foto.length} fotografija`}>
+                    <WorkOrderPanel key={`photos-${selected.id}`} title="Fotografije izvedenog rada" icon={<Camera className="h-5 w-5" />} tone="rose" onOpen={() => openFiles(true, false)}>
+                      <button type="button" disabled={refreshingPhotos || selectedPhotoQueue.some((photo) => photo.status !== 'greska')} onClick={() => void refreshPhotos()} className="min-h-10 font-semibold text-sky-700">
+                        {refreshingPhotos ? 'Učitavanje…' : 'Osvježi fotografije'}
+                      </button>
+                      {photoFiles.error != null && <p role="alert">{errorMessage(photoFiles.error, 'Fotografije nije moguće učitati.')}</p>}
                       {details.foto.length > 0 && (
                         <div className="grid min-w-0 grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 xl:grid-cols-2 2xl:grid-cols-3">
-                          {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" className="block min-w-0 overflow-hidden rounded-lg"><img loading="lazy" src={photo.thumbnailUrl} alt={photo.naziv ?? 'Fotografija naloga'} onError={() => setPhotoLoadError('Neke fotografije nije moguće prikazati. Pokušaj ih ponovno učitati ili provjeri internetsku vezu.')} className="aspect-square w-full object-cover" /></a>)}
+                          {details.foto.map((photo) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" className="block min-w-0 overflow-hidden rounded-lg"><img loading="lazy" src={photo.thumbnailUrl} alt={photo.naziv ?? 'Fotografija naloga'} onError={() => {
+                            failedPhotoPaths.current.add(photo.thumbnail_path ?? photo.putanja);
+                            setPhotoLoadError('Neke fotografije nije moguće prikazati. Pokušaj ih ponovno učitati ili provjeri internetsku vezu.');
+                          }} className="aspect-square w-full object-cover" /></a>)}
                         </div>
                       )}
                       {photoLoadError && (
                         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                           <span>{photoLoadError}</span>
-                          <button type="button" onClick={() => void refreshPhotos()} disabled={refreshingPhotos} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-white px-3 font-semibold disabled:opacity-50">
+                          <button type="button" onClick={() => void refreshPhotos()} disabled={refreshingPhotos || selectedPhotoQueue.some((photo) => photo.status !== 'greska')} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-white px-3 font-semibold disabled:opacity-50">
                             <RefreshCw className={`h-4 w-4 ${refreshingPhotos ? 'animate-spin' : ''}`} />
                             Ponovno učitaj
                           </button>
@@ -1367,11 +1394,11 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                       <div className="grid min-w-0 grid-cols-1 xl:grid-cols-2 gap-2">
                         <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl bg-rose-600 px-3 text-sm font-semibold text-white active:bg-rose-700">
                           <Camera className="h-5 w-5" /> Fotografiraj
-                          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(event) => { queuePhotos(event.target.files); event.currentTarget.value = ''; }} />
+                          <input type="file" accept="image/*" capture="environment" disabled={refreshingPhotos} className="hidden" onChange={(event) => { queuePhotos(event.target.files); event.currentTarget.value = ''; }} />
                         </label>
                         <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-300 px-3 text-sm font-semibold text-slate-700">
                           <ImagePlus className="h-5 w-5" /> Iz galerije
-                          <input type="file" accept="image/*" multiple className="hidden" onChange={(event) => { queuePhotos(event.target.files); event.currentTarget.value = ''; }} />
+                          <input type="file" accept="image/*" multiple disabled={refreshingPhotos} className="hidden" onChange={(event) => { queuePhotos(event.target.files); event.currentTarget.value = ''; }} />
                         </label>
                       </div>
                       <p className="text-xs text-slate-500">Slikaj koliko god treba – svaka se fotografija šalje u pozadini dok slikaš dalje.</p>
@@ -1388,7 +1415,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                           }
                           void setPotvrda('foto', value);
                         }}
-                        disabled={working || !canEditOrder}
+                        disabled={working || !canEditOrder || refreshingPhotos || photoFiles.error != null}
                       />
                     </WorkOrderPanel>
 
@@ -1824,16 +1851,27 @@ function WorkOrderPanel({
   tone = 'sky',
   summary,
   children,
+  onOpen,
 }: {
   title: string;
   icon: React.ReactNode;
   tone?: WorkOrderPanelTone;
   summary?: string;
   children: React.ReactNode;
+  onOpen?: () => void;
 }) {
+  const [open, setOpen] = useState(false);
   const colors = workOrderPanelTone[tone];
   return (
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      {onOpen ? (
+        <button type="button" aria-expanded={open} onClick={() => {
+          if (!open) onOpen();
+          setOpen(!open);
+        }} className={`flex min-h-14 w-full items-center gap-3 px-4 py-3 text-left ${colors.header}`}>
+          {icon}<span className="flex-1 font-bold">{title}</span><span>{open ? 'Zatvori' : 'Otvori'}</span>
+        </button>
+      ) : (
       <div className={`flex items-center gap-3 border-b border-slate-200/70 px-4 py-3 ${colors.header}`}>
         <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${colors.icon}`}>
           {icon}
@@ -1841,7 +1879,8 @@ function WorkOrderPanel({
         <h3 className="min-w-0 flex-1 text-base font-bold text-slate-900">{title}</h3>
         {summary && <span className="shrink-0 text-right text-xs font-bold text-emerald-700">{summary}</span>}
       </div>
-      <div className="space-y-3 p-4">{children}</div>
+      )}
+      {(!onOpen || open) && <div className="space-y-3 p-4">{children}</div>}
     </section>
   );
 }

@@ -115,6 +115,8 @@ test('trip form selects remembered car, derives km/cost, and explains work-time 
   assert.match(rendered, /Početak rada/);
   assert.match(rendered, /evidenciju radnog vremena i obračun/);
   assert.match(rendered, /radno vrijeme koji se već obračunavaju preko radnog naloga/);
+  assert.match(rendered, /Razlog puta/);
+  assert.doesNotMatch(rendered, /Vrijeme vožnje|Polazak|Dolazak/);
   const selects = elements(ui.render()).filter((node) => node.type === 'select');
   selects[0].props.onChange({ target: { value: 'car' } });
   await flush();
@@ -135,6 +137,8 @@ test('private and business submissions use only raw trip input; unchanged retrie
   assert.equal(first.radno_vrijeme_od, '08:00');
   assert.equal(first.radno_vrijeme_do, '16:00');
   assert.equal(Object.keys(first).sort().join(','), 'datum,gradiliste_id,id,km_kraj,km_pocetak,napomena,radno_vrijeme_do,radno_vrijeme_od,vozilo_id,vrijeme_do,vrijeme_od');
+  assert.equal(first.vrijeme_od, null);
+  assert.equal(first.vrijeme_do, null);
   await ui.submit();
   assert.equal(ui.calls.filter((call) => call[0] === 'report')[1][1].id, first.id);
   assert.match(ui.states.notice, /radno vrijeme i trošak/);
@@ -149,9 +153,9 @@ test('private and business submissions use only raw trip input; unchanged retrie
   assert.match(ui.states.notice, /bez troška/);
 });
 
-test('client rejects missing destination, invalid km, partial times and business zero rate before RPC', async () => {
+test('client rejects missing destination, invalid km and business zero rate before RPC', async () => {
   for (const changes of [
-    { destination: '' }, { endKm: '1000' }, { startKm: '-1' }, { endKm: '1025.5' }, { startTime: '08:00' },
+    { destination: '' }, { endKm: '1000' }, { startKm: '-1' }, { endKm: '1025.5' },
     { workStart: '08:00' }, { workStart: '08:00', workEnd: '08:00' },
     { options: { ...options, vozila: [{ ...options.vozila[0], cijena_km: 0 }] } },
   ]) {

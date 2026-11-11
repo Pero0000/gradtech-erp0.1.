@@ -277,6 +277,21 @@ export async function deleteObjekt(id: string) {
   if (error) throwActionableDbError(error, 'objekti');
 }
 
+export const overviewCountModules = ['gradilista', 'radnici', 'vozila', 'raspored', 'troskovi', 'radni_nalozi'] as const;
+export type OverviewCountModule = typeof overviewCountModules[number];
+export type OverviewCounts = Record<OverviewCountModule, number>;
+
+export async function fetchOverviewCounts(modules: readonly OverviewCountModule[]): Promise<OverviewCounts> {
+  const counts: OverviewCounts = { gradilista: 0, radnici: 0, vozila: 0, raspored: 0, troskovi: 0, radni_nalozi: 0 };
+  await Promise.all(modules.map(async (module) => {
+    const { count, error } = await supabase.from(module).select('*', { count: 'exact', head: true });
+    if (error) throw error;
+    if (typeof count !== 'number') throw new Error(`Brojač za ${module} nije vraćen.`);
+    counts[module] = count;
+  }));
+  return counts;
+}
+
 export async function fetchGradilista(): Promise<Gradiliste[]> {
   const { data, error } = await supabase
     .from('gradilista')

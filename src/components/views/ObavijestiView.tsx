@@ -1,8 +1,9 @@
 import { formatHrDate } from '@/lib/localization';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Bell, BellRing, CheckCircle2, Search } from 'lucide-react';
 import type { View } from '@/components/Sidebar';
-import { loadObavijesti, relativeLabel, sendPushNotifications, type Obavijest, type ObavijestLevel } from '@/lib/obavijesti';
+import { relativeLabel, sendPushNotifications, type Obavijest, type ObavijestLevel } from '@/lib/obavijesti';
+import type { useOverview } from '@/lib/useOverview';
 import { resolveVoziloGorivoAnomalija, resolveVoziloObavijest } from '@/lib/api';
 import { loadPostavke, obavijestTipovi, savePostavke } from '@/lib/postavke';
 
@@ -13,9 +14,12 @@ const levelStyle: Record<ObavijestLevel, { row: string; badge: string; label: st
   upcoming: { row: 'border-slate-200', badge: 'bg-slate-100 text-slate-600', label: 'Nadolazeće' },
 };
 
-export function ObavijestiView({ onNavigate, canResolveVozila }: { onNavigate: (view: View) => void; canResolveVozila: boolean }) {
-  const [items, setItems] = useState<Obavijest[]>([]);
-  const [loading, setLoading] = useState(true);
+export function ObavijestiView({ onNavigate, canResolveVozila, overview }: {
+  onNavigate: (view: View) => void;
+  canResolveVozila: boolean;
+  overview: ReturnType<typeof useOverview>;
+}) {
+  const { items, notificationsLoading: loading } = overview;
   const [error, setError] = useState<string | null>(null);
   const [grupa, setGrupa] = useState('');
   const [tip, setTip] = useState('');
@@ -26,30 +30,6 @@ export function ObavijestiView({ onNavigate, canResolveVozila }: { onNavigate: (
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
   );
 
-  useEffect(() => {
-    let active = true;
-    const refresh = () => {
-      setLoading(true);
-      loadObavijesti(loadPostavke())
-        .then((nextItems) => {
-          if (active) {
-            setItems(nextItems);
-            setError(null);
-          }
-        })
-        .catch((reason: unknown) => {
-          if (active) setError(reason instanceof Error ? reason.message : 'Greška pri učitavanju obavijesti.');
-        })
-        .finally(() => { if (active) setLoading(false); });
-    };
-    window.addEventListener('vozila-obavijest-updated', refresh);
-    refresh();
-    return () => {
-      active = false;
-      window.removeEventListener('vozila-obavijest-updated', refresh);
-    };
-  }, []);
-
   const resolveIssue = async (item: Obavijest) => {
     const resolveId = item.voziloObavijestId ?? item.voziloGorivoAnomalijaId;
     if (!resolveId) return;
@@ -58,9 +38,7 @@ export function ObavijestiView({ onNavigate, canResolveVozila }: { onNavigate: (
     try {
       if (item.voziloObavijestId) await resolveVoziloObavijest(item.voziloObavijestId);
       else if (item.voziloGorivoAnomalijaId) await resolveVoziloGorivoAnomalija(item.voziloGorivoAnomalijaId);
-      setItems((current) => current.filter((entry) =>
-        entry.voziloObavijestId !== item.voziloObavijestId
-        && entry.voziloGorivoAnomalijaId !== item.voziloGorivoAnomalijaId));
+      overview.resolve(resolveId);
       window.dispatchEvent(new Event('vozila-obavijest-updated'));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Greška pri označavanju prijave riješenom.');
@@ -108,7 +86,8 @@ export function ObavijestiView({ onNavigate, canResolveVozila }: { onNavigate: (
         )}
       </div>
 
-      {error && <p className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+      <button type="button" disabled={loading} onClick={() => void overview.refresh()} className="mb-3 rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">Osvježi obavijesti</button>
+      {(error || overview.notificationsError) && <p className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{error ?? overview.notificationsError}</p>}
 
       <div className="mb-4 grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-4">
         {(['overdue', 'today', 'soon', 'upcoming'] as ObavijestLevel[]).map((l) => (

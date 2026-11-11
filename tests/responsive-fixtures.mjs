@@ -34,6 +34,11 @@ const site = {
   status: 'aktivno', adresa: 'Ulica gradilista 123', regija: 'zagreb_i_okolica',
 };
 const api = new Proxy({}, { get: (_, name) => name === '__esModule' ? true : async () => [] });
+const overview = {
+  counts: {}, source: { gradilista: [], fakture: [], rokovi: [] }, items: [],
+  notificationsLoading: false, notificationsError: null, countsError: null,
+  refresh() {}, resolve() {},
+};
 const auth = {
   useAuth: () => ({
     canAccess: () => true, isAdmin: true, isPlatformOwner: true,
@@ -157,11 +162,11 @@ function loader(overrides = {}) {
 export async function buildResponsiveFixtures() {
   const views = [
     ['TerminskiPlanView', { onOpenGradiliste() {} }],
-    ['Dashboard', { onNavigate() {} }], ['GradilistaView', {}], ['RegistryViews', {}, 'InvestitoriView'],
+    ['Dashboard', { onNavigate() {}, overview }], ['GradilistaView', {}], ['RegistryViews', {}, 'InvestitoriView'],
     ['RegistryViews', {}, 'ObjektiView'], ['KooperantiView', {}], ['StavkeView', {}], ['PonudeView', {}],
     ['RadniciView', {}], ['VozilaView', {}], ['OpremaView', { kategorija: 'alat' }], ['OpremaView', { kategorija: 'stroj' }],
     ['RasporedView', {}], ['TroskoviView', {}], ['FaktureView', {}], ['RadnoVrijemeView', {}],
-    ['RadniNaloziView', {}], ['RekapitulacijaView', {}], ['ObavijestiView', { onNavigate() {} }],
+    ['RadniNaloziView', {}], ['RekapitulacijaView', {}], ['ObavijestiView', { onNavigate() {}, overview }],
     ['PostavkeView', {}], ['AsistentView', { onNavigate() {} }], ['KorisniciView', {}], ['TvrtkeView', {}],
     ['ObracunSatiPanel', { canEdit: true }],
     ['GradilisteMaterijalDokumenti', {

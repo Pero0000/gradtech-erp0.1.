@@ -11,25 +11,23 @@ import {
 } from 'lucide-react';
 import type { Faktura, Gradiliste, RadniNalog, Rok, Trosak } from '@/types';
 import {
-  fetchFakture,
   fetchFinancijskaRekapitulacija,
-  fetchGradilista,
   fetchRadniNalozi,
-  fetchRokovi,
   fetchTroskovi,
   iznosFakture,
   type FinancijskaRekapitulacija,
 } from '@/lib/api';
 import { izracunajFinancijskeRedove, prazniFinancijskiFilteri } from '@/lib/financijskaRekapitulacija';
-import { loadObavijesti, relativeLabel, type Obavijest, type ObavijestLevel } from '@/lib/obavijesti';
+import { relativeLabel, type Obavijest, type ObavijestLevel } from '@/lib/obavijesti';
+import type { OverviewSnapshot } from '@/lib/overview';
 import { companyStorage, getUniversalHourlyRate } from '@/lib/company';
-import { loadPostavke } from '@/lib/postavke';
 import { todayISO } from '@/lib/rokovi';
 import { Badge } from '@/components/ui/Badge';
 import type { View } from '@/components/Sidebar';
 
 interface DashboardProps {
   onNavigate: (view: View) => void;
+  overview: OverviewSnapshot;
 }
 
 interface DashboardData {
@@ -123,8 +121,8 @@ function AttentionRow({ item, onClick }: { item: AttentionItem; onClick: () => v
   );
 }
 
-export function Dashboard({ onNavigate }: DashboardProps) {
-  const [data, setData] = useState<DashboardData | null>(null);
+export function Dashboard({ onNavigate, overview }: DashboardProps) {
+  const [localData, setData] = useState<Pick<DashboardData, 'troskovi' | 'nalozi' | 'financije'> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const danas = todayISO();
@@ -132,16 +130,12 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   useEffect(() => {
     let cancelled = false;
     void Promise.all([
-      fetchGradilista(),
       fetchTroskovi(),
       fetchRadniNalozi(),
-      fetchFakture(),
-      fetchRokovi(),
-      loadObavijesti(loadPostavke()),
       fetchFinancijskaRekapitulacija(),
-    ]).then(([gradilista, troskovi, nalozi, fakture, rokovi, obavijesti, financije]) => {
+    ]).then(([troskovi, nalozi, financije]) => {
       if (cancelled) return;
-      setData({ gradilista, troskovi, nalozi, fakture, rokovi, obavijesti, financije });
+      setData({ troskovi, nalozi, financije });
     }).catch((reason: unknown) => {
       if (!cancelled) setError(reason instanceof Error ? reason.message : 'Greška pri učitavanju nadzorne ploče.');
     }).finally(() => {
@@ -150,6 +144,11 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     return () => { cancelled = true; };
   }, []);
 
+  const data = useMemo<DashboardData | null>(() => localData && overview.source ? {
+    ...localData, gradilista: overview.source.gradilista, fakture: overview.source.fakture,
+    rokovi: overview.source.rokovi, obavijesti: overview.items,
+  } : null, [localData, overview.source, overview.items]);
+
   const financijskiRedovi = useMemo(() => {
     if (!data) return [];
     const satnica = getUniversalHourlyRate();
@@ -157,8 +156,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     return izracunajFinancijskeRedove(data.gradilista, data.financije, prazniFinancijskiFilteri, satnica, nettoPoRadnicima);
   }, [data]);
 
-  if (loading) return <div className="flex h-full items-center justify-center text-sm text-slate-400">Učitavanje…</div>;
-  if (error) return <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>;
+  if (error || overview.notificationsError) return <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error ?? overview.notificationsError}</div>;
+  if (loading || !overview.source) return <div className="flex h-full items-center justify-center text-sm text-slate-400">Učitavanje…</div>;
   if (!data) return null;
 
   const { gradilista, troskovi, nalozi, fakture, rokovi, obavijesti, financije } = data;

@@ -87,6 +87,7 @@ export function savePostavke(p: Postavke) {
     push: p.push,
   };
   companyStorage.setItem(KEY, JSON.stringify(companySettings));
+  window.dispatchEvent(new Event('tm-notification-settings-changed'));
 }
 
 export function applyTheme(theme: Postavke['theme']) {

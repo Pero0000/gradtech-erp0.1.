@@ -22,16 +22,8 @@ import { PostavkeView } from '@/components/views/PostavkeView';
 import { AsistentView } from '@/components/views/AsistentView';
 import { KorisniciView } from '@/components/views/KorisniciView';
 import { TvrtkeView } from '@/components/views/TvrtkeView';
-import { loadObavijesti, sendPushNotifications } from '@/lib/obavijesti';
-import { applyTheme, applyUserLayout, loadPostavke, loadUserLayout, loadUserTheme } from '@/lib/postavke';
-import {
-  fetchGradilista,
-  fetchRadnici,
-  fetchVozila,
-  fetchRasporedi,
-  fetchTroskovi,
-  fetchRadniNalozi,
-} from '@/lib/api';
+import { applyTheme, applyUserLayout, loadUserLayout, loadUserTheme } from '@/lib/postavke';
+import { useOverview } from '@/lib/useOverview';
 import { useAuth } from '@/auth/useAuth';
 import { MODULES, moduleForView } from '@/auth/permissions';
 import { MobileWorkOrdersView } from '@/components/mobile/MobileWorkOrdersView';
@@ -47,15 +39,8 @@ function App() {
   const sidebarCloseTimer = useRef<number | null>(null);
   const [focusNalogId, setFocusNalogId] = useState<string | null>(null);
   const [focusGradilisteId, setFocusGradilisteId] = useState<string | null>(null);
-  const [counts, setCounts] = useState({
-    gradilista: 0,
-    radnici: 0,
-    vozila: 0,
-    raspored: 0,
-    troskovi: 0,
-    radni_nalozi: 0,
-    obavijesti: 0,
-  });
+  const overview = useOverview();
+  const counts = { ...overview.counts, obavijesti: overview.items.filter((item) => item.level !== 'upcoming').length };
 
   useEffect(() => {
     const hoverQuery = window.matchMedia('(hover: hover)');
@@ -78,44 +63,6 @@ function App() {
     applyTheme(loadUserTheme(profile.id));
     applyUserLayout(loadUserLayout(profile.id));
   }, [company?.id, profile?.approved, profile?.id]);
-
-  useEffect(() => {
-    if (!profile?.approved || !canAccess('obavijesti')) return;
-    let active = true;
-    const refresh = async () => {
-      try {
-        const postavke = loadPostavke();
-        const list = await loadObavijesti(postavke);
-        if (!active) return;
-        setCounts((previous) => ({ ...previous, obavijesti: list.filter((o) => o.level !== 'upcoming').length }));
-        if (postavke.push) sendPushNotifications(list);
-      } catch {
-        // obavijesti view shows its own errors
-      }
-    };
-    window.addEventListener('vozila-obavijest-updated', refresh);
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 30 * 60 * 1000);
-    return () => {
-      active = false;
-      window.removeEventListener('vozila-obavijest-updated', refresh);
-      window.clearInterval(timer);
-    };
-  }, [view, profile?.approved, canAccess]);
-
-  useEffect(() => {
-    if (!profile?.approved) return;
-    (async () => {
-      const requests: Promise<void>[] = [];
-      if (canAccess('gradilista')) requests.push(fetchGradilista().then((items) => setCounts((previous) => ({ ...previous, gradilista: items.length }))));
-      if (canAccess('radnici')) requests.push(fetchRadnici().then((items) => setCounts((previous) => ({ ...previous, radnici: items.length }))));
-      if (canAccess('vozila')) requests.push(fetchVozila().then((items) => setCounts((previous) => ({ ...previous, vozila: items.length }))));
-      if (canAccess('raspored')) requests.push(fetchRasporedi().then((items) => setCounts((previous) => ({ ...previous, raspored: items.length }))));
-      if (canAccess('troskovi')) requests.push(fetchTroskovi().then((items) => setCounts((previous) => ({ ...previous, troskovi: items.length }))));
-      if (canAccess('radni_nalozi')) requests.push(fetchRadniNalozi().then((items) => setCounts((previous) => ({ ...previous, radni_nalozi: items.length }))));
-      await Promise.allSettled(requests);
-    })();
-  }, [view, profile?.approved, canAccess]);
 
   useEffect(() => {
     if (view !== 'raspored' && view !== 'gradilista') setHoverSidebarVisible(false);
@@ -224,13 +171,20 @@ function App() {
           </div>
         </header>
         <div className={`app-content mx-auto min-w-0 w-full max-w-[2560px] px-3 py-4 sm:px-4 sm:py-6 xl:px-8 2xl:px-12 xl:py-8 ${view === 'dashboard' ? 'xl:h-full xl:min-h-0' : ''}`}>
+          {(overview.countsError || overview.notificationsError) && (
+            <div role="alert" className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+              {overview.countsError && <p>Brojače nije moguće osvježiti: {overview.countsError}</p>}
+              {overview.notificationsError && <p>Obavijesti nije moguće osvježiti: {overview.notificationsError}</p>}
+              <button type="button" className="underline" onClick={() => void overview.refresh()}>Pokušaj ponovno</button>
+            </div>
+          )}
           {!viewAuthorized && <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">Provjera prava pristupa…</p>}
           {viewAuthorized && module && !canAccess(module, 'edit') && (
             <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               Ovaj modul je dostupan samo za pregled. Promjene nisu dopuštene za vaš račun.
             </p>
           )}
-          {viewAuthorized && view === 'dashboard' && <Dashboard onNavigate={navigate} />}
+          {viewAuthorized && view === 'dashboard' && <Dashboard onNavigate={navigate} overview={overview} />}
           {viewAuthorized && view === 'tvrtke' && <TvrtkeView />}
           {viewAuthorized && view === 'gradilista' && <GradilistaView focusGradilisteId={focusGradilisteId} onOpenNalog={(id) => { setFocusNalogId(id); setView('radni_nalozi'); }} />}
           {viewAuthorized && view === 'investitori' && <InvestitoriView />}
@@ -260,7 +214,7 @@ function App() {
           {viewAuthorized && view === 'radno_vrijeme' && <RadnoVrijemeView />}
           {viewAuthorized && view === 'radni_nalozi' && <RadniNaloziView key={focusNalogId ?? 'none'} focusNalogId={focusNalogId} />}
           {viewAuthorized && view === 'rekapitulacija' && <RekapitulacijaView />}
-          {viewAuthorized && view === 'obavijesti' && <ObavijestiView onNavigate={navigate} canResolveVozila={canAccess('vozila', 'edit')} />}
+          {viewAuthorized && view === 'obavijesti' && <ObavijestiView onNavigate={navigate} canResolveVozila={canAccess('vozila', 'edit')} overview={overview} />}
           {viewAuthorized && view === 'postavke' && <PostavkeView />}
           {viewAuthorized && view === 'asistent' && <AsistentView />}
           {viewAuthorized && view === 'korisnici' && <KorisniciView />}

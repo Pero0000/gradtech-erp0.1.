@@ -2,6 +2,16 @@
 
 ## Provjere prije objave
 
+### Zajednički globalni brojači i obavijesti
+
+Objaviti novi web-build; nova SQL migracija nije potrebna. Šest bočnih brojača koristi RLS-zaštićene `HEAD` upite s `count: 'exact'`, bez prijenosa redaka, relacija ili paginacije punih lista. Brojač obavijesti računa se iz iste spremljene liste koju prikazuju Obavijesti i Dashboard. Dashboard ponovno koristi i gradilišta, fakture i rokove iz tog zajedničkog izvora; financijski obračun i njegove filtre ne mijenja.
+
+Promjena stranice ne osvježava globalne brojače niti devet izvora obavijesti. Jedna memorijska instanca vezana je uz korisnika, tvrtku i ovlasti; promjena pristupa ili odjava ne prenosi stare rezultate u novi opseg. Paralelni zahtjevi i razvojni StrictMode dijele dohvat. Uspješni relevantni REST upisi i mutacijski RPC-ovi pokreću objedinjeno osvježavanje nakon 300 ms; čitanje, Storage potpisi, Auth i neuspjeli upisi ga ne pokreću. Promjena tijekom aktivnog dohvata zakazuje jedan naknadni dohvat.
+
+Ostaje periodično osvježavanje svakih 30 minuta dok je stranica vidljiva, uz osvježavanje pri povratku na vidljivu stranicu ako je zadnja provjera starija od minute. Obavijesti imaju i ručno osvježavanje. Promjene s drugih uređaja postaju vidljive pri tim provjerama ili ručnom osvježavanju, a ne samom navigacijom. Lokalne postavke prikaza ponovno filtriraju spremljeni izvor bez mrežnog dohvata. Greške su vidljive uz mogućnost ponovnog pokušaja; zadnji uspješni rezultati ostaju sačuvani. Čitanje obavijesti i dalje ne obračunava anomalije niti piše u bazu.
+
+Provjera: `node --test tests/overview.test.mjs tests/auth-refresh.test.mjs tests/fuel-anomalies-readonly.test.mjs tests/company.test.mjs`. Pokriveni su točni brojevi iznad limita redaka, zabrana punih lista za brojače, deduplikacija, navigacija bez novih globalnih dohvata, izolacija opsega, greške i invalidacija samo nakon uspješnih mutacija.
+
 ### Trajne poslovne greške bez PostgREST retry petlje
 
 Nakon prethodnih migracija primijeniti `supabase/migrations/20261110690000_poslovne_greske_bez_serialization_retry.sql`. Migracija u instaliranim PL/pgSQL funkcijama shema `public` i `private` zamjenjuje samo eksplicitne dodjele `ERRCODE = '40001'` s `P0001`. Inventar trenutačnih definicija sadrži 30 funkcija i 43 takve dodjele: zaštitu ekipe naloga, povrat iz povijesti, zaštite povezanih stavki i potvrdu dnevnih kilometara. Koristi se instalirana definicija funkcije kako se ne bi vratila starija verzija iz povijesne migracije. Uvjeti, poruke, potpisi, vlasnici, ovlasti, sigurnosne postavke i triggeri ostaju sačuvani. Stare migracije ostaju nepromijenjene.

@@ -76,7 +76,7 @@ const voziloTip = (vrsta: VoziloDokument['vrsta']): ObavijestTip | null => {
   }
 };
 
-interface Source {
+export interface Source {
   gradilista: Gradiliste[];
   radnici: Radnik[];
   vozila: Vozilo[];

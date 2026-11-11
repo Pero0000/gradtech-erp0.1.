@@ -118,33 +118,45 @@ function setup() {
     render(); await settle(); render(); await settle(); return render();
   };
 
-  // Execute the actual global data effects, rather than a proxy for their dependencies.
-  const app = ts.createSourceFile('App.tsx', read('../src/App.tsx'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const effects = [];
-  function visit(node) {
-    if (ts.isCallExpression(node) && node.expression.getText(app) === 'useEffect'
-      && /loadObavijesti|fetchGradilista/.test(node.getText(app))) effects.push(node.getText(app));
-    ts.forEachChild(node, visit);
-  }
-  visit(app);
-  assert.equal(effects.length, 2);
+  // Run the real shared overview consumer across access-check renders.
   const consumer = hooks();
+  consumer.react.useSyncExternalStore = (_subscribe, snapshot) => snapshot();
   const dataCalls = [];
-  const scope = {
-    useEffect: consumer.react.useEffect, setCounts() {}, loadPostavke: () => ({}), sendPushNotifications() {},
-    window: { addEventListener() {}, removeEventListener() {}, setInterval() {}, clearInterval() {} },
+  const overviewModule = { exports: {} };
+  const overviewMocks = {
+    './api': {
+      fetchOverviewCounts: async () => { dataCalls.push('counts'); return {}; },
+    },
+    './obavijesti': {
+      loadObavijestiSource: async () => { dataCalls.push('notifications'); return {}; },
+      buildObavijesti: () => [],
+    },
+    './postavke': { loadPostavke: () => ({}) },
   };
-  for (const name of ['loadObavijesti', 'fetchGradilista', 'fetchRadnici', 'fetchVozila',
-    'fetchRasporedi', 'fetchTroskovi', 'fetchRadniNalozi']) {
-    scope[name] = async () => { dataCalls.push(name); return []; };
-  }
-  const dataEffects = vm.runInNewContext(compile(`(auth) => {
-    const {profile, canAccess} = auth; const view = 'dashboard';
-    ${effects.join(';\n')}
-  }`), scope);
+  vm.runInNewContext(compile(read('../src/lib/overview.ts')), {
+    module: overviewModule, exports: overviewModule.exports,
+    require: (name) => { assert.ok(name in overviewMocks, name); return overviewMocks[name]; },
+  });
+  let currentAuth;
+  const sharedModule = { exports: {} };
+  const sharedMocks = {
+    react: consumer.react,
+    '@/auth/useAuth': { useAuth: () => currentAuth },
+    './api': { overviewCountModules: ['gradilista', 'radnici', 'vozila', 'raspored', 'troskovi', 'radni_nalozi'] },
+    './overview': overviewModule.exports,
+    './overviewEvents': { OVERVIEW_CHANGED: 'changed' },
+    './obavijesti': { sendPushNotifications() {} },
+    './postavke': { loadPostavke: () => ({ push: false }) },
+  };
+  vm.runInNewContext(compile(read('../src/lib/useOverview.ts')), {
+    module: sharedModule, exports: sharedModule.exports,
+    require: (name) => { assert.ok(name in sharedMocks, name); return sharedMocks[name]; },
+    window: { addEventListener() {}, removeEventListener() {}, setInterval() {}, clearInterval() {}, clearTimeout() {} },
+    document: { addEventListener() {}, removeEventListener() {} },
+  });
   return {
     database, queries, companyWrites, timers, dataCalls, ready, render, settle,
-    renderApp: (auth) => consumer.render(() => dataEffects(auth)),
+    renderApp: (auth) => { currentAuth = auth; return consumer.render(() => sharedModule.exports.useOverview()); },
     fail: () => { failure = new Error('Provjera ovlasti nije uspjela'); },
     dispose: () => { runtime.dispose(); consumer.dispose(); },
   };
@@ -157,7 +169,7 @@ test('60-second access checks preserve references and do not reload any global a
   s.renderApp(initial);
   await s.settle();
   const initialCalls = [...s.dataCalls];
-  assert.equal(initialCalls.length, 7);
+  assert.equal(initialCalls.length, 2);
   for (let minute = 0; minute < 3; minute++) {
     s.database.app_user_permissions.reverse();
     s.database.tvrtke.postavke.extra = { b: 2, a: 1 };

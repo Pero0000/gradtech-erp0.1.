@@ -1,4 +1,9 @@
-import type { RadnikDokumentVrsta } from '@/types';
+import type { RadnikDokument, RadnikDokumentVrsta } from '@/types';
+
+export function radnikDokumentSpremnostVrsta(document: Pick<RadnikDokument, 'vrsta' | 'naziv'>): RadnikDokumentVrsta {
+  const naziv = document.naziv.trim().toLocaleLowerCase('hr').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return naziv === 'pozar' ? 'osposobljavanje' : document.vrsta;
+}
 
 export const dokumentVrste: Record<RadnikDokumentVrsta, string> = {
   lijecnicki: 'Liječnički pregled',

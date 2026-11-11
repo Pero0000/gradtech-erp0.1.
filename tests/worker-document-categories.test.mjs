@@ -43,6 +43,19 @@ function load(file, mocks, fixtures = {}) {
 const definitions = load('../src/lib/radnikDokumenti.ts', {});
 const custom = { vrsta: 'custom:category-id', naziv: 'Rad na visini' };
 
+test('Požar counts as osposobljavanje for readiness without modifying documents or other categories', () => {
+  for (const naziv of ['Požar', ' POŽAR ', 'pozar']) {
+    const document = { vrsta: custom.vrsta, naziv };
+    assert.equal(definitions.radnikDokumentSpremnostVrsta(document), 'osposobljavanje');
+    assert.equal(document.vrsta, custom.vrsta);
+    assert.equal(document.naziv, naziv);
+  }
+  for (const vrsta of ['lijecnicki', 'zastita_na_radu', 'osposobljavanje', 'atest', custom.vrsta]) {
+    assert.equal(definitions.radnikDokumentSpremnostVrsta({ vrsta, naziv: 'Drugi dokument' }), vrsta);
+  }
+  assert.equal(definitions.radnikDokumentSpremnostVrsta({ vrsta: custom.vrsta, naziv: 'Požarni plan' }), custom.vrsta);
+});
+
 function nodes(node) {
   if (Array.isArray(node)) return node.flatMap(nodes);
   if (!node || typeof node !== 'object' || !node.props) return [];
@@ -144,12 +157,15 @@ for (const [name, training, status, expected] of [
   ['training remains valid on expiry day', { vrsta: 'osposobljavanje', datum_do: '2026-11-04' }, 'aktivan', 'Spreman za rad'],
   ['training without expiry preserves existing document behavior', { vrsta: 'osposobljavanje', datum_do: null }, 'aktivan', 'Spreman za rad'],
   ['inactive workers are not ready despite valid training', { vrsta: 'osposobljavanje', datum_do: '2027-01-01' }, 'neaktivan', 'Neaktivan'],
+  ['valid Požar supplies training readiness', { vrsta: custom.vrsta, naziv: 'Požar', datum_do: '2027-01-01' }, 'aktivan', 'Spreman za rad'],
+  ['expired Požar blocks training readiness', { vrsta: custom.vrsta, naziv: 'Požar', datum_do: '2026-11-03' }, 'aktivan', 'Nije spreman za rad'],
+  ['another custom document cannot supply training readiness', { ...custom, datum_do: '2027-01-01' }, 'aktivan', 'Nije spreman za rad'],
 ]) {
   test(name, () => {
     const documents = [
-      { radnik_id: 'worker', vrsta: 'lijecnicki', datum_do: '2027-01-01' },
-      { radnik_id: 'worker', vrsta: 'zastita_na_radu', datum_do: '2027-01-01' },
-      { radnik_id: 'worker', ...training },
+      { radnik_id: 'worker', vrsta: 'lijecnicki', naziv: 'Liječnički pregled', datum_do: '2027-01-01' },
+      { radnik_id: 'worker', vrsta: 'zastita_na_radu', naziv: 'Zaštita na radu', datum_do: '2027-01-01' },
+      { radnik_id: 'worker', naziv: 'Osposobljavanje', ...training },
     ];
     const elements = readiness(documents, status);
     const badge = elements.find((node) => node.type.name === 'Badge');

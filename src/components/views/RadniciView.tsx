@@ -10,7 +10,7 @@ import {
   addRadnikPovijest, fetchSviRadnikDokumenti, addRadnikKategorija,
   fetchRadnikKategorijeGorivo, type RadnikKategorijaGorivo,
 } from '@/lib/api';
-import { obavezniRadnikDokumenti } from '@/lib/radnikDokumenti';
+import { obavezniRadnikDokumenti, radnikDokumentSpremnostVrsta } from '@/lib/radnikDokumenti';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Field, TextInput, Select } from '@/components/ui/Field';
@@ -61,7 +61,7 @@ type SortKey = 'ime';
 const requiredDocumentTypes = obavezniRadnikDokumenti.map(({ type }) => type);
 const documentSummary = (documents: RadnikDokument[], today: string) => {
   const states = requiredDocumentTypes.map((type) => {
-    const latest = documents.filter((item) => item.vrsta === type)
+    const latest = documents.filter((item) => radnikDokumentSpremnostVrsta(item) === type)
       .sort((a, b) => (b.datum_do ?? '').localeCompare(a.datum_do ?? ''))[0];
     if (!latest) return 'red';
     if (!latest.datum_do) return 'green';

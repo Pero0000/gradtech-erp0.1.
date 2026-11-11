@@ -18,7 +18,7 @@ import { Modal } from '@/components/ui/Modal';
 import { HistoryButton, HistoryDialog } from './HistoryDialog';
 import { RadnikDokumenti } from '@/components/views/RadnikDokumenti';
 import { Badge } from '@/components/ui/Badge';
-import { obavezniRadnikDokumenti } from '@/lib/radnikDokumenti';
+import { obavezniRadnikDokumenti, radnikDokumentSpremnostVrsta } from '@/lib/radnikDokumenti';
 
 type Tab = 'pregled' | 'place' | 'dokumenti' | 'aktivnost';
 const tabs: { key: Tab; label: string; icon: typeof Activity }[] = [
@@ -233,8 +233,9 @@ export function RadnikDetalj({ radnik, open, onClose, onEdit }: {
     const result = new Map<RadnikDokumentVrsta, RadnikDokument>();
     for (const document of documents) {
       if (document.radnik_id !== radnik.id) continue;
-      const existing = result.get(document.vrsta);
-      if (!existing || (document.datum_do ?? '') > (existing.datum_do ?? '')) result.set(document.vrsta, document);
+      const vrsta = radnikDokumentSpremnostVrsta(document);
+      const existing = result.get(vrsta);
+      if (!existing || (document.datum_do ?? '') > (existing.datum_do ?? '')) result.set(vrsta, document);
     }
     return result;
   }, [documents, radnik]);

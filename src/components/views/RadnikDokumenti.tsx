@@ -154,6 +154,7 @@ export function RadnikDokumenti({ radnikId, onChange }: { radnikId: string; onCh
       </p>
       <p className="mb-3 text-xs text-slate-500">
         Za spremnost za rad potrebni su važeći liječnički pregled, zaštita na radu i osposobljavanje.
+        Dokument naziva „Požar” također se računa pod osposobljavanje.
         Stari atesti ostaju u evidenciji, ali ne zamjenjuju osposobljavanje.
       </p>
       {error && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}

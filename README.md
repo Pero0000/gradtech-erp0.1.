@@ -2,6 +2,8 @@
 
 ## Provjere prije objave
 
+Dokument djelatnika s točnim nazivom **Požar** (neovisno o velikim slovima, okolnim razmacima i zapisu `pozar`) računa se pod postojeće **Osposobljavanje** u profilu i sažetku spremnosti na popisu djelatnika. Primjenjuju se postojeća pravila odabira dokumenta po datumu isteka i provjere valjanosti. Nazivi pokazatelja, spremljene kategorije/dokumenti i obavijesti ne mijenjaju se; postojeće osposobljavanje i dalje vrijedi. Nije potrebna migracija. Provjera: `node --test tests/worker-document-categories.test.mjs`.
+
 ### Zajedničko izvršenje i read-only otvaranje radnog naloga
 
 Detalj naloga i modal **Uredi** dijele stanje izvršenja po ID-u naloga tijekom boravka u modulu. Ekipa/vremena, zadaci, materijal, inventar alata i strojeva te kilometri, napomena i oznake izvršenja učitavaju se jednom. Otvaranje **Uredi** nakon uspješnog učitavanja detalja dodaje **0 zahtjeva za tih šest izvora** umjesto prethodnih šest; aktivni zahtjevi također se dijele. Prazan rezultat smatra se učitanim, a nakon djelomične pogreške ponavlja se samo neuspješan izvor. Izmjene i blokade spremanja sati/zadataka/stavki vidljive su u oba prikaza. Fotografije, dokumenti i povijesti ostaju zasebno odgođeni do otvaranja pripadajućeg prikaza.

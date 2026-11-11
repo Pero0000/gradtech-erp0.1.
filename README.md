@@ -2,6 +2,16 @@
 
 ## Provjere prije objave
 
+### Grupirana rekapitulacija svih gradilišta
+
+Primijeniti `supabase/migrations/20261110700000_rekapitulacija_grupirani_sazeci.sql` prije objave novog web-builda. Zadani pregled svih gradilišta više ne poziva šest upita za svako gradilište. Jedan read-only RPC grupira troškove po gradilištu/kategoriji, sate i rad po satnicama, fakture s postojećim smjerom rabata, plaćene fakture i ugovorene iznose. Povezane izvore agregira odvojeno prije spajanja, bez umnožavanja redaka. Nalozi i rokovi ne dohvaćaju se za pregled svih gradilišta jer se ondje ne prikazuju; detaljni pregled pojedinačnog gradilišta i dalje ih učitava postojećim putem.
+
+Za 20 gradilišta pregled sada traži jedan zahtjev sa sažecima umjesto 120 detaljnih zahtjeva (plus postojeći dohvat liste gradilišta). Sažeci se paginiraju po 500 gradilišta uz stabilan redoslijed; broj poziva ne ovisi o broju troškova/sati po gradilištu. Ne prenose se pojedinačni troškovi, sati, fakture ni dokumenti. Prazna gradilišta ostaju u rezultatu s nulama. Pogreška ili nedostupan sažetak ne zamjenjuje se nulom niti parcijalnim uspjehom.
+
+Funkcija je `STABLE SECURITY INVOKER`, ograničena na prijavljene korisnike, postojeći RLS svih izvornih tablica i trenutačnu tvrtku. Nema proširivanja prava ni potpisivanja datoteka. Univerzalna satnica i način obračuna po djelatnicima mijenjaju rezultat odmah lokalno bez novog RPC-a; nedostupna/neunesena satnica koristi univerzalnu, a spremljena nula ostaje nula. Kategorije, statusni filtar, sortiranje, izvoz i otvaranje detalja ostaju dostupni. Kartica financija zadržava postojeći grupni dohvat potreban njezinim detaljnim filtrima.
+
+Provjera: `node --test tests/recap-grouped.test.mjs`. Stvarni SQL testiran je za RLS, drugu tvrtku, skrivene djelatnike, rabate, negativne iznose, prazna gradilišta i više od 1000 zapisa. API/UI testovi provjeravaju broj zahtjeva, paginaciju, greške te iznose prikaza/izvoza pri promjeni satnice, načina obračuna, statusa i sortiranja.
+
 ### Zajednički globalni brojači i obavijesti
 
 Objaviti novi web-build; nova SQL migracija nije potrebna. Šest bočnih brojača koristi RLS-zaštićene `HEAD` upite s `count: 'exact'`, bez prijenosa redaka, relacija ili paginacije punih lista. Brojač obavijesti računa se iz iste spremljene liste koju prikazuju Obavijesti i Dashboard. Dashboard ponovno koristi i gradilišta, fakture i rokove iz tog zajedničkog izvora; financijski obračun i njegove filtre ne mijenja.

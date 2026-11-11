@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, FileText, TrendingDown, Building2 } from 'lucide-react';
-import type { Gradiliste, Trosak, RadnoVrijeme, Faktura, UgovoreniRad, TrosakKategorija } from '@/types';
-import { fetchFullRekapitulacija, iznosFakture } from '@/lib/api';
+import type { Gradiliste, TrosakKategorija } from '@/types';
+import { fetchRekapitulacijaSazeci, type RekapitulacijaSazetak } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
 import { ExportMenu } from '@/components/ui/ExportMenu';
 
@@ -26,17 +26,10 @@ const statusBadge: Record<string, { variant: 'blue' | 'green' | 'red' | 'yellow'
   zavrseno: { variant: 'blue', label: 'Završeno' },
 };
 
-interface Red {
+interface Red extends RekapitulacijaSazetak {
   g: Gradiliste;
-  direktni: number;
   rad: number;
   troskovi: number;
-  fakture: number;
-  placeno: number;
-  ugovoreno: number;
-  sati: number;
-  radnoVrijeme: RadnoVrijeme[];
-  kategorije: Partial<Record<TrosakKategorija, number>>;
 }
 
 type SortKey = 'naziv' | 'troskovi' | 'fakture' | 'ugovoreno';
@@ -63,29 +56,23 @@ export function RekapitulacijaSva({
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setError(null);
+      setRows([]);
       try {
-        const all = await Promise.all(gradilista.map(async (g): Promise<Red> => {
-          const d = await fetchFullRekapitulacija(g.id);
-          const troskovi = d.troskovi as Trosak[];
-          const rv = d.radnoVrijeme as RadnoVrijeme[];
-          const fakture = d.fakture as Faktura[];
-          const ugovoreni = d.ugovoreniRadovi as UgovoreniRad[];
-          const direktni = troskovi.reduce((s, t) => s + t.iznos, 0);
-          const kategorije: Partial<Record<TrosakKategorija, number>> = {};
-          troskovi.forEach((t) => { kategorije[t.kategorija] = (kategorije[t.kategorija] ?? 0) + t.iznos; });
+        const summaries = new Map((await fetchRekapitulacijaSazeci(gradilista.map((g) => g.id)))
+          .map((summary) => [summary.gradiliste_id, summary]));
+        const all = gradilista.map((g): Red => {
+          const summary = summaries.get(g.id);
+          if (!summary) throw new Error(`Sažetak gradilišta „${g.naziv}” nije dostupan.`);
           return {
-            g, direktni, rad: 0, troskovi: direktni,
-            fakture: fakture.reduce((s, f) => s + iznosFakture(f), 0),
-            placeno: fakture.filter((f) => f.status === 'placena').reduce((s, f) => s + iznosFakture(f), 0),
-            ugovoreno: ugovoreni.reduce((s, u) => s + u.ugovoreni_iznos, 0),
-            sati: rv.reduce((s, r) => s + r.sati, 0),
-            radnoVrijeme: rv,
-            kategorije,
+            ...summary, g, rad: 0, troskovi: summary.direktni,
           };
-        }));
+        });
         if (!cancelled) setRows(all);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Greška pri učitavanju');
+        if (!cancelled) setError(
+          e && typeof e === 'object' && 'message' in e ? String(e.message) : 'Greška pri učitavanju',
+        );
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -97,10 +84,9 @@ export function RekapitulacijaSva({
     const list = rows.filter((r) => !status || r.g.status === status);
     const dir = sortDir === 'asc' ? 1 : -1;
     return list.map((row) => {
-      const rad = row.radnoVrijeme.reduce((sum, item) => {
-        const rate = nettoPoRadnicima ? item.radnici?.cijena_sata ?? satnica : satnica;
-        return sum + item.sati * rate;
-      }, 0);
+      const rad = nettoPoRadnicima
+        ? row.rad_po_satnici + row.sati_bez_satnice * satnica
+        : row.sati * satnica;
       return { ...row, rad, troskovi: row.direktni + rad };
     }).sort((a, b) => {
       if (sortKey === 'naziv') return a.g.naziv.localeCompare(b.g.naziv, 'hr') * dir;

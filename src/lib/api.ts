@@ -5032,6 +5032,37 @@ export async function fetchFinancijskaRekapitulacija(): Promise<FinancijskaRekap
 
 export type RekapitulacijaNalog = Pick<RadniNalog, 'id' | 'broj' | 'naslov' | 'status' | 'prioritet' | 'datum_kreiranja' | 'rok'>;
 
+export interface RekapitulacijaSazetak {
+  gradiliste_id: string;
+  direktni: number;
+  kategorije: Partial<Record<TrosakKategorija, number>>;
+  sati: number;
+  rad_po_satnici: number;
+  sati_bez_satnice: number;
+  fakture: number;
+  placeno: number;
+  ugovoreno: number;
+}
+
+export async function fetchRekapitulacijaSazeci(gradilisteIds: readonly string[]): Promise<RekapitulacijaSazetak[]> {
+  const requested = new Set(gradilisteIds);
+  const ids = [...requested];
+  if (ids.length === 0) return [];
+  const rows = await fetchAllRows<RekapitulacijaSazetak>(async (from, to) => {
+    const result = await supabase.rpc('get_rekapitulacija_sazeci', { p_gradiliste_ids: ids })
+      .order('gradiliste_id').range(from, to);
+    if (result.error && ['42883', 'PGRST202'].includes(result.error.code ?? '')) {
+      throw new Error('Primijenite migraciju 20261110700000_rekapitulacija_grupirani_sazeci.sql za grupiranu rekapitulaciju.');
+    }
+    return result;
+  });
+  if (rows.length !== ids.length || new Set(rows.map((row) => row.gradiliste_id)).size !== ids.length
+    || rows.some((row) => !requested.has(row.gradiliste_id))) {
+    throw new Error('Nisu dostupni sažeci svih odabranih gradilišta. Osvježite gradilišta i provjerite prava pristupa.');
+  }
+  return rows;
+}
+
 export async function fetchFullRekapitulacija(gradilisteId: string) {
   const [troskovi, radnoVrijeme, nalozi, rokovi, fakture, ugovoreniRadovi] = await Promise.all([
     supabase

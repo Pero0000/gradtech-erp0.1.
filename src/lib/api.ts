@@ -3586,6 +3586,21 @@ export async function setNalogPoslovodja(nalogId: string, radnikId: string | nul
   if (error) throw error;
 }
 
+export async function saveNalogInitialValues(nalogId: string, radnikIds: string[], poslovodjaId: string | null) {
+  if (radnikIds.length > 0) {
+    const { error } = await supabase.from('radni_nalozi_radnici')
+      .update({ vrijeme_od: '06:00' })
+      .eq('nalog_id', nalogId).in('radnik_id', radnikIds)
+      .is('vrijeme_od', null).eq('mobile_zero_hours', false);
+    if (error) throw error;
+  }
+  if (poslovodjaId) {
+    const { error } = await supabase.from('radni_nalozi')
+      .update({ poslovodja_id: poslovodjaId }).eq('id', nalogId).is('poslovodja_id', null);
+    if (error) throw error;
+  }
+}
+
 export async function setNalogVozac(nalogId: string, radnikId: string | null) {
   const { error } = await supabase.from('radni_nalozi').update({ vozac_id: radnikId }).eq('id', nalogId);
   if (error) throw error;

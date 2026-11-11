@@ -1,6 +1,7 @@
 import { formatHrDate } from '@/lib/localization';
 import { useState, useEffect, useCallback } from 'react';
 import { useRequestScope } from '@/lib/useRequestScope';
+import { useNalogExecutionCache } from '@/lib/useNalogExecution';
 import { ClipboardList, Plus, Pencil, Trash2, Users, Calendar, AlertCircle, Printer, Bell, History, Ban } from 'lucide-react';
 import type { RadniNalog, Gradiliste, Radnik, NalogStatus, NalogPrioritet, Rok } from '@/types';
 import {
@@ -81,6 +82,7 @@ const addDays = (d: Date, n: number) => {
 const fmtDate = (s: string) => formatHrDate(new Date(s + 'T00:00:00'));
 
 export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null } = {}) {
+  const executionCache = useNalogExecutionCache();
   const loadScope = useRequestScope();
   const rokoviScope = useRequestScope();
   const [items, setItems] = useState<RadniNalog[]>([]);
@@ -202,6 +204,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
   const load = useCallback(async (rethrow = false) => {
     const isCurrent = loadScope.start();
     if (!isCurrent()) return;
+    executionCache.invalidate();
     if (!rethrow) setLoading(true);
     setError(null);
     try {
@@ -216,7 +219,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, [loadRokovi, loadScope]);
+  }, [loadRokovi, loadScope, executionCache]);
 
   useEffect(() => {
     void load();
@@ -267,6 +270,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
         radnik_ids: form.radnik_ids,
       };
       if (editing) {
+        await executionCache.get(editing.id).persistDefaults();
         await updateRadniNalog(editing.id, payload);
       } else {
         await createRadniNalog({ ...payload, broj: form.broj });
@@ -752,7 +756,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                   </fieldset>
                 </div>
 
-                <NalogIzvrsenje key={n.id} nalog={n} slotId={`rn-detail-slot-${n.id}`} visualSections onChange={() => { setDeletionVersion((value) => value + 1); void load(); }} />
+                <NalogIzvrsenje key={n.id} nalog={n} executionCache={executionCache} slotId={`rn-detail-slot-${n.id}`} visualSections onChange={() => { setDeletionVersion((value) => value + 1); void load(); }} />
               </div>
             );
           })()}
@@ -893,6 +897,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
             <NalogIzvrsenje
               key={editing.id}
               nalog={editing}
+              executionCache={executionCache}
               slotId="nalog-modal-slot"
               radnikIds={form.radnik_ids}
               onChange={(zavrsen) => {

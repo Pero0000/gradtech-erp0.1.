@@ -544,6 +544,7 @@ test('time editing restores persisted values after rejection and serializes pend
     const errors = [];
     const context = {
       vremena: previous, nalog: { id: 'order' }, timeSavePending: { current: false },
+      execution: { persistDefaults: async () => {} },
       setVremena: (value) => { rows = value; },
       setSavingTime: (value) => { saving = value; },
       saveNalogRadnikVrijeme: () => {
@@ -561,6 +562,7 @@ test('time editing restores persisted values after rejection and serializes pend
     vm.runInContext(`${outputText}\nthis.changeTime = changeVrijeme; this.changeZero = changeZeroHours;`, context);
     context.changeTime('worker', 'vrijeme_do', '12:00');
     context.changeZero('worker', true);
+    await new Promise(resolve => setImmediate(resolve));
     assert.equal(calls, 1);
     assert.equal(saving, true);
     assert.equal(context.timeSavePending.current, true);

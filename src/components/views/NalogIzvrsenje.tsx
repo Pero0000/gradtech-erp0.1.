@@ -2,6 +2,8 @@ import { formatHrDateTime } from '@/lib/localization';
 import { useAuth } from '@/auth/useAuth';
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from 'react';
 import { useDeferredFiles } from '@/lib/useDeferredFiles';
+import { useNalogExecution } from '@/lib/useNalogExecution';
+import type { NalogExecutionCache } from '@/lib/nalogExecution';
 import { createPortal } from 'react-dom';
 import { PrivateImage, PrivateFileLink } from '@/components/ui/PrivateImage';
 import { Camera, Check, ChevronLeft, ChevronRight, Clock, FileText, Gauge, Hammer, Package, Plus, Trash2, X, ListChecks, Wrench } from 'lucide-react';
@@ -20,7 +22,6 @@ import {
   deleteNalogStavka,
   fetchNalogDokumenti,
   fetchNalogFoto,
-  fetchNalogIzvrsenje,
   fetchOprema,
   fetchNalogRadnikVrijeme,
   fetchNalogStavke,
@@ -55,8 +56,6 @@ function errText(reason: unknown, fallback: string) {
   return fallback;
 }
 
-const hint = ' Pokreni migraciju 20261015230000_nalog_izvrsenje.sql u Supabase SQL editoru.';
-const hint2 = ' Pokreni migraciju 20261015240000_nalog_stavke_dokumenti.sql u Supabase SQL editoru.';
 const auditActions: Record<string, string> = {
   worker_assigned: 'Djelatnik je dodijeljen nalogu',
   worker_unassigned: 'Djelatnik je uklonjen s naloga',
@@ -391,6 +390,7 @@ export function NalogIzvrsenje({
   visualSections = false,
   onChange,
   slotId,
+  executionCache,
 }: {
   nalog: Pick<RadniNalog, 'id' | 'gradiliste_id'> & Partial<Pick<RadniNalog, 'status' | 'mobile_status'>>;
   radnikIds?: string[];
@@ -398,18 +398,20 @@ export function NalogIzvrsenje({
   hideStavke?: boolean;
   visualSections?: boolean;
   slotId?: string;
+  executionCache?: NalogExecutionCache;
   onChange?: (zavrsen: boolean) => void;
 }) {
   const { canAccess } = useAuth();
+  const { execution, snapshot } = useNalogExecution(nalog.id, executionCache);
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   useEffect(() => {
     setSlot(slotId ? document.getElementById(slotId) : null);
   }, [slotId]);
-  const [zavrsen, setZavrsen] = useState(false);
-  const [bezIzvrsenja, setBezIzvrsenja] = useState(false);
-  const [teren, setTeren] = useState(false);
-  const [poslovodja, setPoslovodja] = useState<string | null>(null);
-  const [vozac, setVozac] = useState<string | null>(null);
+  const [zavrsen, setZavrsen] = execution.field(snapshot, 'zavrsen');
+  const [bezIzvrsenja, setBezIzvrsenja] = execution.field(snapshot, 'bezIzvrsenja');
+  const [teren, setTeren] = execution.field(snapshot, 'teren');
+  const [poslovodja, setPoslovodja] = execution.field(snapshot, 'poslovodja');
+  const [vozac, setVozac] = execution.field(snapshot, 'vozac');
 
   const changePoslovodja = (radnikId: string | null) => {
     setPoslovodja(radnikId);
@@ -425,16 +427,19 @@ export function NalogIzvrsenje({
       onChange?.(zavrsen);
     }, 'Greška pri spremanju vozača.');
   };
-  const [error, setError] = useState<string | null>(null);
+  const error = snapshot.error;
+  const setError = useCallback((next: SetStateAction<string | null>) => {
+    execution.field(execution.getSnapshot(), 'error')[1](next);
+  }, [execution]);
   const [retryingKmSync, setRetryingKmSync] = useState(false);
   const [restoringStatusId, setRestoringStatusId] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const [km, setKm] = useState({ pocetak: '', kraj: '' });
-  const [kmBezObracuna, setKmBezObracuna] = useState(false);
-  const [stavke, setStavke] = useState<NalogStavka[]>([]);
-  const [alati, setAlati] = useState<Oprema[]>([]);
-  const [strojevi, setStrojevi] = useState<Oprema[]>([]);
-  const [napomena, setNapomena] = useState('');
+  const [km, setKm] = execution.field(snapshot, 'km');
+  const [kmBezObracuna] = execution.field(snapshot, 'kmBezObracuna');
+  const [stavke, setStavke] = execution.field(snapshot, 'stavke');
+  const [alati, setAlati] = execution.field(snapshot, 'alati');
+  const [strojevi, setStrojevi] = execution.field(snapshot, 'strojevi');
+  const [napomena, setNapomena] = execution.field(snapshot, 'napomena');
   const [filesSelection, setFilesSelection] = useState<{ id: string; tab: 'foto' | 'dokumenti' | null }>({ id: nalog.id, tab: null });
   const filesTab = filesSelection.id === nalog.id ? filesSelection.tab : null;
   const setFilesTab = (tab: 'foto' | 'dokumenti') => setFilesSelection({ id: nalog.id, tab });
@@ -464,11 +469,11 @@ export function NalogIzvrsenje({
   const [gradDokumenti, setGradDokumenti] = useState<GradilisteDokument[]>([]);
   const [gradLinked, setGradLinked] = useState<string[]>([]);
   const docRef = useRef<HTMLInputElement>(null);
-  const [vremena, setVremena] = useState<NalogRadnikVrijeme[]>([]);
-  const [savingTime, setSavingTime] = useState(false);
-  const timeSavePending = useRef(false);
-  const [zadaci, setZadaci] = useState<GradilisteZadatak[]>([]);
-  const [savingCompletion, setSavingCompletion] = useState(false);
+  const [vremena, setVremena] = execution.field(snapshot, 'vremena');
+  const [savingTime, setSavingTime] = execution.field(snapshot, 'savingTime');
+  const timeSavePending = execution.timeSavePending;
+  const [zadaci, setZadaci] = execution.field(snapshot, 'zadaci');
+  const [savingCompletion, setSavingCompletion] = execution.field(snapshot, 'savingCompletion');
   const completionDisabled = savingCompletion || zavrsen || nalog.status === 'zavrsen' || nalog.status === 'otkazan';
   const [newZadatak, setNewZadatak] = useState<Record<ZadatakVrsta, string>>({ zadatak: '', dodatni: '' });
   const [selectedFotoId, setSelectedFotoId] = useState<string | null>(null);
@@ -502,46 +507,12 @@ export function NalogIzvrsenje({
 
   const load = useCallback(async () => {
     setError(null);
-    const [izv, vr, zad, st, inventory, machines] = await Promise.allSettled([
-      fetchNalogIzvrsenje(nalog.id),
-      fetchNalogRadnikVrijeme(nalog.id),
-      fetchNalogZadaci(nalog.id),
-      fetchNalogStavke(nalog.id),
-      fetchOprema('alat'),
-      fetchOprema('stroj'),
-    ]);
-    if (izv.status === 'fulfilled') {
-      setKm({ pocetak: izv.value.km_pocetak?.toString() ?? '', kraj: izv.value.km_kraj?.toString() ?? '' });
-      setKmBezObracuna(Boolean(izv.value.km_bez_obracuna));
-      setNapomena(izv.value.napomena ?? '');
-      setZavrsen(izv.value.status === 'zavrsen');
-      setBezIzvrsenja(Boolean(izv.value.bez_izvrsenja));
-      setTeren(Boolean(izv.value.teren));
-      setPoslovodja(izv.value.poslovodja_id ?? null);
-      setVozac(izv.value.vozac_id ?? null);
-      // Jedini djelatnik na nalogu automatski postaje poslovođa.
-      if (!izv.value.poslovodja_id && vr.status === 'fulfilled' && vr.value.length === 1) {
-        const only = vr.value[0].radnik_id;
-        setPoslovodja(only);
-        void setNalogPoslovodja(nalog.id, only).catch(() => undefined);
-      }
-    } else setError(errText(izv.reason, 'Greška pri učitavanju.') + hint + ' Za napomene pokreni i 20261015250000_nalog_napomena.sql.');
-    if (st.status === 'fulfilled') setStavke(st.value);
-    else setError((e) => e ?? errText(st.reason, 'Greška pri učitavanju materijala i alata.') + hint2);
-    if (inventory.status === 'fulfilled') setAlati(inventory.value.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'));
-    else setError((e) => e ?? errText(inventory.reason, 'Greška pri učitavanju popisa alata.'));
-    if (machines.status === 'fulfilled') setStrojevi(machines.value.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'));
-    if (vr.status === 'fulfilled') {
-      const withDefault = vr.value.map((v) => (v.mobile_zero_hours || v.vrijeme_od ? v : { ...v, vrijeme_od: '06:00:00' }));
-      setVremena(withDefault);
-      vr.value
-        .filter((v) => !v.mobile_zero_hours && !v.vrijeme_od)
-        .forEach((v) => void saveNalogRadnikVrijeme(nalog.id, v.radnik_id, '06:00', v.vrijeme_do).catch(() => undefined));
+    try {
+      await execution.load(true);
+    } catch (reason) {
+      setError(errText(reason, 'Greška pri učitavanju izvršenja naloga.'));
     }
-    else setError((e) => e ?? errText(vr.reason, 'Greška pri učitavanju radnika.') + hint);
-    if (zad.status === 'fulfilled') setZadaci(zad.value);
-    else setError((e) => e ?? errText(zad.reason, 'Greška pri učitavanju zadataka.') + ' Pokreni migraciju 20261015220000_zadaci_nalog_veza.sql.');
-  }, [nalog.id]);
+  }, [execution, setError]);
 
   useEffect(() => {
     if (loadedSiteDocuments) setGradDokumenti(loadedSiteDocuments);
@@ -677,8 +648,12 @@ export function NalogIzvrsenje({
   };
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    let active = true;
+    void execution.load().catch((reason: unknown) => {
+      if (active) setError(errText(reason, 'Greška pri učitavanju izvršenja naloga.'));
+    });
+    return () => { active = false; };
+  }, [execution, setError]);
 
   const guard = async (action: () => Promise<void>, fallback: string) => {
     setError(null);
@@ -692,6 +667,7 @@ export function NalogIzvrsenje({
   const changeTeren = (value: boolean) => {
     setTeren(value);
     void guard(async () => {
+      await execution.persistDefaults();
       await setNalogTeren(nalog.id, value);
       onChange?.(zavrsen);
     }, 'Greška pri spremanju oznake teren.');
@@ -741,6 +717,7 @@ export function NalogIzvrsenje({
         }
         : undefined;
       try {
+        await execution.persistDefaults();
         await setNalogZavrsen(nalog.id, value, bezPotvrdeDjelatnika, zavrsiBezIzvrsenja, izvrsenje);
       } catch (reason) {
         if (reason instanceof Error && reason.message.startsWith('Nalog je ')) {
@@ -765,6 +742,7 @@ export function NalogIzvrsenje({
         throw new Error('Očitanja kilometara moraju biti nenegativni cijeli brojevi.');
       }
       if (pocetak !== null && kraj !== null && kraj < pocetak) throw new Error('Završno stanje ne može biti manje od početnog.');
+      await execution.persistDefaults();
       await saveNalogIzvrsenje(nalog.id, { km_pocetak: pocetak, km_kraj: kraj, napomena: napomena.trim() || null });
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1500);
@@ -780,6 +758,7 @@ export function NalogIzvrsenje({
     setVremena(next);
     void guard(async () => {
       try {
+        await execution.persistDefaults();
         await saveNalogRadnikVrijeme(nalog.id, radnikId, row.vrijeme_od, row.vrijeme_do, zeroHours);
       } catch (reason) {
         setVremena(previous);

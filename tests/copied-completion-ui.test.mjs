@@ -60,6 +60,25 @@ function loadView({ status = 'otvoren', failure } = {}) {
       if (name === '@/lib/localization') return { formatHrDateTime: () => '20.11.2026. 10:00' };
       if (name === '@/components/views/WorkOrderItemChangeHistory') return { WorkOrderItemChangeHistory: () => null };
       if (name === '@/components/views/HistoryDialog') return { HistoryButton: () => null, HistoryDialog: () => null };
+      if (name === '@/lib/useDeferredFiles') return { useDeferredFiles: () => ({ data: [], setData() {} }) };
+      if (name === '@/components/ui/PrivateImage') return { PrivateImage: () => null, PrivateFileLink: () => null };
+      if (name === '@/lib/useNalogExecution') return {
+        useNalogExecution: () => ({
+          snapshot: states,
+          execution: {
+            getSnapshot: () => states,
+            field(_snapshot, key) {
+              const defaults = {
+                km: { pocetak: '', kraj: '' }, vremena: [], zadaci: [], stavke: [], alati: [], strojevi: [],
+                napomena: '', poslovodja: null, vozac: null, error: null,
+              };
+              if (!(key in states)) states[key] = key in defaults ? defaults[key] : false;
+              return [states[key], next => { states[key] = typeof next === 'function' ? next(states[key]) : next; }];
+            },
+            timeSavePending: { current: false }, persistDefaults: async () => {},
+          },
+        }),
+      };
       if (name === '@/lib/api') return {
         updateGradilisteZadatak: save, updateNalogStavka: save,
         fetchNalogZadaci: async id => { calls.push(['tasks', id]); return refreshedTasks; },

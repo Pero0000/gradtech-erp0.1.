@@ -137,6 +137,23 @@ function loader(overrides = {}) {
       require: (name) => {
         if (/\/api$/.test(name)) return api;
         if (/\/useAuth$/.test(name)) return auth;
+        if (/\/useNalogExecution$/.test(name)) {
+          const execution = {
+            getSnapshot: () => stateFixtures['NalogIzvrsenje.tsx'],
+            subscribe: () => () => {},
+            field: (_snapshot, key) => [
+              key === 'error' ? null : stateFixtures['NalogIzvrsenje.tsx'][key]
+                ?? ({ km: { pocetak: '', kraj: '' }, alati: [], strojevi: [] })[key]
+                ?? false,
+              () => {},
+            ],
+            timeSavePending: { current: false },
+          };
+          return {
+            useNalogExecutionCache: () => ({ get: () => execution }),
+            useNalogExecution: () => ({ execution, snapshot: execution.getSnapshot() }),
+          };
+        }
         if (/\/company$/.test(name)) {
           const companyModule = load(path.join(root, 'src', 'lib', 'company.ts'));
           companyModule.setCurrentCompany(company);

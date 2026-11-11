@@ -2,6 +2,16 @@
 
 ## Provjere prije objave
 
+### Zajedničko izvršenje i read-only otvaranje radnog naloga
+
+Detalj naloga i modal **Uredi** dijele stanje izvršenja po ID-u naloga tijekom boravka u modulu. Ekipa/vremena, zadaci, materijal, inventar alata i strojeva te kilometri, napomena i oznake izvršenja učitavaju se jednom. Otvaranje **Uredi** nakon uspješnog učitavanja detalja dodaje **0 zahtjeva za tih šest izvora** umjesto prethodnih šest; aktivni zahtjevi također se dijele. Prazan rezultat smatra se učitanim, a nakon djelomične pogreške ponavlja se samo neuspješan izvor. Izmjene i blokade spremanja sati/zadataka/stavki vidljive su u oba prikaza. Fotografije, dokumenti i povijesti ostaju zasebno odgođeni do otvaranja pripadajućeg prikaza.
+
+Cache nije globalan: odvaja naloge i ponovno se stvara pri promjeni korisnika, tvrtke ili ovlasti te nakon izlaska iz modula. Dok je detalj otvoren, modal koristi iste podatke; nakon napuštanja svih prikaza jednog naloga, ponovni odabir tog naloga ponovno provjerava izvore kao ranije. Postojeće ponovno učitavanje liste nakon spremanja/povrata invalidira izvršenja, tako da se promijenjena ekipa ili vraćeni podaci ponovno učitaju. Nema trajnog spremanja cachea u preglednik.
+
+Samo otvaranje više ne sprema poslovođu ni početak rada 06:00 i ne poziva obračun sati/troškova/kilometara. Ako vrijeme nije uneseno (i nije označeno nula sati), 06:00 ostaje samo prikazana početna vrijednost; isto vrijedi za predloženog poslovođu kada nalog ima jednog djelatnika. Nedostajuće vrijednosti spremaju se tek pri izričitom spremanju osnovnog naloga ili izvršenja (kilometri/napomena, radno vrijeme, teren, promjena završnog statusa). Nedostajući počeci spremaju se jednim uvjetnim batch ažuriranjem, bez zasebnog obračuna po djelatniku; postojeće spremanje zatim koristi svoj dosadašnji obračun. Već upisani počeci, nula sati i postojeći poslovođa ne prepisuju se inicijalizacijom. Pogreške inicijalizacije prikazuju se, a naknadno spremanje može ih ponovno pokušati. Kreiranje naloga već zadržava postojeće postavljanje jedinog djelatnika kao poslovođe.
+
+Nije potrebna nova SQL migracija; objaviti web-build. Provjere: `node --test tests/nalog-execution-cache.test.mjs tests/copied-completion-ui.test.mjs tests/deferred-files.test.mjs`. Testovi izvršavaju zajednički store i stvarnu komponentu s lokalnim API zamjenama: nula dodatnih zahtjeva za modal, dijeljenje aktivnih zahtjeva/izmjena, dohvat nedostajućeg izvora, read-only otvaranje, spremanje početnih vrijednosti tek na korisničku radnju, greške i izolaciju cachea. Nisu mjerenje produkcijskog Network prometa.
+
 ### Grupirana rekapitulacija svih gradilišta
 
 Primijeniti `supabase/migrations/20261110700000_rekapitulacija_grupirani_sazeci.sql` prije objave novog web-builda. Zadani pregled svih gradilišta više ne poziva šest upita za svako gradilište. Jedan read-only RPC grupira troškove po gradilištu/kategoriji, sate i rad po satnicama, fakture s postojećim smjerom rabata, plaćene fakture i ugovorene iznose. Povezane izvore agregira odvojeno prije spajanja, bez umnožavanja redaka. Nalozi i rokovi ne dohvaćaju se za pregled svih gradilišta jer se ondje ne prikazuju; detaljni pregled pojedinačnog gradilišta i dalje ih učitava postojećim putem.

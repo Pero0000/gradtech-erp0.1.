@@ -3049,12 +3049,12 @@ export async function cancelRadniNalog(nalogId: string) {
 export async function notifyLockedNalogWorkers(nalogId: string) {
   const { data, error } = await supabase.functions.invoke('notify-work-order', { body: { nalog_id: nalogId } });
   if (error) {
-    throw new Error(`Nalog je zaključan i djelatnici ga vide, ali push obavijest nije poslana: ${error.message}`);
+    throw new Error(`Nalog je spremljen i zaključan, ali push obavijest nije poslana: ${error.message}`);
   }
   const receipt = data as { sent?: number; failed?: number; reason?: string; errors?: string[] } | null;
   const details = receipt?.errors?.length ? ` Detalji: ${receipt.errors.join('; ')}` : '';
   if (!receipt?.sent) {
-    throw new Error(`Nalog je zaključan i djelatnici ga vide, ali push obavijest nije poslana${receipt?.reason ? ` (${receipt.reason})` : ''}.${details}`);
+    throw new Error(`Nalog je spremljen i zaključan, ali push obavijest nije poslana${receipt?.reason ? ` (${receipt.reason})` : ''}.${details}`);
   }
   if (receipt.failed) {
     throw new Error(`Nalog je zaključan; push je poslan na ${receipt.sent} uređaja, a ${receipt.failed} uređaja nije primilo obavijest.${details}`);

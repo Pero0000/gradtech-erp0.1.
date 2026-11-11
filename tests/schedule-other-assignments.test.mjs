@@ -154,5 +154,9 @@ test('daily-plan uses the existing execution editor to set the team leader and k
   assert.doesNotMatch(viewSource, /original_poslovodja_id|setNalogPoslovodja\(nalogId/);
   assert.match(executionSource, /setNalogPoslovodja\(nalog\.id, radnikId\)/);
   assert.match(viewSource, /if \(lock === 'lock'\) \{[\s\S]*updateRadniNalog\(nalogId, \{ \.\.\.payload, zakljucen: true \}\)[\s\S]*notifyLockedNalogWorkers\(nalogId\)/);
+  assert.match(viewSource, /lockedIds = await fetchZakljuceniNalozi\(\[nalogId\]\);[\s\S]*if \(!lockedIds\.includes\(nalogId\)\)[\s\S]*setLockedNalozi/);
+  assert.match(viewSource, /closeNalog\(\);[\s\S]*await loadDay\(selectedDate\);[\s\S]*if \(lock === 'lock'\) \{[\s\S]*await notifyLockedNalogWorkers\(nalogId\)/);
+  assert.match(viewSource, /if \(lockWarnings\.length > 0\) setError\(lockWarnings\.join\(' '\)\)/);
+  assert.doesNotMatch(apiSource, /zaključan i djelatnici ga vide/);
   assert.match(viewSource, /nalogForm && \([\s\S]*role="alert" className="rounded-lg border border-red-200 bg-red-50/);
 });

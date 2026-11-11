@@ -964,6 +964,7 @@ export function RasporedView() {
     if (!nalogForm || !nalogForm.naslov.trim() || !nalogForm.nalogId) return;
     setNalogSaving(true);
     setError(null);
+    const lockWarnings: string[] = [];
     try {
       const nalogId = nalogForm.nalogId;
       const payload = {
@@ -1020,11 +1021,48 @@ export function RasporedView() {
       await addNalogStavke(nalogId, nalogForm.nove_stavke);
       setNalogForm((current) => current ? { ...current, nove_stavke: [] } : current);
       if (lock === 'lock') {
-        await updateRadniNalog(nalogId, { ...payload, zakljucen: true });
-        await notifyLockedNalogWorkers(nalogId);
+        try {
+          await updateRadniNalog(nalogId, { ...payload, zakljucen: true });
+        } catch (reason) {
+          let lockWasPersisted: boolean;
+          try {
+            lockWasPersisted = (await fetchZakljuceniNalozi([nalogId])).includes(nalogId);
+          } catch (confirmationError) {
+            throw new Error(`${errMsg(reason, 'Greška pri spremanju naloga')} Nije moguće potvrditi je li nalog zaključan: ${errMsg(confirmationError, 'greška pri provjeri')}`);
+          }
+          if (!lockWasPersisted) throw reason;
+          lockWarnings.push(`Nalog je zaključan, ali naknadna sinkronizacija nije uspjela: ${errMsg(reason, 'greška pri sinkronizaciji')}`);
+        }
+        let lockedIds: string[];
+        try {
+          lockedIds = await fetchZakljuceniNalozi([nalogId]);
+        } catch (reason) {
+          throw new Error(`Nalog je spremljen, ali nije moguće provjeriti je li zaključan: ${errMsg(reason, 'greška pri provjeri')}`);
+        }
+        if (!lockedIds.includes(nalogId)) {
+          throw new Error('Zaključivanje naloga nije potvrđeno nakon spremanja.');
+        }
+        setLockedNalozi((current) => current.includes(nalogId) ? current : [...current, nalogId]);
       }
       closeNalog();
-      await loadDay(selectedDate);
+      try {
+        await loadDay(selectedDate);
+      } catch (reason) {
+        const message = errMsg(reason, lock === 'lock'
+          ? 'Nalog je zaključan, ali dnevni plan nije moguće osvježiti.'
+          : 'Greška pri osvježavanju dnevnog plana');
+        if (lock === 'lock') lockWarnings.push(message);
+        else setError(message);
+      }
+      if (lock === 'lock') {
+        setNotice('Nalog je spremljen i zaključan.');
+        try {
+          await notifyLockedNalogWorkers(nalogId);
+        } catch (reason) {
+          lockWarnings.push(errMsg(reason, 'Nalog je zaključan, ali push obavijest nije poslana.'));
+        }
+        if (lockWarnings.length > 0) setError(lockWarnings.join(' '));
+      }
     } catch (e) {
       setError(errMsg(e, 'Greška pri spremanju naloga'));
     } finally {

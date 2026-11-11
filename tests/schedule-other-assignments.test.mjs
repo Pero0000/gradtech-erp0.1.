@@ -141,12 +141,18 @@ test('daily-plan drag data survives browsers that only preserve the plain-text t
   assert.match(viewSource, /setData\('application\/json', serialized\)/);
   assert.match(viewSource, /setData\('text\/plain', serialized\)/);
   assert.match(viewSource, /getData\('application\/json'\) \|\| event\.dataTransfer\.getData\('text\/plain'\)/);
+  assert.match(viewSource, /activeDragPayload = useRef<DragPayload \| null>\(null\)/);
+  assert.match(viewSource, /readPayload\(event\) \?\? activeDragPayload\.current/);
+  assert.match(viewSource, /onDragEnd=\{endDrag\}/);
+  assert.match(viewSource, /aria-label="Ostalo"[\s\S]*onDragStart=\{\(e\) => beginDrag\(e, \{ type: 'ostalo', id: entry\.id \}\)\}/);
   assert.match(viewSource, /Stavku nije moguće pročitati/);
 });
 
-test('daily-plan work-order lock lets the user select a team leader and shows save errors in the modal', () => {
-  assert.match(viewSource, /Poslovođa naloga/);
-  assert.match(viewSource, /Za zaključivanje naloga odaberi poslovođu iz dodijeljene ekipe/);
-  assert.match(viewSource, /setNalogPoslovodja\(nalogId, nalogForm\.poslovodja_id\)/);
+test('daily-plan uses the existing execution editor to set the team leader and keeps lock failures visible', () => {
+  const executionSource = readFileSync(new URL('../src/components/views/NalogIzvrsenje.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(viewSource, /Poslovođa naloga/);
+  assert.doesNotMatch(viewSource, /original_poslovodja_id|setNalogPoslovodja\(nalogId/);
+  assert.match(executionSource, /setNalogPoslovodja\(nalog\.id, radnikId\)/);
+  assert.match(viewSource, /if \(lock === 'lock'\) \{[\s\S]*updateRadniNalog\(nalogId, \{ \.\.\.payload, zakljucen: true \}\)[\s\S]*notifyLockedNalogWorkers\(nalogId\)/);
   assert.match(viewSource, /nalogForm && \([\s\S]*role="alert" className="rounded-lg border border-red-200 bg-red-50/);
 });

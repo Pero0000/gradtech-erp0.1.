@@ -27,7 +27,6 @@ import {
   fetchZakljuceniNalozi,
   fetchRadniNalozi,
   updateRadniNalog,
-  setNalogPoslovodja,
   cancelRadniNalog,
   notifyLockedNalogWorkers,
   addRasporedOstalo,
@@ -111,8 +110,6 @@ interface NalogForm {
   prioritet: NalogPrioritet;
   rok: string;
   radnik_ids: string[];
-  poslovodja_id: string | null;
-  original_poslovodja_id: string | null;
   radnik_options: string[];
   zadatak_ids: string[];
   novi_zadaci: { naziv: string; vrsta: ZadatakVrsta }[];
@@ -284,6 +281,7 @@ export function RasporedView() {
   const layoutSaveQueue = useRef<Promise<void>>(Promise.resolve());
   const layoutVersion = useRef(0);
   const boardRevision = useRef<number | null>(null);
+  const activeDragPayload = useRef<DragPayload | null>(null);
   const [ostalo, setOstalo] = useState<DnevniRasporedOstalo[]>([]);
   const [ostaloError, setOstaloError] = useState<string | null>(null);
   const [nalogForm, setNalogForm] = useState<NalogForm | null>(null);
@@ -599,6 +597,17 @@ export function RasporedView() {
     }
   };
 
+  const beginDrag = (event: React.DragEvent, payload: DragPayload) => {
+    activeDragPayload.current = payload;
+    startDrag(event, payload);
+  };
+
+  const endDrag = () => {
+    activeDragPayload.current = null;
+  };
+
+  const getDragPayload = (event: React.DragEvent) => readPayload(event) ?? activeDragPayload.current;
+
   const dailyKmSites = (vehicleId: string) => [...new Set(
     siteAssignments
       .filter((assignment) => assignment.vozilo_id === vehicleId && assignment.gradiliste_id)
@@ -903,8 +912,6 @@ export function RasporedView() {
         novi_zadaci: [],
         stavka_ids: [],
         nove_stavke: [],
-        poslovodja_id: nalog.poslovodja_id ?? null,
-        original_poslovodja_id: nalog.poslovodja_id ?? null,
       });
       setNoviMaterijal('');
       setNoviAlat('');
@@ -955,11 +962,6 @@ export function RasporedView() {
 
   const saveNalog = async (lock?: 'lock' | 'unlock') => {
     if (!nalogForm || !nalogForm.naslov.trim() || !nalogForm.nalogId) return;
-    if (lock === 'lock' && nalogForm.radnik_ids.length > 1
-      && (!nalogForm.poslovodja_id || !nalogForm.radnik_ids.includes(nalogForm.poslovodja_id))) {
-      setError('Za zaključivanje naloga odaberi poslovođu iz dodijeljene ekipe.');
-      return;
-    }
     setNalogSaving(true);
     setError(null);
     try {
@@ -975,10 +977,6 @@ export function RasporedView() {
         zakljucen: lock === 'unlock' ? false : undefined,
       };
       if (nalogForm.nalogId) await updateRadniNalog(nalogForm.nalogId, payload);
-      if (nalogForm.poslovodja_id !== nalogForm.original_poslovodja_id
-        && nalogForm.poslovodja_id && nalogForm.radnik_ids.includes(nalogForm.poslovodja_id)) {
-        await setNalogPoslovodja(nalogId, nalogForm.poslovodja_id);
-      }
       const selectedTasks = visibleZadaci.filter((z) => nalogForm.zadatak_ids.includes(z.id));
       try {
         const tasksToKeepOrAssign = selectedTasks
@@ -1076,7 +1074,8 @@ export function RasporedView() {
       setError('Vozilo je zaključano zbog potvrđene stavke.');
       return;
     }
-    const payload = readPayload(event);
+    const payload = getDragPayload(event);
+    activeDragPayload.current = null;
     if (!payload) {
       setError('Stavku nije moguće pročitati. Osvježite dnevni plan i pokušajte ponovno povući stavku.');
       return;
@@ -1130,7 +1129,8 @@ export function RasporedView() {
     event.preventDefault();
     event.stopPropagation();
     setDropTarget(null);
-    const payload = readPayload(event);
+    const payload = getDragPayload(event);
+    activeDragPayload.current = null;
     if (!payload || payload.type !== 'gradiliste') return;
     if (payload.assignmentId) {
       if (isLockedAssignment(payload.assignmentId)) {
@@ -1147,7 +1147,8 @@ export function RasporedView() {
   const dropOnOstalo = (event: React.DragEvent) => {
     event.preventDefault();
     setDropTarget(null);
-    const payload = readPayload(event);
+    const payload = getDragPayload(event);
+    activeDragPayload.current = null;
     if (!payload || payload.type === 'ostalo') return;
     const assignmentId = payload.type === 'radnik' || payload.type === 'gradiliste' ? payload.assignmentId : undefined;
     if (payload.type === 'radnik' && isWorkerAssignedToLockedVehicle(payload.id)) {
@@ -1181,7 +1182,8 @@ export function RasporedView() {
   const dropOnPanel = (event: React.DragEvent, type: DragPayload['type']) => {
     event.preventDefault();
     setDropTarget(null);
-    const payload = readPayload(event);
+    const payload = getDragPayload(event);
+    activeDragPayload.current = null;
     if (payload?.type === 'ostalo' && type === 'radnik') {
       const entry = ostalo.find((o) => o.id === payload.id);
       if (entry?.radnik_id) void run(() => removeRasporedOstalo(entry.id));
@@ -1469,7 +1471,8 @@ export function RasporedView() {
                       <div
                         key={g.id}
                         draggable
-                        onDragStart={(e) => startDrag(e, { type: 'gradiliste', id: g.id })}
+                        onDragStart={(e) => beginDrag(e, { type: 'gradiliste', id: g.id })}
+                        onDragEnd={endDrag}
                         onDragOver={(e) => {
                           e.stopPropagation();
                           allowDrop(e, `site-${g.id}`);
@@ -1595,12 +1598,13 @@ export function RasporedView() {
                           <div
                             key={a.id}
                             draggable={!vehicleLocked}
+                            onDragEnd={endDrag}
                             onDragStart={(e) => {
                               if (vehicleLocked) {
                                 e.preventDefault();
                                 return;
                               }
-                              startDrag(e, { type: 'gradiliste', id: a.gradiliste_id ?? a.id, assignmentId: a.id });
+                              beginDrag(e, { type: 'gradiliste', id: a.gradiliste_id ?? a.id, assignmentId: a.id });
                             }}
                             className={`min-h-[2.25rem] border-b border-slate-100 pb-0.5 ${nalogLocked ? 'cursor-not-allowed bg-emerald-100' : vehicleLocked ? 'cursor-not-allowed' : 'cursor-grab'}`}
                           >
@@ -1612,6 +1616,13 @@ export function RasporedView() {
                                     defaultValue={a.tekst ?? ''}
                                     aria-label="Ručni unos"
                                     disabled={vehicleLocked}
+                                    onDragStart={(e) => {
+                                      if (vehicleLocked) {
+                                        e.preventDefault();
+                                        return;
+                                      }
+                                      beginDrag(e, { type: 'gradiliste', id: a.gradiliste_id ?? a.id, assignmentId: a.id });
+                                    }}
                                     onBlur={(e) => {
                                       const next = e.target.value.trim();
                                       if (!next) void run(() => removeSiteAssignment(a.id));
@@ -1721,12 +1732,13 @@ export function RasporedView() {
                           <div
                             key={a.id}
                             draggable={!vehicleLocked}
+                            onDragEnd={endDrag}
                             onDragStart={(e) => {
                               if (vehicleLocked) {
                                 e.preventDefault();
                                 return;
                               }
-                              startDrag(e, { type: 'radnik', id: a.radnik_id, assignmentId: a.id });
+                              beginDrag(e, { type: 'radnik', id: a.radnik_id, assignmentId: a.id });
                             }}
                             className={`flex h-6 items-center justify-between gap-1 border-b border-slate-100 ${vehicleLocked ? 'cursor-not-allowed' : 'cursor-grab'}`}
                           >
@@ -1788,7 +1800,8 @@ export function RasporedView() {
               <div
                 key={r.id}
                 draggable
-                onDragStart={(e) => startDrag(e, { type: 'radnik', id: r.id })}
+                onDragStart={(e) => beginDrag(e, { type: 'radnik', id: r.id })}
+                onDragEnd={endDrag}
                 title={assignments.some((assignment) => isVehicleOrderLocked(assignment.vozilo_id))
                   ? 'Povuci na drugo vozilo za dodjelu bez uklanjanja sa zaključenog naloga'
                   : 'Povuci u vozilo za dodjelu'}
@@ -1826,7 +1839,8 @@ export function RasporedView() {
                 <div
                   key={entry.id}
                   draggable
-                  onDragStart={(e) => startDrag(e, { type: 'ostalo', id: entry.id })}
+                  onDragStart={(e) => beginDrag(e, { type: 'ostalo', id: entry.id })}
+                  onDragEnd={endDrag}
                   className="flex cursor-grab items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm active:cursor-grabbing"
                 >
                   <GripVertical className="h-3.5 w-3.5 flex-shrink-0 text-slate-300" />
@@ -1837,6 +1851,7 @@ export function RasporedView() {
                       key={`${entry.id}-${entry.tekst ?? ''}`}
                       defaultValue={entry.tekst ?? ''}
                       aria-label="Ostalo"
+                      onDragStart={(e) => beginDrag(e, { type: 'ostalo', id: entry.id })}
                       onBlur={(e) => {
                         const next = e.target.value.trim();
                         if (!next) void run(() => removeRasporedOstalo(entry.id));
@@ -2198,19 +2213,14 @@ export function RasporedView() {
                       type="checkbox"
                       checked={nalogForm.radnik_ids.includes(r.id)}
                       disabled={nalogForm.status === 'zavrsen'}
-                      onChange={() => setNalogForm((current) => {
-                        if (!current) return current;
-                        const radnik_ids = current.radnik_ids.includes(r.id)
-                          ? current.radnik_ids.filter((id) => id !== r.id)
-                          : [...current.radnik_ids, r.id];
-                        return {
-                          ...current,
-                          radnik_ids,
-                          poslovodja_id: current.poslovodja_id && radnik_ids.includes(current.poslovodja_id)
-                            ? current.poslovodja_id
-                            : null,
-                        };
-                      })}
+                      onChange={() =>
+                        setNalogForm({
+                          ...nalogForm,
+                          radnik_ids: nalogForm.radnik_ids.includes(r.id)
+                            ? nalogForm.radnik_ids.filter((id) => id !== r.id)
+                            : [...nalogForm.radnik_ids, r.id],
+                        })
+                      }
                       className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                     />
                     <span className="text-sm text-slate-700">
@@ -2222,20 +2232,6 @@ export function RasporedView() {
                   </label>
                 ))}
               </div>
-              {nalogForm.radnik_ids.length > 1 && (
-                <Field label="Poslovođa naloga">
-                  <Select
-                    value={nalogForm.poslovodja_id ?? ''}
-                    onChange={(event) => setNalogForm((current) => current ? { ...current, poslovodja_id: event.target.value || null } : current)}
-                  >
-                    <option value="">Odaberi poslovođu</option>
-                    {radnici.filter((worker) => nalogForm.radnik_ids.includes(worker.id)).map((worker) => (
-                      <option key={worker.id} value={worker.id}>{worker.ime} {worker.prezime}</option>
-                    ))}
-                  </Select>
-                  <p className="mt-1 text-xs text-slate-500">Za zaključivanje naloga s više djelatnika mora biti odabran poslovođa iz ekipe.</p>
-                </Field>
-              )}
             </div>
             </div>
             {nalogForm.nalogId && (

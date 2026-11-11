@@ -21,6 +21,8 @@ export function PersonalCarTab() {
   const [destination, setDestination] = useState('');
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
+  const [workStart, setWorkStart] = useState('');
+  const [workEnd, setWorkEnd] = useState('');
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [ready, setReady] = useState(false);
@@ -92,8 +94,9 @@ export function PersonalCarTab() {
       || !date || date > todayISO() || !startKm.trim() || !endKm.trim()
       || !Number.isInteger(Number(startKm)) || Number(startKm) < 0
       || !Number.isInteger(Number(endKm)) || Number(endKm) > 2147483647 || distance <= 0
-      || Boolean(startTime) !== Boolean(endTime)) {
-      setError('Odaberite auto, gradilište ili privatnu vožnju, datum do danas i valjane početne i završne kilometre. Vrijeme unesite u oba polja ili ga ostavite prazno.');
+      || Boolean(startTime) !== Boolean(endTime)
+      || (business && (!workStart || !workEnd || workStart === workEnd))) {
+      setError('Odaberite auto, gradilište ili privatnu vožnju, datum do danas i valjane početne i završne kilometre. Vrijeme vožnje unesite u oba polja ili ga ostavite prazno; za gradilište obavezno unesite početak i završetak rada.');
       return;
     }
     if (business && (!Number.isFinite(rate) || rate <= 0)) {
@@ -103,6 +106,7 @@ export function PersonalCarTab() {
     const input = {
       vozilo_id: vehicle.id, datum: date, km_pocetak: Number(startKm), km_kraj: Number(endKm),
       gradiliste_id: business ? destination : null, vrijeme_od: startTime || null, vrijeme_do: endTime || null,
+      radno_vrijeme_od: business ? workStart : null, radno_vrijeme_do: business ? workEnd : null,
       napomena: note.trim(),
     };
     const payload = JSON.stringify(input);
@@ -114,11 +118,13 @@ export function PersonalCarTab() {
     try {
       await reportPersonalCarTrip({ ...input, id: request.current.id });
       request.current = null;
-      setNotice(business ? 'Vožnja je spremljena, a trošak evidentiran na gradilištu.' : 'Privatna vožnja je spremljena bez troška gradilišta.');
+      setNotice(business ? 'Vožnja, radno vrijeme i trošak gradilišta su spremljeni.' : 'Privatna vožnja je spremljena bez troška gradilišta i radnog vremena.');
       setStartKm(endKm);
       setEndKm('');
       setStartTime('');
       setEndTime('');
+      setWorkStart('');
+      setWorkEnd('');
       setNote('');
       try {
         const nextOptions = await refresh();
@@ -146,7 +152,7 @@ export function PersonalCarTab() {
       await cancelPersonalCarTrip(cancelId, cancelReason.trim());
       setCancelId(null);
       setCancelReason('');
-      setNotice('Vožnja je stornirana. Povezani trošak gradilišta je poništen; zapis ostaje u povijesti.');
+      setNotice('Vožnja je stornirana. Povezani trošak gradilišta je poništen, ali već evidentirano radno vrijeme ostaje u obračunu i povijesti.');
       try { await refresh(); } catch (reason) {
         setError(`Storno je spremljen, ali povijest nije osvježena: ${errorText(reason)}`);
       }
@@ -210,18 +216,26 @@ export function PersonalCarTab() {
                   <p className="font-bold">{distance > 0 ? distance.toLocaleString('hr-HR') : '—'} km</p>
                   {business ? <p>{rate > 0 ? `${rate.toLocaleString('hr-HR')} €/km · procjena troška ${money(Math.max(0, estimatedCost))}` : 'U vozilu nije postavljena cijena/km.'}</p>
                     : <p>{destination === 'privatno' ? 'Privatna vožnja ne tereti gradilište.' : 'Odaberi svrhu za prikaz obračuna.'}</p>}
-                  <p className="mt-1 text-xs">Radni sati ne upisuju se u evidenciju niti obračun plaće.</p>
+                  {business && <p className="mt-1 text-xs">Unesena smjena upisuje se u evidenciju radnog vremena i obračun.</p>}
                 </div>
+                {business && <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
+                  <p className="text-sm font-bold text-slate-800">Radno vrijeme na gradilištu</p>
+                  <div className="mt-2 grid min-w-0 grid-cols-2 gap-2">
+                    <label className="block text-sm">Početak rada<input required type="time" value={workStart} onChange={(event) => setWorkStart(event.target.value)} className={inputClass} /></label>
+                    <label className="block text-sm">Završetak rada<input required type="time" value={workEnd} onChange={(event) => setWorkEnd(event.target.value)} className={inputClass} /></label>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-600">Ako rad završava nakon ponoći, unesite vrijeme završetka sljedećeg dana. Sati već evidentirani na radnom nalogu ne smiju se prijaviti ponovno.</p>
+                </div>}
                 <details className="text-sm text-slate-600">
-                  <summary className="cursor-pointer py-1">Vrijeme vožnje i napomena (neobavezno)</summary>
+                  <summary className="cursor-pointer py-1">Vrijeme vožnje i {business ? 'razlog puta' : 'napomena'} (neobavezno)</summary>
                   <div className="mt-2 grid min-w-0 grid-cols-2 gap-2">
                     <label className="block">Polazak<input type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} className={inputClass} /></label>
                     <label className="block">Dolazak<input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} className={inputClass} /></label>
                   </div>
                   <p className="mt-1 text-xs">Samo informacija o vožnji; dolazak može biti sljedeći dan.</p>
-                  <label className="mt-2 block">Napomena<textarea value={note} maxLength={1000} rows={2} onChange={(event) => setNote(event.target.value)} className={`${inputClass} py-2`} /></label>
+                  <label className="mt-2 block">{business ? 'Razlog puta' : 'Napomena'}<textarea value={note} maxLength={1000} rows={2} onChange={(event) => setNote(event.target.value)} className={`${inputClass} py-2`} /></label>
                 </details>
-                <p className="text-xs text-amber-800">Ne prijavljuj ovdje kilometre koji se već obračunavaju preko radnog naloga.</p>
+                <p className="text-xs text-amber-800">Ne prijavljuj kilometre ni radno vrijeme koji se već obračunavaju preko radnog naloga.</p>
                 <button type="submit" disabled={!options.vozila.length}
                   className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 font-bold text-white disabled:opacity-50">
                   {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
@@ -242,14 +256,15 @@ export function PersonalCarTab() {
                   </div>
                   <p className="mt-1 text-xs text-slate-600">{trip.vozilo_naziv}</p>
                   <p className="text-xs text-slate-500">{trip.km_pocetak.toLocaleString('hr-HR')} → {trip.km_kraj.toLocaleString('hr-HR')} km</p>
-                  {trip.vrijeme_od && <p className="text-xs text-slate-500">Vožnja {trip.vrijeme_od.slice(0, 5)} – {trip.vrijeme_do?.slice(0, 5)} · bez upisa radnih sati</p>}
+                  {trip.vrijeme_od && <p className="text-xs text-slate-500">Vožnja {trip.vrijeme_od.slice(0, 5)} – {trip.vrijeme_do?.slice(0, 5)}</p>}
+                  {trip.radno_vrijeme_od && <p className="text-xs text-slate-600">Rad {trip.radno_vrijeme_od.slice(0, 5)} – {trip.radno_vrijeme_do?.slice(0, 5)}{trip.radno_vrijeme_do && trip.radno_vrijeme_do < trip.radno_vrijeme_od ? ' · završetak sljedeći dan' : ''} · evidentirano u radnom vremenu</p>}
                   {trip.napomena && <p className="mt-1 whitespace-pre-wrap break-words text-xs text-slate-600">{trip.napomena}</p>}
                   {trip.stornirano_at ? <p className="mt-2 text-xs font-medium text-rose-700">Stornirano · {trip.razlog_storna}</p>
                     : <p className="mt-2 text-xs font-semibold text-sky-800">{trip.gradiliste_id ? `Trošak gradilišta: ${money(trip.iznos)}` : 'Privatno · bez troška gradilišta'}</p>}
                   {!trip.stornirano_at && cancelId !== trip.id && <button type="button" disabled={saving || selecting || loadingMore} onClick={() => { setCancelId(trip.id); setCancelReason(''); }}
                     className="mt-2 text-xs text-slate-500 underline disabled:opacity-50">Pogrešan unos? Storniraj</button>}
                   {cancelId === trip.id && <div className="mt-2 space-y-2 rounded-lg bg-rose-50 p-2 text-xs text-rose-900">
-                    <p>Storno zadržava zapis, a trošak gradilišta svodi na 0 €. Zatim možeš prijaviti ispravnu vožnju.</p>
+                    <p>Storno zadržava zapis, a trošak gradilišta svodi na 0 €. Već evidentirano radno vrijeme ostaje u obračunu; zatim možeš prijaviti ispravnu vožnju.</p>
                     <label className="block">Razlog storna<input maxLength={500} value={cancelReason} disabled={saving} onChange={(event) => setCancelReason(event.target.value)} className={inputClass} /></label>
                     <div className="flex gap-3">
                       <button type="button" disabled={saving || selecting || loadingMore || !cancelReason.trim()} onClick={() => void cancel()} className="font-bold disabled:opacity-50">Potvrdi storno</button>

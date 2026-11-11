@@ -3894,7 +3894,7 @@ export async function fetchMobileWorkerDisplayName(): Promise<string | null> {
 }
 
 export interface MojeRadnoVrijeme {
-  izvor: 'nalog' | 'evidencija' | 'dionica';
+  izvor: 'nalog' | 'evidencija' | 'dionica' | 'osobni_auto';
   nalog_id: string | null;
   nalog_broj: string | null;
   gradiliste_naziv: string | null;

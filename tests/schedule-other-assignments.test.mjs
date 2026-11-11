@@ -136,3 +136,17 @@ test('shared list rendering and drag lookup do not filter by date and refresh on
   assert.match(viewSource, /assignRasporedRadnik\(selectedDate, voziloId, entry\.radnik_id, true\)/);
   assert.match(viewSource, /addRasporedTekst\(selectedDate, voziloId, entry\.tekst, true\)/);
 });
+
+test('daily-plan drag data survives browsers that only preserve the plain-text transfer type', () => {
+  assert.match(viewSource, /setData\('application\/json', serialized\)/);
+  assert.match(viewSource, /setData\('text\/plain', serialized\)/);
+  assert.match(viewSource, /getData\('application\/json'\) \|\| event\.dataTransfer\.getData\('text\/plain'\)/);
+  assert.match(viewSource, /Stavku nije moguće pročitati/);
+});
+
+test('daily-plan work-order lock lets the user select a team leader and shows save errors in the modal', () => {
+  assert.match(viewSource, /Poslovođa naloga/);
+  assert.match(viewSource, /Za zaključivanje naloga odaberi poslovođu iz dodijeljene ekipe/);
+  assert.match(viewSource, /setNalogPoslovodja\(nalogId, nalogForm\.poslovodja_id\)/);
+  assert.match(viewSource, /nalogForm && \([\s\S]*role="alert" className="rounded-lg border border-red-200 bg-red-50/);
+});

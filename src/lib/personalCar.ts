@@ -1,4 +1,6 @@
 import { supabase } from './supabase';
+import { minuteSmjene } from './obracunSati';
+import { nocniInterval } from './postavke';
 
 export interface PersonalCarOptions {
   zadnje_vozilo_id: string | null;
@@ -15,6 +17,8 @@ export interface PersonalCarTripInput {
   gradiliste_id: string | null;
   vrijeme_od: string | null;
   vrijeme_do: string | null;
+  radno_vrijeme_od: string | null;
+  radno_vrijeme_do: string | null;
   napomena: string;
 }
 
@@ -32,7 +36,7 @@ export interface PersonalCarTrip extends PersonalCarTripInput {
 
 function tripError(error: { message: string; code?: string }) {
   if (['42883', '42P01', 'PGRST202', 'PGRST205'].includes(error.code ?? '')) {
-    return new Error('Osobni auto zahtijeva migraciju 20261110420000_osobni_auto_pilot.sql. Obratite se administratoru.');
+    return new Error('Osobni auto zahtijeva migracije 20261110420000_osobni_auto_pilot.sql i 20261111100000_osobni_auto_radno_vrijeme.sql. Obratite se administratoru.');
   }
   return new Error(error.message);
 }
@@ -60,6 +64,9 @@ export async function fetchPersonalCarTrips(before?: Pick<PersonalCarTrip, 'crea
 }
 
 export async function reportPersonalCarTrip(input: PersonalCarTripInput): Promise<string> {
+  const shift = input.gradiliste_id && input.radno_vrijeme_od && input.radno_vrijeme_do
+    ? minuteSmjene(input.radno_vrijeme_od, input.radno_vrijeme_do, nocniInterval())
+    : null;
   const { data, error } = await supabase.rpc('report_my_personal_car_trip', {
     p_id: input.id,
     p_vozilo_id: input.vozilo_id,
@@ -70,6 +77,9 @@ export async function reportPersonalCarTrip(input: PersonalCarTripInput): Promis
     p_vrijeme_od: input.vrijeme_od,
     p_vrijeme_do: input.vrijeme_do,
     p_napomena: input.napomena,
+    p_radno_vrijeme_od: input.gradiliste_id ? input.radno_vrijeme_od : null,
+    p_radno_vrijeme_do: input.gradiliste_id ? input.radno_vrijeme_do : null,
+    p_nocni_sati: shift ? Math.round(shift.nocne / 60 * 10) / 10 : null,
   });
   if (error) throw tripError(error);
   if (typeof data !== 'string' || data !== input.id) {

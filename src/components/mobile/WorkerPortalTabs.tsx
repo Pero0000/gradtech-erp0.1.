@@ -264,10 +264,10 @@ export function WorkerTimeTab() {
         <article key={`${row.izvor}-${row.nalog_id ?? ''}-${row.datum}-${index}`} className="flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="min-w-0">
             <p className="text-sm font-bold text-slate-900">{formatDate(row.datum)}</p>
-            <p className="text-sm text-slate-600">{row.gradiliste_naziv ?? 'Bez gradilišta'}{row.nalog_broj ? ` · ${row.nalog_broj}` : ''}</p>
+            <p className="text-sm text-slate-600">{row.gradiliste_naziv ?? 'Bez gradilišta'}{row.nalog_broj ? ` · ${row.nalog_broj}` : ''}{row.izvor === 'osobni_auto' ? ' · Osobni auto' : ''}</p>
             {row.vrijeme_od && (
               <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
-                <Clock3 className="h-3.5 w-3.5" /> {row.vrijeme_od.slice(0, 5)} – {row.vrijeme_do ? row.vrijeme_do.slice(0, 5) : 'u tijeku'}
+                <Clock3 className="h-3.5 w-3.5" /> {row.vrijeme_od.slice(0, 5)} – {row.vrijeme_do ? row.vrijeme_do.slice(0, 5) : 'u tijeku'}{row.vrijeme_do && row.vrijeme_do < row.vrijeme_od ? ' · završetak sljedeći dan' : ''}
               </p>
             )}
             {row.napomena && <p className="mt-1 text-xs text-slate-500">{row.napomena}</p>}

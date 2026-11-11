@@ -103,7 +103,7 @@ test('pilot tab visibility and content both require the server capability, not a
   assert.match(portal, /Ponovi provjeru pristupa/);
 });
 
-test('trip form selects remembered car, derives km/cost, shows no-hours and no-duplicate warnings', async () => {
+test('trip form selects remembered car, derives km/cost, and explains work-time recording', async () => {
   const ui = setup();
   await ui.start();
   assert.equal(ui.states.vehicleId, 'car');
@@ -112,8 +112,9 @@ test('trip form selects remembered car, derives km/cost, shows no-hours and no-d
   ui.states.destination = 'site';
   const rendered = text(ui.render());
   assert.match(rendered, /8,33/);
-  assert.match(rendered, /Radni sati ne upisuju/);
-  assert.match(rendered, /već obračunavaju preko radnog naloga/);
+  assert.match(rendered, /Početak rada/);
+  assert.match(rendered, /evidenciju radnog vremena i obračun/);
+  assert.match(rendered, /radno vrijeme koji se već obračunavaju preko radnog naloga/);
   const selects = elements(ui.render()).filter((node) => node.type === 'select');
   selects[0].props.onChange({ target: { value: 'car' } });
   await flush();
@@ -124,31 +125,34 @@ test('trip form selects remembered car, derives km/cost, shows no-hours and no-d
 test('private and business submissions use only raw trip input; unchanged retries keep UUID', async () => {
   const ui = setup({ failReport: true });
   await ui.start();
-  ui.states.destination = 'site';
-  ui.states.endKm = '1025';
+  Object.assign(ui.states, { destination: 'site', endKm: '1025', workStart: '08:00', workEnd: '16:00', note: 'Sastanak na gradilištu' });
   await ui.submit();
   assert.match(ui.states.error, /Mreža/);
   assert.equal(ui.states.notice, null);
   const first = ui.calls.find((call) => call[0] === 'report')[1];
   assert.equal(first.gradiliste_id, 'site');
   assert.equal(first.km_kraj, 1025);
-  assert.equal(Object.keys(first).sort().join(','), 'datum,gradiliste_id,id,km_kraj,km_pocetak,napomena,vozilo_id,vrijeme_do,vrijeme_od');
+  assert.equal(first.radno_vrijeme_od, '08:00');
+  assert.equal(first.radno_vrijeme_do, '16:00');
+  assert.equal(Object.keys(first).sort().join(','), 'datum,gradiliste_id,id,km_kraj,km_pocetak,napomena,radno_vrijeme_do,radno_vrijeme_od,vozilo_id,vrijeme_do,vrijeme_od');
   await ui.submit();
   assert.equal(ui.calls.filter((call) => call[0] === 'report')[1][1].id, first.id);
-  assert.match(ui.states.notice, /trošak evidentiran/);
+  assert.match(ui.states.notice, /radno vrijeme i trošak/);
   assert.equal(ui.states.endKm, '');
-  ui.states.destination = 'privatno';
-  ui.states.endKm = '1030';
+  Object.assign(ui.states, { destination: 'privatno', endKm: '1030' });
   await ui.submit();
   const last = ui.calls.filter((call) => call[0] === 'report').at(-1)[1];
   assert.notEqual(last.id, first.id);
   assert.equal(last.gradiliste_id, null);
+  assert.equal(last.radno_vrijeme_od, null);
+  assert.equal(last.radno_vrijeme_do, null);
   assert.match(ui.states.notice, /bez troška/);
 });
 
 test('client rejects missing destination, invalid km, partial times and business zero rate before RPC', async () => {
   for (const changes of [
     { destination: '' }, { endKm: '1000' }, { startKm: '-1' }, { endKm: '1025.5' }, { startTime: '08:00' },
+    { workStart: '08:00' }, { workStart: '08:00', workEnd: '08:00' },
     { options: { ...options, vozila: [{ ...options.vozila[0], cijena_km: 0 }] } },
   ]) {
     const ui = setup();
@@ -167,9 +171,9 @@ test('load failures do not show empty success-shaped history; successful save an
   assert.doesNotMatch(text(broken.render()), /Još nema prijavljenih|Prijavi vožnju/);
   const ui = setup({ refreshError: true });
   await ui.start();
-  Object.assign(ui.states, { destination: 'site', endKm: '1025' });
+  Object.assign(ui.states, { destination: 'site', endKm: '1025', workStart: '08:00', workEnd: '16:00' });
   await ui.submit();
-  assert.match(ui.states.notice, /spremljena/);
+  assert.match(ui.states.notice, /spremljeni/);
   assert.match(ui.states.error, /spremljena, ali prikaz nije osvježen/);
 });
 
@@ -196,7 +200,15 @@ function apiWith(rpc) {
   const apiSource = readFileSync(new URL('../src/lib/personalCar.ts', import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(apiSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } });
   const module = { exports: {} };
-  vm.runInNewContext(outputText, { module, exports: module.exports, Error, require: () => ({ supabase: { rpc } }) });
+  vm.runInNewContext(outputText, {
+    module, exports: module.exports, Error,
+    require(name) {
+      if (name === './supabase') return { supabase: { rpc } };
+      if (name === './obracunSati') return { minuteSmjene: () => ({ ukupno: 480, nocne: 60 }) };
+      if (name === './postavke') return { nocniInterval: () => ({ nocOd: 1320, danOd: 360 }) };
+      throw new Error(`Unexpected import: ${name}`);
+    },
+  });
   return module.exports;
 }
 
@@ -206,11 +218,15 @@ test('API propagates migration errors, rejects unconfirmed saves and sends no fi
   assert.equal(await api.fetchPersonalCarAccess(), true);
   await api.reportPersonalCarTrip({
     id: 'request', vozilo_id: 'car', datum: '2026-01-01', km_pocetak: 1000, km_kraj: 1025,
-    gradiliste_id: 'site', vrijeme_od: null, vrijeme_do: null, napomena: '',
+    gradiliste_id: 'site', vrijeme_od: null, vrijeme_do: null, radno_vrijeme_od: '08:00',
+    radno_vrijeme_do: '16:00', napomena: '',
   });
   assert.equal(calls[1][0], 'report_my_personal_car_trip');
   assert.equal(calls[1][1].p_id, 'request');
-  assert.equal(Object.keys(calls[1][1]).length, 9);
+  assert.equal(Object.keys(calls[1][1]).length, 12);
+  assert.equal(calls[1][1].p_radno_vrijeme_od, '08:00');
+  assert.equal(calls[1][1].p_radno_vrijeme_do, '16:00');
+  assert.equal(calls[1][1].p_nocni_sati, 1);
   await assert.rejects(apiWith(async () => ({ error: { code: 'PGRST202', message: 'missing' } })).fetchPersonalCarAccess(), /20261110420000/);
   await assert.rejects(apiWith(async () => ({ data: null, error: null })).fetchPersonalCarAccess(), /nije potvrđena/);
   await assert.rejects(apiWith(async () => ({ data: 'wrong', error: null })).reportPersonalCarTrip({ id: 'request' }), /nije potvrđeno/);

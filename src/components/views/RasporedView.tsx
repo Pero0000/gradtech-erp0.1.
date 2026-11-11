@@ -27,6 +27,7 @@ import {
   fetchZakljuceniNalozi,
   fetchRadniNalozi,
   updateRadniNalog,
+  setNalogPoslovodja,
   cancelRadniNalog,
   notifyLockedNalogWorkers,
   addRasporedOstalo,
@@ -110,6 +111,8 @@ interface NalogForm {
   prioritet: NalogPrioritet;
   rok: string;
   radnik_ids: string[];
+  poslovodja_id: string | null;
+  original_poslovodja_id: string | null;
   radnik_options: string[];
   zadatak_ids: string[];
   novi_zadaci: { naziv: string; vrsta: ZadatakVrsta }[];
@@ -227,7 +230,8 @@ function errMsg(reason: unknown, fallback: string) {
 
 function readPayload(event: React.DragEvent): DragPayload | null {
   try {
-    const parsed = JSON.parse(event.dataTransfer.getData('application/json')) as DragPayload;
+    const raw = event.dataTransfer.getData('application/json') || event.dataTransfer.getData('text/plain');
+    const parsed = JSON.parse(raw) as DragPayload;
     return parsed?.type && parsed.id ? parsed : null;
   } catch {
     return null;
@@ -236,7 +240,9 @@ function readPayload(event: React.DragEvent): DragPayload | null {
 
 function startDrag(event: React.DragEvent, payload: DragPayload) {
   event.dataTransfer.effectAllowed = 'move';
-  event.dataTransfer.setData('application/json', JSON.stringify(payload));
+  const serialized = JSON.stringify(payload);
+  event.dataTransfer.setData('application/json', serialized);
+  event.dataTransfer.setData('text/plain', serialized);
 }
 
 export function RasporedView() {
@@ -897,6 +903,8 @@ export function RasporedView() {
         novi_zadaci: [],
         stavka_ids: [],
         nove_stavke: [],
+        poslovodja_id: nalog.poslovodja_id ?? null,
+        original_poslovodja_id: nalog.poslovodja_id ?? null,
       });
       setNoviMaterijal('');
       setNoviAlat('');
@@ -947,6 +955,11 @@ export function RasporedView() {
 
   const saveNalog = async (lock?: 'lock' | 'unlock') => {
     if (!nalogForm || !nalogForm.naslov.trim() || !nalogForm.nalogId) return;
+    if (lock === 'lock' && nalogForm.radnik_ids.length > 1
+      && (!nalogForm.poslovodja_id || !nalogForm.radnik_ids.includes(nalogForm.poslovodja_id))) {
+      setError('Za zaključivanje naloga odaberi poslovođu iz dodijeljene ekipe.');
+      return;
+    }
     setNalogSaving(true);
     setError(null);
     try {
@@ -962,6 +975,10 @@ export function RasporedView() {
         zakljucen: lock === 'unlock' ? false : undefined,
       };
       if (nalogForm.nalogId) await updateRadniNalog(nalogForm.nalogId, payload);
+      if (nalogForm.poslovodja_id !== nalogForm.original_poslovodja_id
+        && nalogForm.poslovodja_id && nalogForm.radnik_ids.includes(nalogForm.poslovodja_id)) {
+        await setNalogPoslovodja(nalogId, nalogForm.poslovodja_id);
+      }
       const selectedTasks = visibleZadaci.filter((z) => nalogForm.zadatak_ids.includes(z.id));
       try {
         const tasksToKeepOrAssign = selectedTasks
@@ -1060,7 +1077,10 @@ export function RasporedView() {
       return;
     }
     const payload = readPayload(event);
-    if (!payload) return;
+    if (!payload) {
+      setError('Stavku nije moguće pročitati. Osvježite dnevni plan i pokušajte ponovno povući stavku.');
+      return;
+    }
     if (payload.type === 'ostalo') {
       const entry = ostalo.find((item) => item.id === payload.id);
       if (entry?.radnik_id && isWorkerAssignedToLockedVehicle(entry.radnik_id)) {
@@ -1920,6 +1940,7 @@ export function RasporedView() {
       >
         {nalogForm && (
           <div className="space-y-4">
+            {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
             <div className={`flex flex-col items-stretch justify-between gap-3 rounded-lg px-3 py-2 text-xs xl:flex-row xl:flex-wrap xl:items-center ${nalogForm.zakljucen_at ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
               <span>
                 {nalogForm.zakljucen_at
@@ -2070,7 +2091,7 @@ export function RasporedView() {
                   </button>
                 </div>
               </div>
-            </div>
+              </div>
               );
             })}
             <div>
@@ -2177,14 +2198,19 @@ export function RasporedView() {
                       type="checkbox"
                       checked={nalogForm.radnik_ids.includes(r.id)}
                       disabled={nalogForm.status === 'zavrsen'}
-                      onChange={() =>
-                        setNalogForm({
-                          ...nalogForm,
-                          radnik_ids: nalogForm.radnik_ids.includes(r.id)
-                            ? nalogForm.radnik_ids.filter((id) => id !== r.id)
-                            : [...nalogForm.radnik_ids, r.id],
-                        })
-                      }
+                      onChange={() => setNalogForm((current) => {
+                        if (!current) return current;
+                        const radnik_ids = current.radnik_ids.includes(r.id)
+                          ? current.radnik_ids.filter((id) => id !== r.id)
+                          : [...current.radnik_ids, r.id];
+                        return {
+                          ...current,
+                          radnik_ids,
+                          poslovodja_id: current.poslovodja_id && radnik_ids.includes(current.poslovodja_id)
+                            ? current.poslovodja_id
+                            : null,
+                        };
+                      })}
                       className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                     />
                     <span className="text-sm text-slate-700">
@@ -2196,6 +2222,20 @@ export function RasporedView() {
                   </label>
                 ))}
               </div>
+              {nalogForm.radnik_ids.length > 1 && (
+                <Field label="Poslovođa naloga">
+                  <Select
+                    value={nalogForm.poslovodja_id ?? ''}
+                    onChange={(event) => setNalogForm((current) => current ? { ...current, poslovodja_id: event.target.value || null } : current)}
+                  >
+                    <option value="">Odaberi poslovođu</option>
+                    {radnici.filter((worker) => nalogForm.radnik_ids.includes(worker.id)).map((worker) => (
+                      <option key={worker.id} value={worker.id}>{worker.ime} {worker.prezime}</option>
+                    ))}
+                  </Select>
+                  <p className="mt-1 text-xs text-slate-500">Za zaključivanje naloga s više djelatnika mora biti odabran poslovođa iz ekipe.</p>
+                </Field>
+              )}
             </div>
             </div>
             {nalogForm.nalogId && (

@@ -282,6 +282,8 @@ export function RasporedView() {
   const layoutVersion = useRef(0);
   const boardRevision = useRef<number | null>(null);
   const activeDragPayload = useRef<DragPayload | null>(null);
+  const creatingNalogAssignments = useRef(new Set<string>());
+  const [creatingNalogIds, setCreatingNalogIds] = useState<string[]>([]);
   const [ostalo, setOstalo] = useState<DnevniRasporedOstalo[]>([]);
   const [ostaloError, setOstaloError] = useState<string | null>(null);
   const [nalogForm, setNalogForm] = useState<NalogForm | null>(null);
@@ -851,6 +853,9 @@ export function RasporedView() {
     opis: string,
     radnikIds: string[],
   ) => {
+    if (creatingNalogAssignments.current.has(assignmentId) || nalogSaving) return;
+    creatingNalogAssignments.current.add(assignmentId);
+    setCreatingNalogIds((current) => [...current, assignmentId]);
     setError(null);
     try {
       let broj: string;
@@ -874,6 +879,9 @@ export function RasporedView() {
       await openExistingNalog(assignmentId, created.id, true);
     } catch (e) {
       setError(errMsg(e, 'Greška pri kreiranju naloga'));
+    } finally {
+      creatingNalogAssignments.current.delete(assignmentId);
+      setCreatingNalogIds((current) => current.filter((id) => id !== assignmentId));
     }
   };
 
@@ -1705,6 +1713,7 @@ export function RasporedView() {
                               {(g || a.iz_ostalo) && (
                                 <button
                                   type="button"
+                                  disabled={creatingNalogIds.includes(a.id)}
                                   onClick={() => void (a.nalog_id
                                     ? openExistingNalog(a.id, a.nalog_id)
                                     : openNalog(
@@ -1717,8 +1726,14 @@ export function RasporedView() {
                                   aria-label={hasNalog ? 'Otvori radni nalog' : 'Kreiraj radni nalog'}
                                   className={`flex flex-shrink-0 items-center gap-0.5 rounded px-1 text-[10px] font-semibold ${nalogLocked ? 'bg-emerald-500 text-white' : hasNalog ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-600 hover:bg-sky-100 hover:text-sky-800'}`}
                                 >
-                                  {nalogLocked ? <Check className="h-3 w-3" /> : <ClipboardList className="h-3 w-3" />}
-                                  RN
+                                  {creatingNalogIds.includes(a.id) ? (
+                                    '…'
+                                  ) : (
+                                    <>
+                                      {nalogLocked ? <Check className="h-3 w-3" /> : <ClipboardList className="h-3 w-3" />}
+                                      RN
+                                    </>
+                                  )}
                                 </button>
                               )}
                             </div>

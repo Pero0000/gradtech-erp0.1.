@@ -569,7 +569,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
               );
             })}
           </div>
-          <div className="min-w-0 break-words">
+          <div className="min-w-0 break-words xl:sticky xl:top-4">
           {selected && (() => {
             const n = selected;
             const si = statusInfo[n.status];
@@ -578,7 +578,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
             return (
               <div
                 key={n.id}
-                className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:sticky xl:top-4 xl:max-h-[calc(100dvh-2rem)] xl:overflow-y-auto"
+                className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:max-h-[calc(100dvh-2rem)] xl:overflow-y-auto"
               >
                 <div className="mb-3 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:flex-wrap xl:items-start">
                   <div className="flex min-w-0 items-start gap-3">

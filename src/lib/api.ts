@@ -4650,8 +4650,30 @@ export async function createNalogFromRaspored(
     bez_troska?: boolean;
   },
 ) {
+  const { data: assignment, error: assignmentError } = await supabase
+    .from('dnevni_raspored_gradilista')
+    .select('nalog_id')
+    .eq('id', assignmentId)
+    .single();
+  if (assignmentError) throw assignmentError;
+  if (assignment.nalog_id) {
+    const { data: existing, error: existingError } = await supabase
+      .from('radni_nalozi')
+      .select()
+      .eq('id', assignment.nalog_id)
+      .single();
+    if (existingError) throw existingError;
+    return existing;
+  }
+
   const nalog = await createRadniNalog(input, { deferOpenItemTransfer: true });
-  const { error } = await supabase.from('dnevni_raspored_gradilista').update({ nalog_id: nalog.id }).eq('id', assignmentId);
+  const { data: linked, error } = await supabase
+    .from('dnevni_raspored_gradilista')
+    .update({ nalog_id: nalog.id })
+    .eq('id', assignmentId)
+    .is('nalog_id', null)
+    .select('id')
+    .maybeSingle();
   if (error) {
     try {
       await deleteResourceWithHistory('radni_nalozi', nalog.id);
@@ -4662,6 +4684,27 @@ export async function createNalogFromRaspored(
       throw new Error('Pokreni migraciju 20261015160000_raspored_nalog_veza.sql u Supabase SQL editoru.');
     }
     throw error;
+  }
+  if (!linked) {
+    const { data: currentAssignment, error: currentAssignmentError } = await supabase
+      .from('dnevni_raspored_gradilista')
+      .select('nalog_id')
+      .eq('id', assignmentId)
+      .single();
+    try {
+      await deleteResourceWithHistory('radni_nalozi', nalog.id);
+    } catch (cleanupReason) {
+      throw new Error(`Drugi nalog je istodobno otvoren za istu stavku. Dodatni nalog ${nalog.broj} nije moguće ukloniti: ${apiErrorMessage(cleanupReason)}`);
+    }
+    if (currentAssignmentError) throw currentAssignmentError;
+    if (!currentAssignment.nalog_id) throw new Error('Stavka rasporeda nije ostala povezana s radnim nalogom.');
+    const { data: existing, error: existingError } = await supabase
+      .from('radni_nalozi')
+      .select()
+      .eq('id', currentAssignment.nalog_id)
+      .single();
+    if (existingError) throw existingError;
+    return existing;
   }
   return nalog;
 }

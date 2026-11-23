@@ -472,6 +472,7 @@ export function NalogIzvrsenje({
   const [vremena, setVremena] = execution.field(snapshot, 'vremena');
   const [savingTime, setSavingTime] = execution.field(snapshot, 'savingTime');
   const timeSavePending = execution.timeSavePending;
+  const queuedTimeSaves = useRef(new Map<string, { row: NalogRadnikVrijeme; zeroHours: boolean }>());
   const [zadaci, setZadaci] = execution.field(snapshot, 'zadaci');
   const [savingCompletion, setSavingCompletion] = execution.field(snapshot, 'savingCompletion');
   const completionDisabled = savingCompletion || zavrsen || nalog.status === 'zavrsen' || nalog.status === 'otkazan';
@@ -748,20 +749,30 @@ export function NalogIzvrsenje({
       window.setTimeout(() => setSaved(false), 1500);
     }, 'Greška pri spremanju.');
 
-  const saveVrijeme = (next: NalogRadnikVrijeme[], radnikId: string, zeroHours = false) => {
+  const drainTimeSaves = () => {
     if (timeSavePending.current) return;
-    const row = next.find((v) => v.radnik_id === radnikId);
-    if (!row) return;
-    const previous = vremena;
+    const entry = queuedTimeSaves.current.entries().next().value as
+      | [string, { row: NalogRadnikVrijeme; zeroHours: boolean }]
+      | undefined;
+    if (!entry) {
+      setSavingTime(false);
+      return;
+    }
+    const [radnikId, pendingSave] = entry;
+    queuedTimeSaves.current.delete(radnikId);
     timeSavePending.current = true;
     setSavingTime(true);
-    setVremena(next);
     void guard(async () => {
       try {
         await execution.persistDefaults();
-        await saveNalogRadnikVrijeme(nalog.id, radnikId, row.vrijeme_od, row.vrijeme_do, zeroHours);
+        await saveNalogRadnikVrijeme(
+          nalog.id,
+          radnikId,
+          pendingSave.row.vrijeme_od,
+          pendingSave.row.vrijeme_do,
+          pendingSave.zeroHours,
+        );
       } catch (reason) {
-        setVremena(previous);
         try {
           setVremena(await fetchNalogRadnikVrijeme(nalog.id));
         } catch (reloadReason) {
@@ -771,15 +782,27 @@ export function NalogIzvrsenje({
       }
     }, 'Greška pri spremanju vremena.').finally(() => {
       timeSavePending.current = false;
-      setSavingTime(false);
+      drainTimeSaves();
     });
+  };
+
+  const saveVrijeme = (next: NalogRadnikVrijeme[], radnikId: string, zeroHours = false) => {
+    const row = next.find((v) => v.radnik_id === radnikId);
+    if (!row) return;
+    setVremena(next);
+    queuedTimeSaves.current.set(radnikId, { row, zeroHours });
+    drainTimeSaves();
   };
 
   const changeVrijeme = (radnikId: string, field: 'vrijeme_od' | 'vrijeme_do', value: string) => {
     const next = vremena.map((v) => (v.radnik_id === radnikId
       ? { ...v, [field]: value || null, mobile_zero_hours: false }
       : v));
-    saveVrijeme(next, radnikId);
+    setVremena(next);
+  };
+
+  const commitVrijeme = (radnikId: string) => {
+    saveVrijeme(execution.getSnapshot().vremena, radnikId);
   };
 
   const changeZeroHours = (radnikId: string, zeroHours: boolean) => {
@@ -1106,7 +1129,8 @@ export function NalogIzvrsenje({
                       type="time"
                       value={v.vrijeme_od?.slice(0, 5) ?? ''}
                       onChange={(e) => changeVrijeme(v.radnik_id, 'vrijeme_od', e.target.value)}
-                      disabled={savingTime || v.mobile_zero_hours}
+                      onBlur={() => commitVrijeme(v.radnik_id)}
+                      disabled={v.mobile_zero_hours}
                       className={inputCls}
                     />
                   </label>
@@ -1115,11 +1139,9 @@ export function NalogIzvrsenje({
                     <input
                       type="time"
                       value={v.vrijeme_do?.slice(0, 5) ?? ''}
-                      onFocus={() => {
-                        if (!v.mobile_zero_hours && !v.vrijeme_do) changeVrijeme(v.radnik_id, 'vrijeme_do', '16:00');
-                      }}
                       onChange={(e) => changeVrijeme(v.radnik_id, 'vrijeme_do', e.target.value)}
-                      disabled={savingTime || v.mobile_zero_hours}
+                      onBlur={() => commitVrijeme(v.radnik_id)}
+                      disabled={v.mobile_zero_hours}
                       className={inputCls}
                     />
                   </label>

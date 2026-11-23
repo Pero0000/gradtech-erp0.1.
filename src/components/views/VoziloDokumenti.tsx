@@ -1,7 +1,7 @@
 import { formatHrDate } from '@/lib/localization';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Wrench, Plus, Trash2, Paperclip, Pencil, X } from 'lucide-react';
-import type { VoziloDokument, VoziloDokumentVrsta } from '@/types';
+import type { VoziloDokument, VoziloDokumentVrsta, VoziloServisVrsta } from '@/types';
 import { addVoziloDokument, deleteVoziloDokument, fetchVoziloDokumenti, updateVoziloDokument } from '@/lib/api';
 import { todayISO } from '@/lib/rokovi';
 import { TextInput, Select, Textarea } from '@/components/ui/Field';
@@ -40,15 +40,16 @@ export function VoziloDokumenti({ voziloId, onChange }: { voziloId: string; onCh
   const [historyRestoring, setHistoryRestoring] = useState(false);
   const [historyVersion, setHistoryVersion] = useState(0);
   const [editing, setEditing] = useState<VoziloDokument | null>(null);
-  const [form, setForm] = useState({ vrsta: 'servis' as VoziloDokumentVrsta, naziv: '', datum_od: '', datum_do: '', iznos: '', km: '', serviser: '', dijelovi: '', napomena: '' });
+  const [form, setForm] = useState({ vrsta: 'servis' as VoziloDokumentVrsta, servis_vrsta: 'redovni' as VoziloServisVrsta, naziv: '', datum_od: '', datum_do: '', iznos: '', km: '', serviser: '', dijelovi: '', napomena: '' });
   const [file, setFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const requestScope = useRequestScope();
   const isServis = form.vrsta === 'servis';
+  const isIzvanredni = isServis && form.servis_vrsta === 'izvanredni';
 
   const resetForm = () => {
     setEditing(null);
-    setForm({ vrsta: 'servis', naziv: '', datum_od: '', datum_do: '', iznos: '', km: '', serviser: '', dijelovi: '', napomena: '' });
+    setForm({ vrsta: 'servis', servis_vrsta: 'redovni', naziv: '', datum_od: '', datum_do: '', iznos: '', km: '', serviser: '', dijelovi: '', napomena: '' });
     setFile(null);
     if (fileRef.current) fileRef.current.value = '';
   };
@@ -57,6 +58,7 @@ export function VoziloDokumenti({ voziloId, onChange }: { voziloId: string; onCh
     setEditing(document);
     setForm({
       vrsta: document.vrsta,
+      servis_vrsta: document.servis_vrsta ?? 'redovni',
       naziv: document.naziv,
       datum_od: document.datum_od ?? '',
       datum_do: document.datum_do ?? '',
@@ -99,6 +101,7 @@ export function VoziloDokumenti({ voziloId, onChange }: { voziloId: string; onCh
         datum_do: form.datum_do || null,
         iznos: form.iznos ? parseFloat(form.iznos) : null,
         km: form.km ? parseInt(form.km) : null,
+        servis_vrsta: form.vrsta === 'servis' ? form.servis_vrsta : null,
         serviser: form.vrsta === 'servis' ? form.serviser.trim() || null : null,
         dijelovi: form.vrsta === 'servis' ? form.dijelovi.trim() || null : null,
         napomena: form.napomena.trim() || null,
@@ -160,6 +163,7 @@ export function VoziloDokumenti({ voziloId, onChange }: { voziloId: string; onCh
                 </p>
                 <p className="text-xs text-slate-500">
                   {vrste[d.vrsta] ?? d.vrsta} · {d.vrsta === 'servis' ? date(d.datum_od) : `${date(d.datum_od)} – ${date(d.datum_do)}`}
+                  {d.vrsta === 'servis' && ` · ${d.servis_vrsta === 'izvanredni' ? 'izvanredni' : 'redovni'}`}
                   {d.km != null && ` · ${d.km.toLocaleString('hr-HR')} km`}
                   {d.iznos != null && ` · ${d.iznos.toLocaleString('hr-HR', { minimumFractionDigits: 2 })} €`}
                   {d.vrsta === 'servis' && d.datum_do && ` · idući ${date(d.datum_do)}`}
@@ -197,18 +201,44 @@ export function VoziloDokumenti({ voziloId, onChange }: { voziloId: string; onCh
           <label className="block min-w-0 text-xs text-slate-500">{isServis ? 'Datum servisa' : 'Početak'}
             <TextInput type="date" value={form.datum_od} onChange={(e) => setForm({ ...form, datum_od: e.target.value })} />
           </label>
-          <label className="block min-w-0 text-xs text-slate-500">{isServis ? 'Idući servis (datum)' : 'Kraj / istek'}
-            <TextInput type="date" value={form.datum_do} onChange={(e) => setForm({ ...form, datum_do: e.target.value })} />
-          </label>
+          {isServis ? (
+            <label className="block min-w-0 text-xs text-slate-500">Vrsta servisa
+              <Select
+                value={form.servis_vrsta}
+                onChange={(e) => setForm((previous) => ({
+                  ...previous,
+                  servis_vrsta: e.target.value as VoziloServisVrsta,
+                  datum_do: e.target.value === 'izvanredni' ? '' : previous.datum_do,
+                }))}
+              >
+                <option value="redovni">Redovni servis</option>
+                <option value="izvanredni">Izvanredni servis</option>
+              </Select>
+            </label>
+          ) : (
+            <label className="block min-w-0 text-xs text-slate-500">Kraj / istek
+              <TextInput type="date" value={form.datum_do} onChange={(e) => setForm({ ...form, datum_do: e.target.value })} />
+            </label>
+          )}
           <label className="block min-w-0 text-xs text-slate-500">Kilometraža (km)
             <TextInput type="number" min="0" value={form.km} onChange={(e) => setForm({ ...form, km: e.target.value })} placeholder="npr. 125000" />
           </label>
+          {isServis && !isIzvanredni && (
+            <label className="block min-w-0 text-xs text-slate-500">Idući servis (datum)
+              <TextInput type="date" value={form.datum_do} onChange={(e) => setForm({ ...form, datum_do: e.target.value })} />
+            </label>
+          )}
           <label className="block min-w-0 text-xs text-slate-500">Cijena servisa / iznos (€)
             <TextInput type="number" min="0" step="0.01" value={form.iznos} onChange={(e) => setForm({ ...form, iznos: e.target.value })} placeholder="npr. 350,00" />
           </label>
         </div>
         {isServis && (
           <>
+            <p className={`rounded-lg px-3 py-2 text-xs ${isIzvanredni ? 'bg-amber-50 text-amber-800' : 'bg-sky-50 text-sky-800'}`}>
+              {isIzvanredni
+                ? 'Izvanredni servis ulazi u povijest i trošak, ali ne mijenja datum ni kilometražu sljedećeg redovnog servisa.'
+                : 'Redovni servis postavlja novu početnu točku za obračun sljedećeg servisa prema kilometrima i vremenu.'}
+            </p>
             <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
               <label className="block min-w-0 text-xs text-slate-500">Serviser / servisna radionica
                 <TextInput value={form.serviser} onChange={(e) => setForm((previous) => ({ ...previous, serviser: e.target.value }))} placeholder="npr. Auto Centar Horvat" />

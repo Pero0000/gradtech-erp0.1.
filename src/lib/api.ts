@@ -765,7 +765,7 @@ export async function fetchSviServisi(): Promise<VoziloDokument[]> {
 
 export async function addVoziloDokument(
   voziloId: string,
-  input: { vrsta: VoziloDokumentVrsta; naziv: string; datum_od: string | null; datum_do: string | null; iznos: number | null; km: number | null; napomena: string | null; serviser?: string | null; dijelovi?: string | null },
+  input: { vrsta: VoziloDokumentVrsta; naziv: string; datum_od: string | null; datum_do: string | null; iznos: number | null; km: number | null; napomena: string | null; servis_vrsta?: VoziloDokument['servis_vrsta']; serviser?: string | null; dijelovi?: string | null },
   file: File | null,
 ) {
   let putanja: string | null = null;
@@ -784,7 +784,7 @@ export async function addVoziloDokument(
 
 export async function updateVoziloDokument(
   dokument: VoziloDokument,
-  input: { vrsta: VoziloDokumentVrsta; naziv: string; datum_od: string | null; datum_do: string | null; iznos: number | null; km: number | null; napomena: string | null; serviser?: string | null; dijelovi?: string | null },
+  input: { vrsta: VoziloDokumentVrsta; naziv: string; datum_od: string | null; datum_do: string | null; iznos: number | null; km: number | null; napomena: string | null; servis_vrsta?: VoziloDokument['servis_vrsta']; serviser?: string | null; dijelovi?: string | null },
   file: File | null,
 ) {
   let newPath: string | null = null;

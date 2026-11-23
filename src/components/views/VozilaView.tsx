@@ -258,9 +258,10 @@ export function VozilaView() {
         setModalOpen(false);
         setSelectedVehicle(null);
       } else {
-        // Nakon kreiranja ostaje otvoreno da se odmah mogu dodati dokumenti i servisi
-        const created = await createVozilo(payload);
-        setEditing(created);
+        await createVozilo(payload);
+        setModalOpen(false);
+        setEditing(null);
+        setSelectedVehicle(null);
       }
       await load();
     } catch (e) {
@@ -807,7 +808,7 @@ export function VozilaView() {
                 <TextInput type="number" min="0" value={form.servis_upozorenje_dana} onChange={(e) => setForm({ ...form, servis_upozorenje_dana: e.target.value })} />
               </Field>
             </div>
-            <p className="mt-2 text-[11px] text-slate-400">Računa se od zadnjeg upisanog servisa i trenutne kilometraže vozila. Ostavi prazno za isključeno.</p>
+            <p className="mt-2 text-[11px] text-slate-400">Računa se od zadnjeg redovnog servisa i trenutne kilometraže vozila. Izvanredni servisi ne pomiču interval. Ostavi prazno za isključeno.</p>
           </div>
           <Field label="Što treba napraviti na sljedećem servisu">
             <Textarea

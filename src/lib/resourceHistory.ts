@@ -23,7 +23,7 @@ const labels: Record<string, string> = {
   cijena_put_sat: 'Cijena putnog sata', nocni_dodatak: 'Noćni dodatak',
   teren_dnevnica: 'Terenska dnevnica', bonusi: 'Bonusi',
   vrsta: 'Vrsta dokumenta', putanja: 'Prilog', datum_od: 'Početak', datum_do: 'Kraj / istek',
-  iznos: 'Iznos', km: 'Kilometraža (km)', serviser: 'Serviser', dijelovi: 'Dijelovi',
+  iznos: 'Iznos', km: 'Kilometraža (km)', servis_vrsta: 'Vrsta servisa', serviser: 'Serviser', dijelovi: 'Dijelovi',
   vozilo_id: 'Vozilo', oprema_id: 'Oprema',
   adresa: 'Adresa', regija: 'Regija', objekt_id: 'Objekt (ID)', voditelj_gradilista: 'Voditelj gradilišta',
   datum_pocetka: 'Datum početka', datum_zavrsetka: 'Datum završetka', opis: 'Opis',

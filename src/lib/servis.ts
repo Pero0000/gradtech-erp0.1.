@@ -12,10 +12,13 @@ function addMonths(iso: string, months: number) {
 const days = (from: string, to: string) =>
   Math.round((new Date(`${to}T00:00:00`).getTime() - new Date(`${from}T00:00:00`).getTime()) / 86400000);
 
+const isRedovniServis = (document: VoziloDokument) =>
+  document.vrsta === 'servis' && document.servis_vrsta !== 'izvanredni';
+
 // Idući servis: km (zadnji servis + interval) i/ili datum
 export function nextServis(v: Vozilo, dokumenti: VoziloDokument[]): { km: number | null; datum: string | null } {
   const last = dokumenti
-    .filter((d) => d.vozilo_id === v.id && d.vrsta === 'servis')
+    .filter((d) => d.vozilo_id === v.id && isRedovniServis(d))
     .sort((a, b) => (b.datum_od ?? '').localeCompare(a.datum_od ?? ''))[0];
   if (!last) return { km: null, datum: null };
   const km = v.servis_interval_km && last.km != null ? last.km + v.servis_interval_km : null;
@@ -30,10 +33,10 @@ export function servisAlert(v: Vozilo, dokumenti: VoziloDokument[]): ServisAlert
   if (!intKm && !intMj) return null;
 
   const servisi = dokumenti
-    .filter((d) => d.vozilo_id === v.id && d.vrsta === 'servis')
+    .filter((d) => d.vozilo_id === v.id && isRedovniServis(d))
     .sort((a, b) => (b.datum_od ?? '').localeCompare(a.datum_od ?? ''));
   const last = servisi[0];
-  if (!last) return { level: 'none-recorded', text: 'Nema upisanog servisa' };
+  if (!last) return { level: 'none-recorded', text: 'Nema upisanog redovnog servisa' };
 
   const today = todayISO();
   const warnKm = v.servis_upozorenje_km ?? 1000;

@@ -34,10 +34,12 @@ export interface RadnikDokument {
   url?: string | null;
 }
 export type VoziloDokumentVrsta = 'registracija' | 'tehnicki' | 'osiguranje' | 'kasko' | 'servis' | 'enc' | 'tahograf' | 'ostalo';
+export type VoziloServisVrsta = 'redovni' | 'izvanredni';
 export interface VoziloDokument {
   id: string;
   vozilo_id: string;
   vrsta: VoziloDokumentVrsta;
+  servis_vrsta?: VoziloServisVrsta | null;
   naziv: string;
   putanja: string | null;
   datum_od: string | null;

@@ -238,9 +238,10 @@ export function RadniciView() {
         await addRadnikPovijest(rows).catch(() => undefined);
         setModalOpen(false);
       } else {
-        // Nakon kreiranja ostaje otvoreno da se odmah mogu dodati dokumenti
-        const created = await createRadnik(payload);
-        setEditing(created);
+        await createRadnik(payload);
+        setModalOpen(false);
+        setEditing(null);
+        setSelectedRadnik(null);
       }
       await load();
     } catch (e) {

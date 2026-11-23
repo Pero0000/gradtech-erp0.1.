@@ -434,6 +434,8 @@ export function NalogIzvrsenje({
   const [retryingKmSync, setRetryingKmSync] = useState(false);
   const [restoringStatusId, setRestoringStatusId] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [changingStatus, setChangingStatus] = useState(false);
+  const statusChangePending = useRef(false);
   const [km, setKm] = execution.field(snapshot, 'km');
   const [kmBezObracuna] = execution.field(snapshot, 'kmBezObracuna');
   const [stavke, setStavke] = execution.field(snapshot, 'stavke');
@@ -674,64 +676,62 @@ export function NalogIzvrsenje({
     }, 'Greška pri spremanju oznake teren.');
   };
 
-  const toggleZavrsen = (value: boolean, bezPotvrdeDjelatnika = false, zavrsiBezIzvrsenja = false) => {
-    if (timeSavePending.current) {
-      setError('Pričekaj da se spremi radno vrijeme prije promjene statusa naloga.');
-      return;
-    }
-    if (zavrsiBezIzvrsenja) {
-      if (nalog.status === 'zavrsen' || nalog.status === 'otkazan') {
-        setError('Bez izvršenja može se završiti samo otvoren nalog koji još nije zaključen ili otkazan.');
-        return;
-      }
-      if (!window.confirm('Ovaj radni nalog bit će uklonjen iz otvorenih naloga djelatnika i označen kao završen bez izvršenja, neovisno o tome je li djelatnik započeo rad ili predao izvještaj. Neće se obračunati sati ni troškovi, a nezavršeni zadaci vratit će se na gradilište. Nastaviti?')) return;
-    }
-    if (value) {
-      if (!zavrsiBezIzvrsenja && !bezPotvrdeDjelatnika && (nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku')) {
-        setError('Djelatnici još rade na nalogu. Zaključivanje je moguće tek nakon što poslovođa preda završni izvještaj.');
-        return;
-      }
-      const radnici = radnikIds ? vremena.filter((v) => radnikIds.includes(v.radnik_id)) : vremena;
-      if (!zavrsiBezIzvrsenja && !bezPotvrdeDjelatnika && radnici.some((v) => !v.mobile_zero_hours && (!v.vrijeme_od || !v.vrijeme_do))) {
-        setError('Nalog se ne može zaključiti dok nije upisan završetak rada (Do) za sve radnike.');
-        return;
-      }
-      const missing: string[] = [];
-      if (km.pocetak === '' || km.kraj === '') missing.push('kilometre');
-      const upozorenje = bezPotvrdeDjelatnika
-        ? 'Djelatnici nisu potvrdili rad ni završni izvještaj. Ova će napomena biti trajno zabilježena na nalogu.'
-        : '';
-      const detalji = missing.length > 0
-        ? `Nije upisano: ${missing.join(', ')}. Kilometri se neće obračunati.`
-        : 'Sati i kilometri upisat će se u trošak gradilišta, a neriješeni zadaci, materijal i alat prenose se na idući nalog.';
-      if (!zavrsiBezIzvrsenja) {
-        const poruka = [upozorenje, detalji, 'Zaključiti nalog?'].filter(Boolean).join('\n\n');
-        if (!window.confirm(poruka)) return;
-      }
-    }
-    void guard(async () => {
-      const izvrsenje = value && !zavrsiBezIzvrsenja
-        ? {
-          km_pocetak: km.pocetak === '' ? null : Number(km.pocetak),
-          km_kraj: km.kraj === '' ? null : Number(km.kraj),
-          napomena: napomena.trim() || null,
+  const toggleZavrsen = async (value: boolean, bezPotvrdeDjelatnika = false, zavrsiBezIzvrsenja = false) => {
+    if (statusChangePending.current) return;
+    statusChangePending.current = true;
+    setChangingStatus(true);
+    setError(null);
+    try {
+      if (zavrsiBezIzvrsenja) {
+        if (nalog.status === 'zavrsen' || nalog.status === 'otkazan') {
+          setError('Bez izvršenja može se završiti samo otvoren nalog koji još nije zaključen ili otkazan.');
+          return;
         }
-        : undefined;
-      try {
-        await execution.persistDefaults();
-        await setNalogZavrsen(nalog.id, value, bezPotvrdeDjelatnika, zavrsiBezIzvrsenja, izvrsenje);
-      } catch (reason) {
-        if (reason instanceof Error && reason.message.startsWith('Nalog je ')) {
-          setZavrsen(value);
-          setBezIzvrsenja(value && zavrsiBezIzvrsenja);
-          onChange?.(value);
-        }
-        throw reason;
       }
+      if (value) {
+        if (!zavrsiBezIzvrsenja && !bezPotvrdeDjelatnika && (nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku')) {
+          setError('Djelatnici još rade na nalogu. Zaključivanje je moguće tek nakon što poslovođa preda završni izvještaj.');
+          return;
+        }
+        const radnici = radnikIds ? vremena.filter((v) => radnikIds.includes(v.radnik_id)) : vremena;
+        if (!zavrsiBezIzvrsenja && !bezPotvrdeDjelatnika && radnici.some((v) => !v.mobile_zero_hours && (!v.vrijeme_od || !v.vrijeme_do))) {
+          setError('Nalog se ne može zaključiti dok nije upisan završetak rada (Do) za sve radnike.');
+          return;
+        }
+      }
+      const previousZavrsen = zavrsen;
+      const previousBezIzvrsenja = bezIzvrsenja;
       setZavrsen(value);
       setBezIzvrsenja(value && zavrsiBezIzvrsenja);
-      onChange?.(value);
-    }, 'Greška pri zaključivanju naloga.');
+      await guard(async () => {
+        while (timeSavePending.current || queuedTimeSaves.current.size > 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, 25));
+        }
+        const izvrsenje = value && !zavrsiBezIzvrsenja
+          ? {
+            km_pocetak: km.pocetak === '' ? null : Number(km.pocetak),
+            km_kraj: km.kraj === '' ? null : Number(km.kraj),
+            napomena: napomena.trim() || null,
+          }
+          : undefined;
+        try {
+          await execution.persistDefaults();
+          await setNalogZavrsen(nalog.id, value, bezPotvrdeDjelatnika, zavrsiBezIzvrsenja, izvrsenje);
+        } catch (reason) {
+          if (reason instanceof Error && reason.message.startsWith('Nalog je ')) {
+            onChange?.(value);
+          } else {
+            setZavrsen(previousZavrsen);
+            setBezIzvrsenja(previousBezIzvrsenja);
+          }
+          throw reason;
+        }
+        onChange?.(value);
+      }, 'Greška pri zaključivanju naloga.');
+    } finally {
+      statusChangePending.current = false;
+      setChangingStatus(false);
+    }
   };
 
   const saveDetails = () =>
@@ -977,22 +977,24 @@ export function NalogIzvrsenje({
             {nalog.mobile_status === 'zakljucen_bez_potvrde' && (
               <span className="rounded bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">Djelatnici nisu potvrdili</span>
             )}
-            <button onClick={() => toggleZavrsen(false)} disabled={savingTime} className="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50">Ponovno otvori</button>
+            <button onClick={() => void toggleZavrsen(false)} disabled={changingStatus} className="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-50">
+              {changingStatus ? 'Spremam…' : 'Ponovno otvori'}
+            </button>
           </div>
         ) : (
           <>
             <button
-              onClick={() => toggleZavrsen(true)}
-              disabled={savingTime || nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku'}
+              onClick={() => void toggleZavrsen(true)}
+              disabled={changingStatus || nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku'}
               className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Check className="h-4 w-4" />
-              {nalog.mobile_status === 'predan' ? 'Odobri i zaključi nalog' : nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku' ? 'Čeka izvještaj djelatnika' : 'Zaključi radni nalog'}
+              {changingStatus ? 'Zaključujem…' : nalog.mobile_status === 'predan' ? 'Odobri i zaključi nalog' : nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku' ? 'Čeka izvještaj djelatnika' : 'Zaključi radni nalog'}
             </button>
             {nalog.status !== 'zavrsen' && nalog.status !== 'otkazan' && (
               <button
-                onClick={() => toggleZavrsen(true, false, true)}
-                disabled={savingTime}
+                onClick={() => void toggleZavrsen(true, false, true)}
+                disabled={changingStatus}
                 className="ml-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 <Check className="h-4 w-4" />
@@ -1001,8 +1003,8 @@ export function NalogIzvrsenje({
             )}
             {(nalog.mobile_status === 'dodijeljen' || nalog.mobile_status === 'u_tijeku') && (
               <button
-                onClick={() => toggleZavrsen(true, true)}
-                disabled={savingTime}
+                onClick={() => void toggleZavrsen(true, true)}
+                disabled={changingStatus}
                 className="ml-2 inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-900 hover:bg-amber-100"
               >
                 <Check className="h-4 w-4" />

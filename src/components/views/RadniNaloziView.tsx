@@ -578,7 +578,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
             return (
               <div
                 key={n.id}
-                className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+                className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:sticky xl:top-4 xl:max-h-[calc(100dvh-2rem)] xl:overflow-y-auto"
               >
                 <div className="mb-3 flex min-w-0 flex-col items-stretch justify-between gap-3 xl:flex-row xl:flex-wrap xl:items-start">
                   <div className="flex min-w-0 items-start gap-3">
@@ -756,7 +756,7 @@ export function RadniNaloziView({ focusNalogId }: { focusNalogId?: string | null
                   </fieldset>
                 </div>
 
-                <NalogIzvrsenje key={n.id} nalog={n} executionCache={executionCache} slotId={`rn-detail-slot-${n.id}`} visualSections onChange={() => { setDeletionVersion((value) => value + 1); void load(); }} />
+                <NalogIzvrsenje key={n.id} nalog={n} executionCache={executionCache} slotId={`rn-detail-slot-${n.id}`} visualSections onChange={() => { setDeletionVersion((value) => value + 1); void load(true).catch(() => undefined); }} />
               </div>
             );
           })()}

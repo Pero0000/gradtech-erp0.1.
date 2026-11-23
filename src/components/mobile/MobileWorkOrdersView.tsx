@@ -518,7 +518,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     return () => { active = false; requestCounter.current++; };
   }, [selectedId, selectedPublication, loadDetails]);
 
-  const runAction = async (action: () => Promise<void>, success?: string) => {
+  const runAction = async (action: () => Promise<void>, success?: string, refresh = true) => {
     setWorking(true);
     setError(null);
     setNotice(null);
@@ -527,17 +527,21 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
       await action();
       saved = true;
       if (success) setNotice(success);
-      const list = visibleMobileOrders(await fetchMobileRadniNalozi());
-      setOrders(list);
-      const latest = list.find((order) => order.id === selectedId);
-      if (latest) await loadDetails(latest, false);
+      if (refresh) {
+        const list = visibleMobileOrders(await fetchMobileRadniNalozi());
+        setOrders(list);
+        const latest = list.find((order) => order.id === selectedId);
+        if (latest) await loadDetails(latest, false);
+      }
     } catch (reason) {
       setError(saved
         ? `Promjena je spremljena, ali prikaz nije osvježen. ${errorMessage(reason, 'Pokušaj osvježiti nalog.')}`
         : errorMessage(reason, 'Promjena nije spremljena.'));
+      return false;
     } finally {
       setWorking(false);
     }
+    return true;
   };
 
   const saveReport = async (overrides: { potvrde?: string[]; report?: MobileReport } = {}) => {
@@ -568,7 +572,10 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     const next = potvrde.filter((item) => item !== key && item !== `${key}:na`);
     if (value === 'da') next.push(key);
     if (value === 'na') next.push(`${key}:na`);
-    await runAction(() => saveReport({ potvrde: next }));
+    const previous = potvrde;
+    setPotvrde(next);
+    const saved = await runAction(() => saveReport({ potvrde: next }), undefined, false);
+    if (!saved) setPotvrde(previous);
   };
 
   const addNalogVoznja = async () => {
@@ -732,7 +739,10 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
       await setPotvrda('vrijeme', null);
       return;
     }
-    await runAction(async () => {
+    const previous = potvrde;
+    const nextPotvrde = [...potvrde.filter((item) => item !== 'vrijeme'), 'vrijeme'];
+    setPotvrde(nextPotvrde);
+    const saved = await runAction(async () => {
       const timeRangesByWorker = new Map<string, Array<{ from: string; to: string }>>();
       for (const worker of details.ekipa) {
         if (bezSatiRadnici.includes(worker.radnik_id)) continue;
@@ -786,8 +796,9 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         }))),
         bezSatiRadnici,
       });
-      await saveReport({ potvrde: [...potvrde.filter((item) => item !== 'vrijeme'), 'vrijeme'] });
-    }, 'Radno vrijeme ekipe je potvrđeno.');
+      await saveReport({ potvrde: nextPotvrde });
+    }, 'Radno vrijeme ekipe je potvrđeno.', false);
+    if (!saved) setPotvrde(previous);
   };
 
   const confirmEnc = async (value: 'da' | 'na' | null) => {
@@ -803,7 +814,10 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     const next = potvrde.filter((item) => item !== 'enc' && item !== 'enc:na');
     if (value === 'da') next.push('enc');
     if (value === 'na') next.push('enc:na');
-    await runAction(() => saveReport({ potvrde: next, report: nextReport }));
+    const previous = potvrde;
+    setPotvrde(next);
+    const saved = await runAction(() => saveReport({ potvrde: next, report: nextReport }), undefined, false);
+    if (!saved) setPotvrde(previous);
   };
 
   const confirmKmKraj = async (value: 'da' | 'na' | null) => {
@@ -824,7 +838,10 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     const next = potvrde.filter((item) => item !== 'km_kraj' && item !== 'km_kraj:na');
     if (value === 'da') next.push('km_kraj');
     if (value === 'na') next.push('km_kraj:na');
-    await runAction(() => saveReport({ potvrde: next, report: nextReport }));
+    const previous = potvrde;
+    setPotvrde(next);
+    const saved = await runAction(() => saveReport({ potvrde: next, report: nextReport }), undefined, false);
+    if (!saved) setPotvrde(previous);
   };
   const selectedPhotoQueue = photoQueue.filter((photo) => photo.nalogId === selectedId);
   const savMaterijal = details?.stavke.filter((item) => item.tip === 'materijal') ?? [];

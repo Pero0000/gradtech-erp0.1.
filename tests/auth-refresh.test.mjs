@@ -70,6 +70,9 @@ function setup() {
   const companyWrites = [];
   const timers = new Map();
   const listeners = new Map();
+  const storage = new Map();
+  let pushFailure = null;
+  let authSignOutCalls = 0;
   let authListener;
   let failure = null;
   const session = { user: { id: 'user', user_metadata: {} } };
@@ -88,8 +91,9 @@ function setup() {
           authListener = listener;
           return { data: { listener: null, subscription: { unsubscribe() {} } } };
         },
-        signOut: async () => { authListener('SIGNED_OUT', null); return { error: null }; },
+        signOut: async () => { authSignOutCalls++; authListener('SIGNED_OUT', null); return { error: null }; },
       },
+      rpc: async () => ({ error: pushFailure }),
       from(table) {
         queries.push(table);
         const result = () => ({ data: structuredClone(database[table]), error: failure });
@@ -110,6 +114,11 @@ function setup() {
       visibilityState: 'visible',
       addEventListener: (event, fn) => listeners.set(event, fn),
       removeEventListener: (event) => listeners.delete(event),
+    },
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, String(value)),
+      removeItem: (key) => storage.delete(key),
     },
   });
   const render = () => runtime.render(() => module.exports.AuthProvider({ children: null })).props.value;
@@ -158,6 +167,9 @@ function setup() {
     database, queries, companyWrites, timers, dataCalls, ready, render, settle,
     renderApp: (auth) => { currentAuth = auth; return consumer.render(() => sharedModule.exports.useOverview()); },
     fail: () => { failure = new Error('Provjera ovlasti nije uspjela'); },
+    savePushRegistration: (value) => storage.set('gradtech:push-registration', JSON.stringify(value)),
+    failPushLogout: (reason = new Error('Mreža nije dostupna')) => { pushFailure = reason; },
+    getAuthSignOutCalls: () => authSignOutCalls,
     dispose: () => { runtime.dispose(); consumer.dispose(); },
   };
 }
@@ -187,6 +199,22 @@ test('60-second access checks preserve references and do not reload any global a
   }
   assert.equal(s.companyWrites.length, 1, 'imperative company context also keeps the same object');
   assert.equal(s.queries.filter((table) => table === 'app_profiles').length, 4, 'access checks still run');
+});
+
+test('offline push unregister failure keeps the authenticated session active', async (t) => {
+  const s = setup();
+  t.after(s.dispose);
+  const auth = await s.ready();
+  s.savePushRegistration({
+    userId: 'user',
+    token: 'shared-device',
+    platform: 'android',
+    installationProof: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  });
+  s.failPushLogout();
+  await assert.rejects(auth.signOut(), /Mreža nije dostupna/);
+  assert.equal(s.getAuthSignOutCalls(), 0);
+  assert.equal(s.render().profile?.id, 'user');
 });
 
 test('real permission, company-setting and role changes still take effect; failures and sign-out revoke access', async (t) => {

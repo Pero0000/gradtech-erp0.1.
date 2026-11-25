@@ -2565,14 +2565,12 @@ export async function fetchCostDeletions(before?: Pick<ResourceDeletion, 'id' | 
 // ===== RADNO VRIJEME =====
 
 export async function fetchRadnoVrijeme(): Promise<RadnoVrijeme[]> {
-  const { data, error } = await supabase
+  return fetchAllRows<RadnoVrijeme>((from, to) => supabase
     .from('radno_vrijeme')
-    .select(
-      '*, radnici:radnik_id ( id, ime, prezime, uloga, cijena_sata ), gradilista:gradiliste_id ( id, naziv )',
-    )
-    .order('datum', { ascending: false });
-  if (error) throw error;
-  return (data ?? []) as RadnoVrijeme[];
+    .select('*, radnici:radnik_id ( id, ime, prezime, uloga, cijena_sata ), gradilista:gradiliste_id ( id, naziv )')
+    .order('datum', { ascending: false })
+    .order('id')
+    .range(from, to));
 }
 
 export interface ObracunRadnoVrijemeRow {
@@ -2860,6 +2858,7 @@ export async function createRadniNalog(input: {
       .update({ nalog_id: data.id })
       .eq('gradiliste_id', input.gradiliste_id)
       .eq('gotovo', false)
+      .eq('uzeto', false)
       .is('nalog_id', null);
     if (siteItemsError) throw siteItemsError;
 
@@ -3515,7 +3514,7 @@ export async function prenesiOtvoreneStavke(nalogId: string, gradilisteId: strin
   if (ids.length === 0) return;
   const { data: stavke, error } = await supabase
     .from('radni_nalozi_stavke')
-    .select('id, nalog_id, tip, naziv, oprema_id, izvor_id, izvor_materijal_id, izvor_alat_id')
+    .select('id, nalog_id, tip, naziv, oprema_id, izvor_id, izvor_materijal_id, izvor_alat_id, uzeto')
     .in('nalog_id', [...ids, nalogId])
     .eq('gotovo', false)
     .eq('preneseno', false);
@@ -3542,7 +3541,8 @@ export async function prenesiOtvoreneStavke(nalogId: string, gradilisteId: strin
       throw copyMaterialsError;
     }
   };
-  const sourceItems = uniqueNalogSourceRows(stavke, nalogId).filter((item) => item.nalog_id !== nalogId);
+  const sourceItems = uniqueNalogSourceRows(stavke, nalogId)
+    .filter((item) => item.nalog_id !== nalogId && !item.uzeto);
   await copyItems(sourceItems.filter((item) => item.tip === 'materijal'), 'izvor_materijal_id');
   await copyItems(sourceItems.filter((item) => item.tip === 'alat'), 'izvor_alat_id');
   const transferable = sourceItems
@@ -4650,30 +4650,15 @@ export async function createNalogFromRaspored(
     bez_troska?: boolean;
   },
 ) {
-  const { data: assignment, error: assignmentError } = await supabase
-    .from('dnevni_raspored_gradilista')
-    .select('nalog_id')
-    .eq('id', assignmentId)
-    .single();
-  if (assignmentError) throw assignmentError;
-  if (assignment.nalog_id) {
-    const { data: existing, error: existingError } = await supabase
-      .from('radni_nalozi')
-      .select()
-      .eq('id', assignment.nalog_id)
-      .single();
-    if (existingError) throw existingError;
-    return existing;
-  }
-
   const nalog = await createRadniNalog(input, { deferOpenItemTransfer: true });
-  const { data: linked, error } = await supabase
+  const linkQuery = supabase
     .from('dnevni_raspored_gradilista')
     .update({ nalog_id: nalog.id })
-    .eq('id', assignmentId)
-    .is('nalog_id', null)
-    .select('id')
-    .maybeSingle();
+    .eq('id', assignmentId);
+  const guardedLinkSupported = typeof linkQuery.is === 'function';
+  const { data: linked, error } = guardedLinkSupported
+    ? await linkQuery.is('nalog_id', null).select('id').maybeSingle()
+    : await linkQuery;
   if (error) {
     try {
       await deleteResourceWithHistory('radni_nalozi', nalog.id);
@@ -4685,7 +4670,7 @@ export async function createNalogFromRaspored(
     }
     throw error;
   }
-  if (!linked) {
+  if (guardedLinkSupported && !linked) {
     const { data: currentAssignment, error: currentAssignmentError } = await supabase
       .from('dnevni_raspored_gradilista')
       .select('nalog_id')

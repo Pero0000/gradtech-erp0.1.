@@ -150,7 +150,7 @@ export async function exportPdf<T>(spec: ExportSpec<T>) {
   try {
     await document.fonts?.ready;
     for (let i = 0; i < chunks.length; i++) {
-      host.innerHTML = `${style}<div class="pg"><h1>${esc(spec.title)}</h1><div class="sub">${esc(subtitle)}</div><table><thead>${head}</thead><tbody>${chunks[i].join('')}</tbody></table><div class="foot"><span>TM Color</span><span>Stranica ${i + 1} / ${chunks.length}</span></div></div>`;
+      host.innerHTML = `${style}<div class="pg"><h1>${esc(spec.title)}</h1><div class="sub">${esc(subtitle)}</div><table><thead>${head}</thead><tbody>${chunks[i].join('')}</tbody></table><div class="foot"><span>GradTech</span><span>Stranica ${i + 1} / ${chunks.length}</span></div></div>`;
       const el = host.querySelector('.pg') as HTMLElement;
       const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff' });
       let w = PAGE_W - M * 2;

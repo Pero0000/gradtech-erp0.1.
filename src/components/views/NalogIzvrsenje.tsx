@@ -749,48 +749,56 @@ export function NalogIzvrsenje({
       window.setTimeout(() => setSaved(false), 1500);
     }, 'Greška pri spremanju.');
 
-  const drainTimeSaves = () => {
-    if (timeSavePending.current) return;
-    const entry = queuedTimeSaves.current.entries().next().value as
-      | [string, { row: NalogRadnikVrijeme; zeroHours: boolean }]
-      | undefined;
-    if (!entry) {
-      setSavingTime(false);
-      return;
-    }
-    const [radnikId, pendingSave] = entry;
-    queuedTimeSaves.current.delete(radnikId);
-    timeSavePending.current = true;
-    setSavingTime(true);
-    void guard(async () => {
-      try {
-        await execution.persistDefaults();
-        await saveNalogRadnikVrijeme(
-          nalog.id,
-          radnikId,
-          pendingSave.row.vrijeme_od,
-          pendingSave.row.vrijeme_do,
-          pendingSave.zeroHours,
-        );
-      } catch (reason) {
-        try {
-          setVremena(await fetchNalogRadnikVrijeme(nalog.id));
-        } catch (reloadReason) {
-          throw new Error(`${errText(reason, 'Greška pri spremanju vremena.')} ${errText(reloadReason, 'Nije moguće osvježiti spremljena vremena.')} Ponovno otvori nalog za provjeru spremljenih sati.`);
-        }
-        throw reason;
-      }
-    }, 'Greška pri spremanju vremena.').finally(() => {
-      timeSavePending.current = false;
-      drainTimeSaves();
-    });
-  };
-
   const saveVrijeme = (next: NalogRadnikVrijeme[], radnikId: string, zeroHours = false) => {
     const row = next.find((v) => v.radnik_id === radnikId);
     if (!row) return;
+    type PendingState = typeof timeSavePending & {
+      queue?: Map<string, { row: NalogRadnikVrijeme; zeroHours: boolean }>;
+    };
+    const pendingState = timeSavePending as PendingState;
+    const queue = typeof queuedTimeSaves === 'undefined'
+      ? (pendingState.queue ??= new Map())
+      : queuedTimeSaves.current;
+
+    const drainTimeSaves = () => {
+      if (timeSavePending.current) return;
+      const entry = queue.entries().next().value as
+        | [string, { row: NalogRadnikVrijeme; zeroHours: boolean }]
+        | undefined;
+      if (!entry) {
+        setSavingTime(false);
+        return;
+      }
+      const [pendingRadnikId, pendingSave] = entry;
+      queue.delete(pendingRadnikId);
+      timeSavePending.current = true;
+      setSavingTime(true);
+      void guard(async () => {
+        try {
+          await execution.persistDefaults();
+          await saveNalogRadnikVrijeme(
+            nalog.id,
+            pendingRadnikId,
+            pendingSave.row.vrijeme_od,
+            pendingSave.row.vrijeme_do,
+            pendingSave.zeroHours,
+          );
+        } catch (reason) {
+          try {
+            setVremena(await fetchNalogRadnikVrijeme(nalog.id));
+          } catch (reloadReason) {
+            throw new Error(`${errText(reason, 'Greška pri spremanju vremena.')} ${errText(reloadReason, 'Nije moguće osvježiti spremljena vremena.')} Ponovno otvori nalog za provjeru spremljenih sati.`);
+          }
+          throw reason;
+        }
+      }, 'Greška pri spremanju vremena.').finally(() => {
+        timeSavePending.current = false;
+        drainTimeSaves();
+      });
+    };
+
     setVremena(next);
-    queuedTimeSaves.current.set(radnikId, { row, zeroHours });
+    queue.set(radnikId, { row, zeroHours });
     drainTimeSaves();
   };
 

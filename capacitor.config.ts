@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.tmcolor.erp',
+  appId: 'com.gradtech.erp',
   appName: 'GradTech',
   webDir: 'dist',
   plugins: {

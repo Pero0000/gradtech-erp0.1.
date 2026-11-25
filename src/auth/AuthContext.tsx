@@ -167,13 +167,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshAccess, session?.user.id, sessionReady]);
 
   const signOut = useCallback(async () => {
+    const savedRegistration = typeof localStorage === 'undefined'
+      ? null
+      : localStorage.getItem('gradtech:push-registration');
+    if (savedRegistration && session?.user.id) {
+      let token: string | null = null;
+      let platform: string | null = null;
+      let installationProof: string | null = null;
+      try {
+        const parsed = JSON.parse(savedRegistration) as { userId?: unknown; token?: unknown; platform?: unknown; installationProof?: unknown };
+        if (parsed.userId === session.user.id && typeof parsed.token === 'string'
+          && (parsed.platform === 'android' || parsed.platform === 'ios')
+          && typeof parsed.installationProof === 'string') {
+          token = parsed.token;
+          platform = parsed.platform;
+          installationProof = parsed.installationProof;
+        }
+      } catch {
+        localStorage.removeItem('gradtech:push-registration');
+      }
+      if (token && platform && installationProof) {
+        const { error: pushError } = await supabase.rpc('unregister_app_push_token', {
+          p_token: token,
+          p_platform: platform,
+          p_installation_proof: installationProof,
+        });
+        if (pushError) throw new Error(`Push registraciju nije moguće ukloniti: ${pushError.message}`);
+        localStorage.removeItem('gradtech:push-registration');
+      }
+    }
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
     setProfile(null);
     updateCompany(null);
     setPermissions({});
     setRecoveryMode(false);
-  }, [updateCompany]);
+  }, [session?.user.id, updateCompany]);
 
   const updatePassword = useCallback(async (password: string) => {
     const { error } = await supabase.auth.updateUser({ password, data: { gradtech_set_password: false } });

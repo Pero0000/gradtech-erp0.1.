@@ -105,7 +105,7 @@ export async function downloadNalogPdf(nalog: RadniNalog, gradiliste?: Pick<Grad
   const servisTxt = [servis.km != null ? `${num(servis.km)} km` : '', servis.datum ? fmtDate(servis.datum) : ''].filter(Boolean).join(' · ');
 
   const html = `${style}<div class="pg">
-    <div class="top"><div><h1>RADNI NALOG</h1><div class="f">TM Color</div></div>
+    <div class="top"><div><h1>RADNI NALOG</h1><div class="f">GradTech</div></div>
       <div><div class="br">${esc(nalog.broj)}</div><div class="d">${esc(nalog.naslov)}</div></div></div>
     <div class="frm">
       <div class="row"><div class="lab">Datum</div><div class="val">${fmtDate(nalog.rok ?? nalog.datum_kreiranja)}</div>
@@ -132,7 +132,7 @@ export async function downloadNalogPdf(nalog: RadniNalog, gradiliste?: Pick<Grad
     </div>
     <div class="box"><div class="h">Opis radova</div>${lines(opisLinije, Math.max(8, opisLinije.length + 2))}</div>
     <div class="sig"><div>Poslovođa</div><div>Odgovorna osoba</div></div>
-    <div class="ft"><span>TM Color · radni nalog ${esc(nalog.broj)}</span><span>Ispisano ${formatHrDate(new Date())}</span></div>
+    <div class="ft"><span>GradTech · radni nalog ${esc(nalog.broj)}</span><span>Ispisano ${formatHrDate(new Date())}</span></div>
   </div>`;
 
   const host = document.createElement('div');

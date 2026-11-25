@@ -3064,6 +3064,7 @@ test('work-order deadlines expose update recovery and lock competing writes whil
       'lucide-react': new Proxy({}, { get: () => () => null }),
       '@/lib/localization': localization,
       '@/lib/useRequestScope': { useRequestScope: () => ({ start: () => () => true, invalidate() {} }) },
+      '@/lib/useNalogExecution': { useNalogExecutionCache: () => ({ invalidate() {} }) },
       '@/lib/api': {
         fetchRokoviNaloga: async () => { calls.push('deadlines'); return []; },
         updateRok: async (...args) => { calls.push(['update', ...args]); },
@@ -3119,6 +3120,7 @@ test('work-order screen resets editor, selection and filters and reloads after b
     'lucide-react': { ClipboardList() {}, Plus() {}, Pencil() {}, Trash2() {}, Users() {}, Calendar() {}, AlertCircle() {}, Printer() {}, Bell() {}, History() {} },
     '@/lib/localization': localization,
     '@/lib/useRequestScope': { useRequestScope: () => ({ start: () => () => true, invalidate() {} }) },
+    '@/lib/useNalogExecution': { useNalogExecutionCache: () => ({ invalidate() {} }) },
     '@/lib/api': {
       fetchRokoviNaloga: async () => { calls.push('deadlines'); if(state==='deadline-error')throw {message:'Rokovi nisu dostupni'}; return []; },
       fetchRadniNalozi: async () => { calls.push('orders'); if(state==='reload-error')throw {message:'Nalozi nisu dostupni'}; return []; },

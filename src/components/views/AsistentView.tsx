@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Bot, Globe, Loader2, Send, Sparkles, Trash2 } from 'lucide-react';
-import { askAi, buildSnapshot, type ChatMessage } from '@/lib/ai';
+import { askAi, buildSnapshot, invalidateAiSnapshot, type ChatMessage } from '@/lib/ai';
+import { OVERVIEW_CHANGED } from '@/lib/overviewEvents';
 
 const suggestions = [
   'Koja gradilišta imaju najlošiju maržu i zašto?',
@@ -22,6 +23,14 @@ export function AsistentView() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busy]);
+  useEffect(() => {
+    const invalidate = () => {
+      snapshotRef.current = null;
+      invalidateAiSnapshot();
+    };
+    window.addEventListener(OVERVIEW_CHANGED, invalidate);
+    return () => window.removeEventListener(OVERVIEW_CHANGED, invalidate);
+  }, []);
 
   const send = async (text: string) => {
     const question = text.trim();
@@ -32,7 +41,7 @@ export function AsistentView() {
     setBusy(true);
     setError(null);
     try {
-      snapshotRef.current = await buildSnapshot();
+      snapshotRef.current = snapshotRef.current ?? await buildSnapshot();
       const answer = await askAi(next, snapshotRef.current, web);
       setMessages([...next, answer]);
     } catch (reason) {
@@ -50,7 +59,7 @@ export function AsistentView() {
           <p className="mt-1 text-sm text-slate-500">Analizira podatke iz programa (gradilišta, troškovi, fakture, rokovi…) i po potrebi pretražuje web</p>
         </div>
         {messages.length > 0 && (
-          <button type="button" onClick={() => setMessages([])} className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100">
+          <button type="button" onClick={() => { setMessages([]); snapshotRef.current = null; invalidateAiSnapshot(); }} className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100">
             <Trash2 className="h-4 w-4" /> Novi razgovor
           </button>
         )}

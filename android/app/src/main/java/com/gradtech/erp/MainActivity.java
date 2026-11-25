@@ -1,4 +1,4 @@
-package com.tmcolor.erp;
+package com.gradtech.erp;
 
 import com.getcapacitor.BridgeActivity;
 

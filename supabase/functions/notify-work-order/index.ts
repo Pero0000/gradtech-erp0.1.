@@ -16,7 +16,7 @@ function jsonResponse(body: unknown, status = 200) {
 
 async function googleAccessToken() {
   const email = Deno.env.get('FCM_SERVICE_ACCOUNT_EMAIL');
-  const privateKey = Deno.env.get('FCM_SERVICE_ACCOUNT_PRIVATE_KEY')?.replace(/\\n/g, '\n');
+  const privateKey = normalizePrivateKey(Deno.env.get('FCM_SERVICE_ACCOUNT_PRIVATE_KEY'));
   if (!email || !privateKey) throw new Error('Firebase service account nije konfiguriran.');
 
   const key = await importPKCS8(privateKey, 'RS256');
@@ -45,7 +45,7 @@ async function googleAccessToken() {
 async function apnsProviderToken() {
   const keyId = Deno.env.get('APNS_KEY_ID');
   const teamId = Deno.env.get('APNS_TEAM_ID');
-  const privateKey = Deno.env.get('APNS_PRIVATE_KEY')?.replace(/\\n/g, '\n');
+  const privateKey = normalizePrivateKey(Deno.env.get('APNS_PRIVATE_KEY'));
   if (!keyId || !teamId || !privateKey) throw new Error('Apple APNs ključ nije konfiguriran.');
 
   const key = await importPKCS8(privateKey, 'ES256');
@@ -54,6 +54,24 @@ async function apnsProviderToken() {
     .setIssuer(teamId)
     .setIssuedAt()
     .sign(key);
+}
+
+function normalizePrivateKey(value: string | undefined) {
+  if (!value) return undefined;
+  let key = value.trim();
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1);
+  }
+  return key.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
+}
+
+async function tokenLabel(token: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+  return [...new Uint8Array(digest)].slice(0, 6).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function safeProviderError(token: string, message: string) {
+  return message.replaceAll(token, '<token>');
 }
 
 Deno.serve(async (request) => {
@@ -133,7 +151,8 @@ Deno.serve(async (request) => {
       : 'https://api.push.apple.com';
     let fcmTokenPromise: Promise<string> | null = null;
     let appleTokenPromise: Promise<string> | null = null;
-    const outcomes = await Promise.all(devices.map(async (device) => {
+    const uniqueDevices = [...new Map(devices.map((device) => [device.token, device])).values()];
+    const outcomes = await Promise.all(uniqueDevices.map(async (device) => {
       try {
         if (device.platform === 'android') {
           if (!projectId) throw new Error('FCM_PROJECT_ID nije konfiguriran.');
@@ -147,11 +166,30 @@ Deno.serve(async (request) => {
                 token: device.token,
                 notification: { title: 'Novi radni nalog', body: `${nalog.broj} · ${nalog.naslov}` },
                 data: { nalog_id: nalog.id },
-                android: { priority: 'high' },
+                android: {
+                  priority: 'high',
+                  collapse_key: `radni-nalog-${nalog.id}`,
+                  notification: {
+                    channel_id: 'radni-nalozi',
+                    sound: 'default',
+                    tag: `radni-nalog-${nalog.id}`,
+                  },
+                },
               },
             }),
           });
-          if (!response.ok) throw new Error(`FCM greška (${response.status}): ${await response.text()}`);
+          if (!response.ok) {
+            const providerText = await response.text();
+            const invalidToken = /UNREGISTERED|registration-token-not-registered|INVALID_REGISTRATION_TOKEN/i.test(providerText);
+            if (invalidToken) {
+              const { error: deleteError } = await serviceClient.from('app_push_tokens')
+                .delete()
+                .eq('company_id', profile.company_id)
+                .eq('token', device.token);
+              if (deleteError) throw new Error(`FCM token je nevažeći, ali uklanjanje nije uspjelo: ${deleteError.message}`);
+            }
+            throw new Error(`FCM greška (${response.status})${invalidToken ? ', token je nevažeći i uklonjen' : ''}: ${safeProviderError(device.token, providerText)}`);
+          }
         } else {
           if (!bundleId) throw new Error('APNS_BUNDLE_ID nije konfiguriran.');
           appleTokenPromise ??= apnsProviderToken();
@@ -163,6 +201,7 @@ Deno.serve(async (request) => {
               'apns-topic': bundleId,
               'apns-push-type': 'alert',
               'apns-priority': '10',
+              'apns-collapse-id': `radni-nalog-${nalog.id}`,
               'content-type': 'application/json',
             },
             body: JSON.stringify({
@@ -170,17 +209,35 @@ Deno.serve(async (request) => {
               nalog_id: nalog.id,
             }),
           });
-          if (!response.ok) throw new Error(`APNs greška (${response.status}): ${await response.text()}`);
+          if (!response.ok) {
+            const providerText = await response.text();
+            if (response.status === 410 || /BadDeviceToken|Unregistered/i.test(providerText)) {
+              const { error: deleteError } = await serviceClient.from('app_push_tokens')
+                .delete()
+                .eq('company_id', profile.company_id)
+                .eq('token', device.token);
+              if (deleteError) throw new Error(`APNs token je nevažeći, ali uklanjanje nije uspjelo: ${deleteError.message}`);
+            }
+            throw new Error(`APNs greška (${response.status}): ${safeProviderError(device.token, providerText)}`);
+          }
         }
         return { ok: true };
       } catch (reason) {
-        return { ok: false, error: reason instanceof Error ? reason.message : String(reason) };
+        return {
+          ok: false,
+          error: `${device.platform}:${await tokenLabel(device.token)}: ${reason instanceof Error ? reason.message : String(reason)}`,
+        };
       }
     }));
 
     const sent = outcomes.filter((outcome) => outcome.ok).length;
     const failures = outcomes.filter((outcome) => !outcome.ok);
-    return jsonResponse({ sent, failed: failures.length, errors: failures.map((failure) => failure.error) });
+    return jsonResponse({
+      sent,
+      failed: failures.length,
+      skipped_duplicates: devices.length - uniqueDevices.length,
+      errors: failures.map((failure) => failure.error),
+    });
   } catch (reason) {
     return jsonResponse({ error: reason instanceof Error ? reason.message : 'Push notification failed.' }, 500);
   }

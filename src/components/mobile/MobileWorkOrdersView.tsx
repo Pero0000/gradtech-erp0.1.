@@ -4,6 +4,7 @@ import { AlertTriangle, Camera, Fuel, ImagePlus, Trash2, Check, ChevronLeft, Che
 import { useAuth } from '@/auth/useAuth';
 import { loadUserTheme, saveUserTheme } from '@/lib/postavke';
 import { usePushRegistration } from '@/components/mobile/usePushRegistration';
+import { clearPendingPushOrder, takePendingPushOrder } from '@/lib/pushNotifications';
 import {
   addNalogStavka,
   addNalogAlatFromInventory,
@@ -178,7 +179,7 @@ function Button({
 
 export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) {
   const { profile, company, signOut } = useAuth();
-  const pushError = usePushRegistration(profile?.id ?? '');
+  const pushError = usePushRegistration(profile?.id ?? '', company?.id ?? '');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
   const [workerName, setWorkerName] = useState<string | null>(null);
   const [orders, setOrders] = useState<MobileRadniNalog[]>([]);
@@ -340,7 +341,15 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
     void fetchMobileRadniNalozi()
       .then((list) => {
         if (!active) return;
-        setOrders(visibleMobileOrders(list));
+        const visible = visibleMobileOrders(list);
+        setOrders(visible);
+        if (profile?.id) {
+          const pendingOrderId = takePendingPushOrder(profile.id);
+          if (pendingOrderId) {
+            setSelectedId(visible.some((order) => order.id === pendingOrderId) ? pendingOrderId : null);
+            clearPendingPushOrder(profile.id);
+          }
+        }
       })
       .catch((reason: unknown) => {
         if (active) setError(errorMessage(reason, 'Radne naloge nije moguće učitati.'));
@@ -358,14 +367,14 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
       active = false;
       window.clearInterval(timer);
     };
-  }, [refreshOrders]);
+  }, [profile?.id, refreshOrders]);
 
   useEffect(() => {
     const openFromPush = (event: Event) => {
       if (event instanceof CustomEvent && typeof event.detail === 'string') setSelectedId(event.detail);
     };
-    window.addEventListener('tmcolor:open-mobile-work-order', openFromPush);
-    return () => window.removeEventListener('tmcolor:open-mobile-work-order', openFromPush);
+    window.addEventListener('gradtech:open-mobile-work-order', openFromPush);
+    return () => window.removeEventListener('gradtech:open-mobile-work-order', openFromPush);
   }, []);
 
   const loadDetails = useCallback(async (order: MobileRadniNalog, showLoading = true) => {

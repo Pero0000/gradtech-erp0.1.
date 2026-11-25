@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace "com.tmcolor.erp"
+    namespace "com.gradtech.erp"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.tmcolor.erp"
+        applicationId "com.gradtech.erp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

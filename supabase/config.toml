@@ -1,0 +1,2 @@
+[functions.notify-work-order]
+verify_jwt = true

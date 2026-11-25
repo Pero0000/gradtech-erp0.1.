@@ -13,6 +13,40 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+const GEMINI_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-3-flash-preview',
+];
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function generateWithFallback(apiKey: string, request: unknown) {
+  let lastResponse: Response | null = null;
+  for (const [modelIndex, model] of GEMINI_MODELS.entries()) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+            body: JSON.stringify(request),
+          },
+        );
+        if (response.ok) return response;
+        lastResponse = response;
+        if (!RETRYABLE_STATUSES.has(response.status)) return response;
+        if (attempt === 0) await sleep(400);
+      } catch (reason) {
+        if (modelIndex === GEMINI_MODELS.length - 1 && attempt === 1) throw reason;
+        await sleep(300);
+      }
+    }
+  }
+  return lastResponse;
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed.' }, 405);
@@ -70,12 +104,13 @@ Deno.serve(async (request) => {
       if (allowed !== true) return jsonResponse({ error: 'Nemate ovlasti za ovu AI funkciju.' }, 403);
     }
 
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
-      body: JSON.stringify(geminiRequest),
-    });
+    const response = await generateWithFallback(geminiKey, geminiRequest);
+    if (!response) return jsonResponse({ error: 'AI servis trenutačno nije dostupan. Pokušaj ponovno za trenutak.' }, 503);
     const responseBody = await response.text();
+    if (RETRYABLE_STATUSES.has(response.status)) {
+      console.error(`Gemini unavailable after fallback models, status=${response.status}`);
+      return jsonResponse({ error: 'AI servis je trenutačno preopterećen. Pokušaj ponovno za nekoliko sekundi.' }, 503);
+    }
     return new Response(responseBody, {
       status: response.status,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

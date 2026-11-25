@@ -15,7 +15,7 @@ import { FunctionsHttpError } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { requireCompany } from './company';
 
-export const MODEL = 'gemini-3-flash-preview';
+export const MODEL = 'gemini-2.5-flash';
 
 interface GeminiResponse {
   candidates?: {
@@ -249,6 +249,9 @@ export async function askAi(history: ChatMessage[], snapshot: unknown, webSearch
   } catch (reason) {
     if (reason instanceof GeminiRequestError && reason.status === 429) {
       throw new Error('Dosegnut je besplatni limit zahtjeva. Pričekaj minutu pa pokušaj ponovno.');
+    }
+    if (reason instanceof GeminiRequestError && (reason.status === 502 || reason.status === 503 || reason.status === 504)) {
+      throw new Error('AI servis je trenutačno preopterećen. Pokušaj ponovno za nekoliko sekundi.');
     }
     throw reason;
   }

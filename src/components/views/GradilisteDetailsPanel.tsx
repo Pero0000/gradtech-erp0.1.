@@ -74,6 +74,7 @@ import {
   getPrivateFileUrl,
   deleteNalogFoto,
   iznosFakture,
+  uniqueNalogSourceRows,
   type GradilisteRadniNalogFoto,
 } from '@/lib/api';
 import { Badge } from '@/components/ui/Badge';
@@ -1381,7 +1382,8 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               className={`gradiliste-details-tab-panel ${overviewLayout ? 'is-overview' : ''}`}
             >
             {ZADATAK_SEKCIJE.map((sekcija) => {
-              const lista = zadaci.filter((z) => zadatakVrsta(z) === sekcija.vrsta);
+              const lista = uniqueNalogSourceRows(zadaci)
+                .filter((z) => zadatakVrsta(z) === sekcija.vrsta);
               const otvoreni = lista.filter((z) => !z.gotovo);
               const rijeseni = lista.filter((z) => z.gotovo);
               const renderZadatak = (z: GradilisteZadatak) => (

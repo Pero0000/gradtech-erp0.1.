@@ -39,16 +39,25 @@ export async function generateGeminiContent(feature: GeminiFeature, request: Rec
     body: { feature, request },
   });
   if (error) {
-    if (error instanceof FunctionsHttpError) {
+    const response = 'context' in error && error.context instanceof Response
+      ? error.context
+      : error instanceof FunctionsHttpError
+        ? error.context
+        : null;
+    if (response) {
       let message = error.message;
       try {
-        const result = await error.context.json() as { error?: string | { message?: string } };
+        const result = await response.clone().json() as {
+          error?: string | { code?: number; message?: string; status?: string };
+          message?: string;
+        };
         if (typeof result.error === 'string') message = result.error;
         else if (result.error?.message) message = result.error.message;
+        else if (result.message) message = result.message;
       } catch {
         message = error.message;
       }
-      throw new GeminiRequestError(message, error.context.status);
+      throw new GeminiRequestError(message, response.status);
     }
     throw new Error(error.message);
   }

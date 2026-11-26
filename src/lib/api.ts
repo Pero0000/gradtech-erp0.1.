@@ -2888,7 +2888,7 @@ export async function createRadniNalog(input: {
       .is('nalog_id', null);
     if (siteTasksError) throw siteTasksError;
   }
-  if (!options.deferOpenItemTransfer) await prenesiOtvoreneStavke(data.id, input.gradiliste_id);
+  if (!options.deferOpenItemTransfer) await prenesiOtvoreniSadrzajNaloga(data.id, input.gradiliste_id);
   return data;
 }
 
@@ -3559,6 +3559,13 @@ export async function prenesiOtvoreneStavke(nalogId: string, gradilisteId: strin
     .update({ preneseno: true })
     .in('id', transferable.map((item) => item.id));
   if (markTransferredError) throw markTransferredError;
+}
+
+async function prenesiOtvoreniSadrzajNaloga(nalogId: string, gradilisteId: string | null) {
+  await prenesiOtvoreneStavke(nalogId, gradilisteId);
+  if (!gradilisteId) return;
+  const tasks = await fetchGradilisteZadaci(gradilisteId);
+  await copyOpenNalogZadaci(nalogId, gradilisteId, tasks);
 }
 
 export async function fetchNalogIzvrsenje(nalogId: string) {
@@ -4651,47 +4658,50 @@ export async function createNalogFromRaspored(
   },
 ) {
   const nalog = await createRadniNalog(input, { deferOpenItemTransfer: true });
-  const linkQuery = supabase
-    .from('dnevni_raspored_gradilista')
-    .update({ nalog_id: nalog.id })
-    .eq('id', assignmentId);
-  const guardedLinkSupported = typeof linkQuery.is === 'function';
-  const { data: linked, error } = guardedLinkSupported
-    ? await linkQuery.is('nalog_id', null).select('id').maybeSingle()
-    : await linkQuery;
-  if (error) {
+  try {
+    await prenesiOtvoreniSadrzajNaloga(nalog.id, input.gradiliste_id);
+    const linkQuery = supabase
+      .from('dnevni_raspored_gradilista')
+      .update({ nalog_id: nalog.id })
+      .eq('id', assignmentId);
+    const guardedLinkSupported = typeof linkQuery.is === 'function';
+    const { data: linked, error } = guardedLinkSupported
+      ? await linkQuery.is('nalog_id', null).select('id').maybeSingle()
+      : await linkQuery;
+    if (error) throw error;
+    if (guardedLinkSupported && !linked) {
+      const { data: currentAssignment, error: currentAssignmentError } = await supabase
+        .from('dnevni_raspored_gradilista')
+        .select('nalog_id')
+        .eq('id', assignmentId)
+        .single();
+      if (currentAssignmentError) throw currentAssignmentError;
+      if (!currentAssignment.nalog_id) throw new Error('Stavka rasporeda nije ostala povezana s radnim nalogom.');
+      const { data: existing, error: existingError } = await supabase
+        .from('radni_nalozi')
+        .select()
+        .eq('id', currentAssignment.nalog_id)
+        .single();
+      if (existingError) throw existingError;
+      try {
+        await deleteResourceWithHistory('radni_nalozi', nalog.id);
+      } catch (cleanupReason) {
+        throw new Error(`Drugi nalog je istodobno otvoren za istu stavku. Dodatni nalog ${nalog.broj} nije moguće ukloniti: ${apiErrorMessage(cleanupReason)}`);
+      }
+      return existing;
+    }
+    return nalog;
+  } catch (error) {
     try {
       await deleteResourceWithHistory('radni_nalozi', nalog.id);
     } catch (cleanupReason) {
       throw new Error(`Povezivanje naloga nije uspjelo: ${apiErrorMessage(error)}. Nalog ${nalog.broj} (${nalog.id}) ostaje u Radnim nalozima jer brisanje nije uspjelo: ${apiErrorMessage(cleanupReason)}`);
     }
-    if (String(error.message ?? '').includes('nalog_id')) {
+    if (String(error && typeof error === 'object' && 'message' in error ? error.message : '').includes('nalog_id')) {
       throw new Error('Pokreni migraciju 20261015160000_raspored_nalog_veza.sql u Supabase SQL editoru.');
     }
     throw error;
   }
-  if (guardedLinkSupported && !linked) {
-    const { data: currentAssignment, error: currentAssignmentError } = await supabase
-      .from('dnevni_raspored_gradilista')
-      .select('nalog_id')
-      .eq('id', assignmentId)
-      .single();
-    try {
-      await deleteResourceWithHistory('radni_nalozi', nalog.id);
-    } catch (cleanupReason) {
-      throw new Error(`Drugi nalog je istodobno otvoren za istu stavku. Dodatni nalog ${nalog.broj} nije moguće ukloniti: ${apiErrorMessage(cleanupReason)}`);
-    }
-    if (currentAssignmentError) throw currentAssignmentError;
-    if (!currentAssignment.nalog_id) throw new Error('Stavka rasporeda nije ostala povezana s radnim nalogom.');
-    const { data: existing, error: existingError } = await supabase
-      .from('radni_nalozi')
-      .select()
-      .eq('id', currentAssignment.nalog_id)
-      .single();
-    if (existingError) throw existingError;
-    return existing;
-  }
-  return nalog;
 }
 
 export async function deleteRadniNalog(id: string) {

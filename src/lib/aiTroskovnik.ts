@@ -66,7 +66,9 @@ async function callBatch(file: File, content: { b64?: string; text?: string }, o
     try {
       json = await generateGeminiContent('troskovnik-import', body);
     } catch (reason) {
-      if (reason instanceof GeminiRequestError && (reason.status === 429 || reason.status === 503) && attempt < 2) {
+      if (reason instanceof GeminiRequestError
+        && [429, 502, 503, 504].includes(reason.status)
+        && attempt < 2) {
         await new Promise((r) => setTimeout(r, 4000 * (attempt + 1)));
         continue;
       }

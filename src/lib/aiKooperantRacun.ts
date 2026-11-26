@@ -97,7 +97,9 @@ export async function parseKooperantRacun(file: File): Promise<KooperantRacun> {
     try {
       json = await generateGeminiContent('kooperant-invoice', body);
     } catch (reason) {
-      if (reason instanceof GeminiRequestError && (reason.status === 429 || reason.status === 503) && attempt < 2) {
+      if (reason instanceof GeminiRequestError
+        && [429, 502, 503, 504].includes(reason.status)
+        && attempt < 2) {
         await new Promise((resolve) => setTimeout(resolve, 3000 * (attempt + 1)));
         continue;
       }

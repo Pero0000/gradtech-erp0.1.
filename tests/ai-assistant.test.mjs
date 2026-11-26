@@ -109,3 +109,36 @@ test('assistant sends only recent conversation turns', async () => {
   assert.equal(request.contents.length, 8);
   assert.deepEqual(request.contents.map((item) => item.parts[0].text), ['4', '5', '6', '7', '8', '9', '10', '11']);
 });
+
+test('assistant surfaces Edge Function response body for non-2xx responses', async () => {
+  const mocks = {
+    '@/lib/api': {},
+    '@supabase/supabase-js': { FunctionsHttpError: class FunctionsHttpError extends Error {} },
+    './supabase': { supabase: {
+      functions: {
+        invoke: async () => ({
+          data: null,
+          error: {
+            message: 'Edge Function returned a non-2xx status code',
+            context: new Response(JSON.stringify({ error: 'Račun je prevelik za AI analizu.' }), { status: 413 }),
+          },
+        }),
+      },
+    } },
+    './company': { requireCompany: () => ({ id: 'company-1' }) },
+  };
+  const module = { exports: {} };
+  vm.runInNewContext(outputText, {
+    module,
+    exports: module.exports,
+    require(name) {
+      assert.ok(Object.hasOwn(mocks, name), `Unexpected import: ${name}`);
+      return mocks[name];
+    },
+    Response,
+  });
+  await assert.rejects(
+    module.exports.generateGeminiContent('kooperant-invoice', {}),
+    (reason) => reason.status === 413 && reason.message === 'Račun je prevelik za AI analizu.',
+  );
+});

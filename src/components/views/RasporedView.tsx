@@ -1,7 +1,7 @@
 import { formatHrDate, formatHrDateTime } from '@/lib/localization';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, GripVertical, Hammer, Package, Percent, Plus, Send, Trash2, Truck, X } from 'lucide-react';
-import type { DnevniRasporedGradiliste, DnevniRasporedOstalo, DnevniRasporedRadnik, Gradiliste, GradilisteRegija, GradilisteStatus, GradilisteZadatak, Investitor, NalogPrioritet, NalogStatus, Objekt, Radnik, RadnikOdsustvo, Rok, Vozilo, ZadatakVrsta } from '@/types';
+import type { DnevniRasporedGradiliste, DnevniRasporedOstalo, DnevniRasporedRadnik, Gradiliste, GradilisteRegija, GradilisteStatus, GradilisteZadatak, Investitor, NalogPrioritet, NalogStatus, Objekt, Radnik, RadnikOdsustvo, Rok, RucnaObavijest, Vozilo, ZadatakVrsta } from '@/types';
 import { zadatakVrsta } from '@/types';
 import { nextDeadline } from '@/lib/rokovi';
 import { Modal } from '@/components/ui/Modal';
@@ -44,6 +44,7 @@ import {
   fetchRokovi,
   fetchRadnici,
   fetchOdsustvaRaspon,
+  fetchOpenRucneObavijesti,
   fetchVozila,
   moveRasporedGradiliste,
   moveRasporedRadnik,
@@ -299,6 +300,7 @@ export function RasporedView() {
   const [sortModes, setSortModes] = useState<SortMode[]>(['manual', 'manual', 'manual']);
   const [rokovi, setRokovi] = useState<Rok[]>([]);
   const [odsustvaDana, setOdsustvaDana] = useState<RadnikOdsustvo[]>([]);
+  const [rucneObavijestiDana, setRucneObavijestiDana] = useState<RucnaObavijest[]>([]);
   const [nalogZadaci, setNalogZadaciList] = useState<GradilisteZadatak[]>([]);
   const formGradilisteId = nalogForm?.gradiliste_id ?? '';
   const formNalogId = nalogForm?.nalogId;
@@ -462,6 +464,14 @@ export function RasporedView() {
     return () => {
       cancelled = true;
     };
+  }, [selectedDate]);
+
+  useEffect(() => {
+    let active = true;
+    void fetchOpenRucneObavijesti(selectedDate)
+      .then((items) => { if (active) setRucneObavijestiDana(items); })
+      .catch(() => { if (active) setRucneObavijestiDana([]); });
+    return () => { active = false; };
   }, [selectedDate]);
 
   useEffect(() => {
@@ -1287,6 +1297,16 @@ export function RasporedView() {
       </span>
     );
   };
+  const podsjetniciOf = (radnikId: string) => rucneObavijestiDana.filter((item) => item.radnik_id === radnikId);
+  const podsjetnikBadge = (radnikId: string) => {
+    const reminders = podsjetniciOf(radnikId);
+    if (reminders.length === 0) return null;
+    return (
+      <span title={reminders.map((item) => `${item.naslov}: ${item.tekst}`).join('\n')} className="flex-shrink-0 rounded bg-violet-100 px-1 text-[9px] font-bold uppercase text-violet-800">
+        Podsjetnik{reminders.length > 1 ? ` ${reminders.length}` : ''}
+      </span>
+    );
+  };
 
   return (
     <div className="daily-schedule-view min-w-0">
@@ -1368,6 +1388,20 @@ export function RasporedView() {
               <li key={radnik.id}>
                 <span className="font-medium">{radnik.prezime} {radnik.ime}</span> – {odsustvoLabel(odsustvo).toLowerCase()} ({formatHrDate(new Date(`${odsustvo.datum_od}T00:00:00`))} – {formatHrDate(new Date(`${odsustvo.datum_do}T00:00:00`))})
                 {rasporeden && <span className="ml-1 font-bold text-red-700">· raspoređen je na vozilo!</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {rucneObavijestiDana.length > 0 && (
+        <div role="alert" className="mb-4 rounded-lg border border-violet-300 bg-violet-50 px-4 py-3 text-sm text-violet-900">
+          <p className="font-semibold">Ručne obavijesti za {formatHrDate(new Date(`${selectedDate}T00:00:00`))}:</p>
+          <ul className="mt-1 space-y-0.5">
+            {rucneObavijestiDana.map((reminder) => (
+              <li key={reminder.id}>
+                <span className="font-medium">{reminder.naslov}</span>
+                {reminder.radnik && <> – {reminder.radnik.prezime} {reminder.radnik.ime}</>}
+                : {reminder.tekst}
               </li>
             ))}
           </ul>
@@ -1798,6 +1832,7 @@ export function RasporedView() {
                             <span className={`truncate text-[13px] font-medium ${odsustvoOf(a.radnik_id) || workerCount(a.radnik_id) > 1 ? 'text-red-600' : 'text-emerald-700'}`}>{r ? `${r.prezime} ${r.ime}` : 'Nepoznat radnik'}</span>
                             <span className="flex flex-shrink-0 items-center gap-1">
                               {odsustvoBadge(a.radnik_id)}
+                              {podsjetnikBadge(a.radnik_id)}
                               <WorkerCount count={workerCount(a.radnik_id)} />
                               <button
                                 type="button"
@@ -1866,6 +1901,7 @@ export function RasporedView() {
                     {cars && <p className={`truncate text-[10px] ${assignments.length > 1 ? 'text-red-600' : 'text-emerald-700'}`}>{cars}</p>}
                   </div>
                   {odsustvoBadge(r.id)}
+                  {podsjetnikBadge(r.id)}
                   <WorkerCount count={assignments.length} />
                 </div>
               );

@@ -4,8 +4,9 @@ import { Bell, BellRing, CheckCircle2, Search } from 'lucide-react';
 import type { View } from '@/components/Sidebar';
 import { relativeLabel, sendPushNotifications, type Obavijest, type ObavijestLevel } from '@/lib/obavijesti';
 import type { useOverview } from '@/lib/useOverview';
-import { resolveVoziloGorivoAnomalija, resolveVoziloObavijest } from '@/lib/api';
+import { createRucnaObavijest, fetchRadnici, resolveRucnaObavijest, resolveVoziloGorivoAnomalija, resolveVoziloObavijest } from '@/lib/api';
 import { loadPostavke, obavijestTipovi, savePostavke } from '@/lib/postavke';
+import type { Radnik } from '@/types';
 
 const levelStyle: Record<ObavijestLevel, { row: string; badge: string; label: string }> = {
   overdue: { row: 'border-red-600', badge: 'bg-red-600 text-white', label: 'Kasni' },
@@ -13,10 +14,15 @@ const levelStyle: Record<ObavijestLevel, { row: string; badge: string; label: st
   soon: { row: 'border-red-100', badge: 'bg-red-50 text-red-700', label: 'Uskoro' },
   upcoming: { row: 'border-slate-200', badge: 'bg-slate-100 text-slate-600', label: 'Nadolazeće' },
 };
+const todayISO = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
 
-export function ObavijestiView({ onNavigate, canResolveVozila, overview }: {
+export function ObavijestiView({ onNavigate, canResolveVozila, canEdit, overview }: {
   onNavigate: (view: View) => void;
   canResolveVozila: boolean;
+  canEdit: boolean;
   overview: ReturnType<typeof useOverview>;
 }) {
   const { items, notificationsLoading: loading } = overview;
@@ -29,16 +35,61 @@ export function ObavijestiView({ onNavigate, canResolveVozila, overview }: {
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
   );
+  const [radnici, setRadnici] = useState<Radnik[]>([]);
+  const [savingReminder, setSavingReminder] = useState(false);
+  const [reminderFormOpen, setReminderFormOpen] = useState(false);
+  const [reminderWorkersLoaded, setReminderWorkersLoaded] = useState(false);
+  const [reminder, setReminder] = useState({
+    datum: todayISO(),
+    naslov: '',
+    tekst: '',
+    radnik_id: '',
+  });
+
+  const openReminderForm = async () => {
+    setReminderFormOpen(true);
+    if (reminderWorkersLoaded) return;
+    setReminderWorkersLoaded(true);
+    try {
+      const items = await fetchRadnici();
+      setRadnici(items.filter((worker) => worker.status !== 'neaktivan'));
+    } catch (reason) {
+      setReminderWorkersLoaded(false);
+      setError(reason instanceof Error ? reason.message : 'Djelatnike nije moguće učitati.');
+    }
+  };
+
+  const addReminder = async () => {
+    if (!canEdit || savingReminder || !reminder.naslov.trim() || !reminder.tekst.trim() || !reminder.datum) return;
+    setSavingReminder(true);
+    setError(null);
+    try {
+      await createRucnaObavijest({
+        datum: reminder.datum,
+        naslov: reminder.naslov.trim(),
+        tekst: reminder.tekst.trim(),
+        radnik_id: reminder.radnik_id || null,
+      });
+      setReminder({ datum: todayISO(), naslov: '', tekst: '', radnik_id: '' });
+      await overview.refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Podsjetnik nije moguće spremiti.');
+    } finally {
+      setSavingReminder(false);
+    }
+  };
 
   const resolveIssue = async (item: Obavijest) => {
-    const resolveId = item.voziloObavijestId ?? item.voziloGorivoAnomalijaId;
+    const resolveId = item.rucnaObavijestId ?? item.voziloObavijestId ?? item.voziloGorivoAnomalijaId;
     if (!resolveId) return;
     setResolvingId(resolveId);
     setError(null);
     try {
-      if (item.voziloObavijestId) await resolveVoziloObavijest(item.voziloObavijestId);
+      if (item.rucnaObavijestId) await resolveRucnaObavijest(item.rucnaObavijestId);
+      else if (item.voziloObavijestId) await resolveVoziloObavijest(item.voziloObavijestId);
       else if (item.voziloGorivoAnomalijaId) await resolveVoziloGorivoAnomalija(item.voziloGorivoAnomalijaId);
-      overview.resolve(resolveId);
+      if (item.rucnaObavijestId) await overview.refresh();
+      else overview.resolve(resolveId);
       window.dispatchEvent(new Event('vozila-obavijest-updated'));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Greška pri označavanju prijave riješenom.');
@@ -88,6 +139,38 @@ export function ObavijestiView({ onNavigate, canResolveVozila, overview }: {
 
       <button type="button" disabled={loading} onClick={() => void overview.refresh()} className="mb-3 rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">Osvježi obavijesti</button>
       {(error || overview.notificationsError) && <p className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{error ?? overview.notificationsError}</p>}
+
+      {canEdit && !reminderFormOpen && (
+        <button type="button" onClick={() => void openReminderForm()} className="mb-5 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700">
+          Dodaj ručnu obavijest
+        </button>
+      )}
+      {canEdit && reminderFormOpen && (
+        <section className="mb-5 rounded-xl border border-sky-200 bg-sky-50/60 p-4">
+          <h2 className="text-sm font-semibold text-slate-900">Nova ručna obavijest</h2>
+          <p className="mt-1 text-xs text-slate-500">Ako odabereš djelatnika, upozorenje će se prikazati i u Dnevnom rasporedu na odabrani datum.</p>
+          <div className="mt-3 grid gap-3 xl:grid-cols-4">
+            <label className="text-xs text-slate-500">Datum
+              <input type="date" lang="hr-HR" value={reminder.datum} onChange={(event) => setReminder((current) => ({ ...current, datum: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900" />
+            </label>
+            <label className="text-xs text-slate-500">Djelatnik (neobavezno)
+              <select value={reminder.radnik_id} onChange={(event) => setReminder((current) => ({ ...current, radnik_id: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900">
+                <option value="">Opća obavijest</option>
+                {radnici.map((worker) => <option key={worker.id} value={worker.id}>{worker.prezime} {worker.ime}</option>)}
+              </select>
+            </label>
+            <label className="text-xs text-slate-500">Naslov
+              <input value={reminder.naslov} onChange={(event) => setReminder((current) => ({ ...current, naslov: event.target.value }))} placeholder="npr. Kontrola opreme" className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900" />
+            </label>
+            <label className="text-xs text-slate-500">Obavijest
+              <input value={reminder.tekst} onChange={(event) => setReminder((current) => ({ ...current, tekst: event.target.value }))} placeholder="Detalj podsjetnika" className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900" />
+            </label>
+          </div>
+          <button type="button" disabled={savingReminder || !reminder.datum || !reminder.naslov.trim() || !reminder.tekst.trim()} onClick={() => void addReminder()} className="mt-3 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+            {savingReminder ? 'Spremanje…' : 'Dodaj obavijest'}
+          </button>
+        </section>
+      )}
 
       <div className="mb-4 grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-4">
         {(['overdue', 'today', 'soon', 'upcoming'] as ObavijestLevel[]).map((l) => (
@@ -147,6 +230,17 @@ export function ObavijestiView({ onNavigate, canResolveVozila, overview }: {
                 >
                   <CheckCircle2 className="h-4 w-4" />
                   {resolvingId === (o.voziloObavijestId ?? o.voziloGorivoAnomalijaId) ? 'Spremanje…' : 'Označi riješenim'}
+                </button>
+              )}
+              {canEdit && o.rucnaObavijestId && (
+                <button
+                  type="button"
+                  disabled={resolvingId === o.rucnaObavijestId}
+                  onClick={() => void resolveIssue(o)}
+                  className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-emerald-50 px-3 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  {resolvingId === o.rucnaObavijestId ? 'Spremanje…' : 'Označi riješenim'}
                 </button>
               )}
             </div>

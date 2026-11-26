@@ -1382,7 +1382,7 @@ export function GradilisteDetailsPanel({ gradiliste, onClose, onEdit, onGradilis
               className={`gradiliste-details-tab-panel ${overviewLayout ? 'is-overview' : ''}`}
             >
             {ZADATAK_SEKCIJE.map((sekcija) => {
-              const lista = uniqueNalogSourceRows(zadaci)
+              const lista = Array.from(uniqueNalogSourceRows(zadaci))
                 .filter((z) => zadatakVrsta(z) === sekcija.vrsta);
               const otvoreni = lista.filter((z) => !z.gotovo);
               const rijeseni = lista.filter((z) => z.gotovo);

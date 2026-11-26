@@ -1,9 +1,10 @@
-import type { Faktura, Gradiliste, Radnik, Rok, Vozilo, VoziloDokument, RadnikDokument, VoziloObavijest, VoziloGorivoAnomalija } from '@/types';
+import type { Faktura, Gradiliste, Radnik, Rok, Vozilo, VoziloDokument, RadnikDokument, VoziloObavijest, VoziloGorivoAnomalija, RucnaObavijest } from '@/types';
 import { companyStorage } from './company';
 import {
   fetchFakture,
   fetchOpenVoziloObavijesti,
   fetchOpenVozilaGorivoAnomalije,
+  fetchOpenRucneObavijesti,
   fetchGradilista,
   fetchRadnici,
   fetchRokovi,
@@ -30,9 +31,10 @@ export interface Obavijest {
   datum: string | null;
   days: number | null;
   level: ObavijestLevel;
-  view: 'radnici' | 'vozila' | 'gradilista' | 'fakture';
+  view: 'radnici' | 'vozila' | 'gradilista' | 'fakture' | 'raspored';
   voziloObavijestId?: string;
   voziloGorivoAnomalijaId?: string;
+  rucnaObavijestId?: string;
 }
 
 const daysBetween = (from: string, to: string) =>
@@ -86,10 +88,11 @@ export interface Source {
   voziloDok: VoziloDokument[];
   voziloObavijesti: VoziloObavijest[];
   gorivoAnomalije: VoziloGorivoAnomalija[];
+  rucneObavijesti: RucnaObavijest[];
 }
 
 export async function loadObavijestiSource(): Promise<Source> {
-  const [gradilista, radnici, vozila, rokovi, fakture, radnikDok, voziloDok, voziloObavijesti, gorivoAnomalije] = await Promise.all([
+  const [gradilista, radnici, vozila, rokovi, fakture, radnikDok, voziloDok, voziloObavijesti, gorivoAnomalije, rucneObavijesti] = await Promise.all([
     fetchGradilista(),
     fetchRadnici(),
     fetchVozila(),
@@ -99,8 +102,9 @@ export async function loadObavijestiSource(): Promise<Source> {
     fetchSviVoziloDokumenti().catch(() => [] as VoziloDokument[]),
     fetchOpenVoziloObavijesti(),
     fetchOpenVozilaGorivoAnomalije(),
+    fetchOpenRucneObavijesti().catch(() => [] as RucnaObavijest[]),
   ]);
-  return { gradilista, radnici, vozila, rokovi, fakture, radnikDok, voziloDok, voziloObavijesti, gorivoAnomalije };
+  return { gradilista, radnici, vozila, rokovi, fakture, radnikDok, voziloDok, voziloObavijesti, gorivoAnomalije, rucneObavijesti };
 }
 
 export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
@@ -224,6 +228,24 @@ export function buildObavijesti(src: Source, postavke: Postavke): Obavijest[] {
   });
 
   const order: Record<ObavijestLevel, number> = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
+  (src.rucneObavijesti ?? []).forEach((reminder) => {
+    const worker = radnikById.get(reminder.radnik_id ?? '');
+    const days = daysBetween(today, reminder.datum);
+    out.push({
+      id: `ro-${reminder.id}`,
+      rucnaObavijestId: reminder.id,
+      subjectId: reminder.radnik_id ?? undefined,
+      tip: reminder.radnik_id ? 'radnik_ostalo' : 'projekt_rok',
+      grupa: reminder.radnik_id ? 'Zaposlenici' : 'Projekti',
+      tipLabel: 'Ručna obavijest',
+      title: reminder.naslov,
+      detail: worker ? `${worker.ime} ${worker.prezime} · ${reminder.tekst}` : reminder.tekst,
+      datum: reminder.datum,
+      days,
+      level: levelOf(days),
+      view: reminder.radnik_id ? 'radnici' : 'raspored',
+    });
+  });
   return out.sort((a, b) => order[a.level] - order[b.level] || (a.days ?? -999) - (b.days ?? -999));
 }
 

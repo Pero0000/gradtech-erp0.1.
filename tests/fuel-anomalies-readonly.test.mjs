@@ -120,7 +120,7 @@ test('all nine notification sources use SELECT only, including fuel anomalies', 
   for (let i = 0; i < 3; i++) await notifications.exports.loadObavijestiSource();
   const expected = ['gradilista', 'radnici', 'vozila', 'rokovi', 'fakture',
     'radnici_dokumenti', 'vozila_dokumenti', 'vozila_obavijesti', 'vozila_gorivo_anomalije'];
-  assert.equal(calls.length, 27);
+  assert.equal(calls.length, 30);
   for (const table of expected) assert.equal(calls.filter((name) => name === table).length, 3, table);
 });
 

@@ -40,6 +40,7 @@ import type {
   Raspored,
   Trosak,
   RadnoVrijeme,
+  RucnaObavijest,
   RadniNalog,
   NalogStatus,
   NalogPrioritet,
@@ -1482,6 +1483,44 @@ export async function fetchOpenVoziloObavijesti(): Promise<VoziloObavijest[]> {
     .order('created_at', { ascending: false });
   if (error) throw vozilaObavijestiError(error);
   return (data ?? []) as VoziloObavijest[];
+}
+
+export async function fetchOpenRucneObavijesti(datum?: string): Promise<RucnaObavijest[]> {
+  let query = supabase
+    .from('rucne_obavijesti')
+    .select('id, datum, naslov, tekst, radnik_id, rijeseno_at, created_at, radnik:radnik_id ( id, ime, prezime )')
+    .is('rijeseno_at', null)
+    .order('datum', { ascending: true });
+  if (datum) query = query.eq('datum', datum);
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []).map((item) => ({
+    ...item,
+    radnik: Array.isArray(item.radnik) ? item.radnik[0] ?? null : item.radnik,
+  })) as RucnaObavijest[];
+}
+
+export async function createRucnaObavijest(input: {
+  datum: string;
+  naslov: string;
+  tekst: string;
+  radnik_id: string | null;
+}) {
+  const { data, error } = await supabase
+    .from('rucne_obavijesti')
+    .insert(input)
+    .select('id, datum, naslov, tekst, radnik_id, rijeseno_at, created_at')
+    .single();
+  if (error) throw error;
+  return data as RucnaObavijest;
+}
+
+export async function resolveRucnaObavijest(id: string) {
+  const { error } = await supabase
+    .from('rucne_obavijesti')
+    .update({ rijeseno_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw error;
 }
 
 export async function resolveVoziloObavijest(id: string) {

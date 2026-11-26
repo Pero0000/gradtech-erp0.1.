@@ -316,6 +316,17 @@ export interface VoziloObavijest {
   updated_at: string;
 }
 
+export interface RucnaObavijest {
+  id: string;
+  datum: string;
+  naslov: string;
+  tekst: string;
+  radnik_id: string | null;
+  rijeseno_at: string | null;
+  created_at: string;
+  radnik?: Pick<Radnik, 'id' | 'ime' | 'prezime'> | null;
+}
+
                                                                                               export interface Raspored {
                                                                                                 id: string;
                                                                                                   datum: string;

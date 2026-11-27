@@ -885,8 +885,29 @@ export function RasporedView() {
         radnik_ids: radnikIds,
         bez_troska: target.bez_troska,
       });
-      await loadDay(selectedDate);
-      await openExistingNalog(assignmentId, created.id, true);
+      setNalogForm({
+        fresh: true,
+        nalogId: created.id,
+        zakljucen_at: null,
+        bez_troska: Boolean(target.bez_troska),
+        assignmentId,
+        broj: created.broj,
+        gradiliste_id: target.gradiliste_id ?? '',
+        naslov: created.naslov,
+        opis: created.opis ?? '',
+        status: created.status,
+        prioritet: created.prioritet,
+        rok: created.rok ?? selectedDate,
+        radnik_ids: radnikIds,
+        radnik_options: [...new Set(radnikIds)],
+        zadatak_ids: [],
+        novi_zadaci: [],
+        stavka_ids: [],
+        nove_stavke: [],
+      });
+      void loadDay(selectedDate).catch((reason: unknown) => {
+        setError(errMsg(reason, 'Nalog je kreiran, ali dnevni raspored nije osvježen.'));
+      });
     } catch (e) {
       setError(errMsg(e, 'Greška pri kreiranju naloga'));
     } finally {

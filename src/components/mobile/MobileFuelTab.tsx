@@ -10,6 +10,8 @@ import {
 import type { VoziloGorivo } from '@/types';
 import { todayISO } from '@/lib/rokovi';
 import { parseDecimalInput, formatHrDate } from '@/lib/localization';
+import { LargeMileageWarning } from '@/components/ui/LargeMileageWarning';
+import { confirmLargeMileage } from '@/lib/mileage';
 
 const errorText = (reason: unknown, fallback: string) => {
   if (reason instanceof Error) return reason.message;
@@ -85,6 +87,8 @@ export function MobileFuelTab() {
       setError('Odaberite vozilo te unesite datum, litre i kilometražu.');
       return;
     }
+    const baselineKilometraza = selectedVehicle?.kilometraza ?? kmValue;
+    if (!confirmLargeMileage(baselineKilometraza, kmValue)) return;
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -175,6 +179,7 @@ export function MobileFuelTab() {
                   Provjerite kilometražu i datum točenja. Manji unos može se spremiti; trenutno stanje vozila neće se smanjiti.
                 </span>
               )}
+              {selectedVehicle && <LargeMileageWarning start={selectedVehicle.kilometraza} end={kilometraza} />}
             </label>
             {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
             {error && (

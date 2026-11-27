@@ -7,6 +7,18 @@ import ts from 'typescript';
 const viewSource = readFileSync(new URL('../src/components/mobile/MobileWorkOrdersView.tsx', import.meta.url), 'utf8');
 const viewAst = ts.createSourceFile('view.tsx', viewSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const component = viewAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === 'MobileWorkOrdersView');
+const visibleOrdersFunction = viewAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === 'visibleMobileOrders');
+
+function loadTopLevelFunction(declaration, context = {}) {
+  const localDateDeclaration = viewAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === 'localISODate');
+  const source = `${localDateDeclaration.getText(viewAst)}\n${declaration.getText(viewAst)}\nexport const callback = ${declaration.name.text};`;
+  const { outputText } = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  });
+  const module = { exports: {} };
+  vm.runInNewContext(outputText, { module, exports: module.exports, Date, ...context });
+  return module.exports.callback;
+}
 
 function loadCallback(name, context) {
   const declaration = component.body.statements
@@ -56,6 +68,25 @@ function setupDetails({ documentFailure = false, siteFailure = false } = {}) {
   for (const name of ['Loading', 'Error', 'Notice', 'PhotoLoadError', 'DocumentLoadError', 'RouteLoadError', 'EquipmentLoadError', 'ExtraTimeRows', 'BezSatiRadnici', 'Prep', 'Details', 'TeamTimeDrafts', 'Potvrde', 'Report']) {
     context[`set${name}`] = value => { state[name] = typeof value === 'function' ? value(state[name] ?? {}) : value; };
   }
+
+  test('mobile orders keep yesterday available across midnight for night shifts and review', () => {
+    const visibleMobileOrders = loadTopLevelFunction(visibleOrdersFunction);
+    const noonAfterMidnight = new Date(2026, 10, 27, 6, 30);
+    const orders = [
+      { id: 'today', rok: '2026-11-27', mobile_status: 'dodijeljen' },
+      { id: 'night-shift', rok: '2026-11-26', mobile_status: 'u_tijeku' },
+      { id: 'yesterday-approved', rok: '2026-11-26', mobile_status: 'odobren' },
+      { id: 'two-days-old-open', rok: '2026-11-25', mobile_status: 'predan' },
+      { id: 'two-days-old-approved', rok: '2026-11-25', mobile_status: 'odobren' },
+      { id: 'no-due-date', rok: null, mobile_status: 'u_tijeku' },
+      { id: 'approved-no-due-date', rok: null, mobile_status: 'odobren' },
+    ];
+
+    assert.deepEqual(
+      visibleMobileOrders(orders, noonAfterMidnight).map(order => order.id),
+      ['today', 'night-shift', 'yesterday-approved', 'no-due-date'],
+    );
+  });
   return { callback: loadCallback('loadDetails', context), state, calls };
 }
 

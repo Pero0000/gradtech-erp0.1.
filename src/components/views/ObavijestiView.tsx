@@ -1,10 +1,10 @@
-import { formatHrDate } from '@/lib/localization';
+import { formatHrDate, formatHrDateTime } from '@/lib/localization';
 import { useMemo, useState } from 'react';
 import { Bell, BellRing, CheckCircle2, Search } from 'lucide-react';
 import type { View } from '@/components/Sidebar';
 import { relativeLabel, sendPushNotifications, type Obavijest, type ObavijestLevel } from '@/lib/obavijesti';
 import type { useOverview } from '@/lib/useOverview';
-import { createRucnaObavijest, fetchRadnici, resolveRucnaObavijest, resolveVoziloGorivoAnomalija, resolveVoziloObavijest } from '@/lib/api';
+import { createRucnaObavijest, fetchRadnici, fetchRijeseneObavijestiOverview, reopenRucnaObavijest, resolveRucnaObavijest, resolveVoziloGorivoAnomalija, resolveVoziloObavijest } from '@/lib/api';
 import { loadPostavke, obavijestTipovi, savePostavke } from '@/lib/postavke';
 import type { Radnik } from '@/types';
 
@@ -39,6 +39,8 @@ export function ObavijestiView({ onNavigate, canResolveVozila, canEdit, overview
   const [savingReminder, setSavingReminder] = useState(false);
   const [reminderFormOpen, setReminderFormOpen] = useState(false);
   const [reminderWorkersLoaded, setReminderWorkersLoaded] = useState(false);
+  const [resolvedReminders, setResolvedReminders] = useState<Awaited<ReturnType<typeof fetchRijeseneObavijestiOverview>>>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [reminder, setReminder] = useState({
     datum: todayISO(),
     naslov: '',
@@ -76,6 +78,31 @@ export function ObavijestiView({ onNavigate, canResolveVozila, canEdit, overview
       setError(reason instanceof Error ? reason.message : 'Podsjetnik nije moguće spremiti.');
     } finally {
       setSavingReminder(false);
+    }
+  };
+
+  const toggleHistory = async (open: boolean) => {
+    if (!open || resolvedReminders.length > 0) return;
+    setHistoryLoading(true);
+    try {
+      setResolvedReminders(await fetchRijeseneObavijestiOverview());
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Povijest obavijesti nije moguće učitati.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const reopenReminder = async (id: string) => {
+    setResolvingId(id);
+    try {
+      await reopenRucnaObavijest(id);
+      setResolvedReminders((current) => current.filter((item) => item.id !== id));
+      await overview.refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Obavijest nije moguće ponovno otvoriti.');
+    } finally {
+      setResolvingId(null);
     }
   };
 
@@ -246,6 +273,35 @@ export function ObavijestiView({ onNavigate, canResolveVozila, canEdit, overview
             </div>
           ))}
         </div>
+      )}
+      {canEdit && (
+        <details className="mt-4 rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-600" onToggle={(event) => void toggleHistory(event.currentTarget.open)}>
+          <summary className="cursor-pointer px-3 py-2 text-xs font-medium">
+                Povijest riješenih obavijesti
+          </summary>
+          <div className="space-y-1.5 border-t border-slate-200 px-3 py-2">
+            {historyLoading ? (
+              <p className="text-xs text-slate-400">Učitavanje…</p>
+            ) : resolvedReminders.length === 0 ? (
+              <p className="text-xs text-slate-400">Nema riješenih ručnih obavijesti.</p>
+            ) : resolvedReminders.map((reminder) => (
+              <div key={reminder.id} className="flex min-w-0 items-center gap-2 rounded-md bg-white px-2.5 py-2 text-xs">
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="font-medium text-slate-700">{reminder.naslov}</span>
+                  {' · '}{reminder.detalj}
+                  {' · '}{formatHrDate(new Date(`${reminder.datum}T00:00:00`))}
+                </span>
+                {reminder.rijeseno_at && <span className="shrink-0 text-slate-400">{formatHrDateTime(new Date(reminder.rijeseno_at))}</span>}
+                {reminder.vrsta === 'rucna' && (
+                  <button type="button" disabled={resolvingId === reminder.id} onClick={() => void reopenReminder(reminder.id)} className="shrink-0 font-medium text-sky-700 hover:underline disabled:opacity-50">
+                    Ponovno otvori
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </details>
       )}
     </div>
   );

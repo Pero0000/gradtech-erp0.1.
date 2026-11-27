@@ -6,6 +6,8 @@ import {
 } from '@/lib/personalCar';
 import { formatHrDate } from '@/lib/localization';
 import { todayISO } from '@/lib/rokovi';
+import { LargeMileageWarning } from '@/components/ui/LargeMileageWarning';
+import { confirmLargeMileage } from '@/lib/mileage';
 
 const inputClass = 'mt-1 min-h-12 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-base';
 const money = (value: number) => value.toLocaleString('hr-HR', { style: 'currency', currency: 'EUR' });
@@ -100,6 +102,7 @@ export function PersonalCarTab() {
       setError('Vozilo nema cijenu po kilometru. Ured treba postaviti cijenu prije poslovne vožnje.');
       return;
     }
+    if (!confirmLargeMileage(startKm, endKm)) return;
     const input = {
       vozilo_id: vehicle.id, datum: date, km_pocetak: Number(startKm), km_kraj: Number(endKm),
       gradiliste_id: business ? destination : null, vrijeme_od: null, vrijeme_do: null,
@@ -207,6 +210,7 @@ export function PersonalCarTab() {
                     <input required type="number" min="1" max="2147483647" step="1" value={endKm} onChange={(event) => setEndKm(event.target.value)} className={inputClass} />
                   </label>
                 </div>
+                <LargeMileageWarning start={startKm} end={endKm} />
                 <div className="rounded-xl bg-sky-50 p-3 text-sm text-sky-900">
                   <p className="font-bold">{distance > 0 ? distance.toLocaleString('hr-HR') : '—'} km</p>
                   {business ? <p>{rate > 0 ? `${rate.toLocaleString('hr-HR')} €/km · procjena troška ${money(Math.max(0, estimatedCost))}` : 'U vozilu nije postavljena cijena/km.'}</p>

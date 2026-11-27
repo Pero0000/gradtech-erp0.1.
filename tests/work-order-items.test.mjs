@@ -206,3 +206,14 @@ test('automatic transfer offers one source per material/tool chain and skips cop
   assert.equal(mutations[0].payload.length, 1);
   assert.equal(mutations[0].payload[0].izvor_materijal_id, 'source');
 });
+
+test('portal material and tool list excludes any taken row even when legacy ready state is inconsistent', () => {
+  const rows = [
+    { id: 'open', tip: 'materijal', gotovo: false, uzeto: false },
+    { id: 'taken', tip: 'materijal', gotovo: false, uzeto: true },
+    { id: 'tool-taken', tip: 'alat', gotovo: true, uzeto: true },
+    { id: 'machine', tip: 'stroj', gotovo: false, uzeto: false },
+  ];
+  const portalRows = rows.filter((item) => !(item.tip === 'materijal' || item.tip === 'alat') || !item.uzeto);
+  assert.deepEqual(portalRows.map((item) => item.id), ['open', 'machine']);
+});

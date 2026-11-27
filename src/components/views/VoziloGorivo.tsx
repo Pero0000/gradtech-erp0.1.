@@ -17,6 +17,8 @@ import { todayISO } from '@/lib/rokovi';
 import { parseDecimalInput, formatHrDate } from '@/lib/localization';
 import { Select, TextInput } from '@/components/ui/Field';
 import { FuelChangeHistory } from '@/components/views/FuelChangeHistory';
+import { LargeMileageWarning } from '@/components/ui/LargeMileageWarning';
+import { confirmLargeMileage } from '@/lib/mileage';
 
 const errorText = (reason: unknown) => {
   if (reason instanceof Error) return reason.message;
@@ -76,6 +78,12 @@ function getFuelConsumptions(entries: VoziloGorivo[], thresholdPercent: number):
   });
 }
 
+function getAverageFuelConsumption(consumptions: FuelConsumption[]) {
+  const valid = consumptions.filter((item) => item.distance && item.consumption !== null && item.anomaly === null);
+  const distance = valid.reduce((total, item) => total + (item.distance ?? 0), 0);
+  return distance ? valid.reduce((total, item) => total + Number(item.entry.litara), 0) / distance * 100 : null;
+}
+
 export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
   vozilo: Vozilo;
   canEdit?: boolean;
@@ -129,11 +137,7 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
   }, [vozilo.kilometraza, editing]);
 
   const consumptions = useMemo(() => getFuelConsumptions(entries, thresholdPercent), [entries, thresholdPercent]);
-  const average = useMemo(() => {
-    const valid = consumptions.filter((item) => item.distance && item.consumption !== null);
-    const distance = valid.reduce((total, item) => total + (item.distance ?? 0), 0);
-    return distance ? valid.reduce((total, item) => total + Number(item.entry.litara), 0) / distance * 100 : null;
-  }, [consumptions]);
+  const average = useMemo(() => getAverageFuelConsumption(consumptions), [consumptions]);
   const anomalyCount = consumptions.filter((item) => item.anomaly !== null).length;
   const eligibleWorkers = workers.filter((worker) =>
     worker.dozvoljeni_tipovi_vozila === null
@@ -164,6 +168,7 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
       setError('Unesite datum, litre veće od nule, kilometražu i odaberite tko je točio.');
       return;
     }
+    if (!confirmLargeMileage(editing?.kilometraza ?? vozilo.kilometraza, kmValue)) return;
     const input: VoziloGorivoInput = {
       vozilo_id: vozilo.id,
       datum,
@@ -295,7 +300,7 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
           {average === null ? '—' : `${average.toLocaleString('hr-HR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} l/100 km`}
         </p>
         <p className="mt-1 text-xs text-slate-600">
-          Prosjek se računa iz unesenih litara i razlike kilometraže. Za najtočniji rezultat bilježite točenja do punog spremnika.
+          Prosjek se računa iz unesenih litara i razlike kilometraže, bez aktivno prepoznatih anomalija. Za najtočniji rezultat bilježite točenja do punog spremnika.
         </p>
       </section>
       {anomalyCount > 0 && (
@@ -326,6 +331,7 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
                 Provjerite kilometražu i datum točenja. Manji unos može se spremiti; trenutno stanje vozila neće se smanjiti.
               </span>
             )}
+            <LargeMileageWarning start={editing?.kilometraza ?? vozilo.kilometraza} end={kilometraza} />
           </label>
           <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-slate-600">Tko je točio
             <Select className="h-11" value={tocioId} onChange={(event) => setTocioId(event.target.value)}>
@@ -370,8 +376,16 @@ export function VoziloGorivo({ vozilo, canEdit = false, onChange }: {
                     {(anomaly === 'high' || anomaly === 'low') && (
                       <p role="status" className="mt-1 flex items-start gap-1 text-xs font-medium text-rose-700">
                         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                        {anomaly === 'high' ? 'Neuobičajeno visoka' : 'Neuobičajeno niska'} potrošnja u odnosu na tipičnih {baseline?.toLocaleString('hr-HR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} l/100 km za ovo vozilo. Provjerite unos ili okolnosti vožnje.
+                        {anomaly === 'high' ? 'Neuobičajeno visoka' : 'Neuobičajeno niska'} potrošnja u odnosu na tipičnih {baseline?.toLocaleString('hr-HR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} l/100 km za ovo vozilo. Točenje je izuzeto iz prosjeka potrošnje. Provjerite unos ili okolnosti vožnje.
                       </p>
+                    )}
+                    {anomaly === 'odometer' && (
+                      <p className="mt-1 text-xs font-medium text-rose-700">
+                        Točenje je izuzeto iz prosjeka potrošnje. Napomena je zapisana uz anomaliju vozila radi naknadne provjere.
+                      </p>
+                    )}
+                    {anomaly === null && consumption !== null && (
+                      <p className="mt-1 text-xs text-emerald-700">Uključeno u prosjek potrošnje.</p>
                     )}
                   </div>
                   {canEdit && <div className="flex gap-1">

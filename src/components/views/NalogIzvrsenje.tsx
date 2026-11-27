@@ -11,6 +11,8 @@ import type { GradilisteZadatak, Oprema, RadniNalog, ZadatakVrsta } from '@/type
 import { zadatakVrsta } from '@/types';
 import { WorkOrderItemChangeHistory } from '@/components/views/WorkOrderItemChangeHistory';
 import { HistoryButton, HistoryDialog } from '@/components/views/HistoryDialog';
+import { LargeMileageWarning } from '@/components/ui/LargeMileageWarning';
+import { confirmLargeMileage } from '@/lib/mileage';
 import {
   addNalogStavka,
   addNalogAlatFromInventory,
@@ -698,6 +700,7 @@ export function NalogIzvrsenje({
           setError('Nalog se ne može zaključiti dok nije upisan završetak rada (Do) za sve radnike.');
           return;
         }
+        if (km.pocetak !== '' && km.kraj !== '' && !confirmLargeMileage(km.pocetak, km.kraj)) return;
       }
       const previousZavrsen = zavrsen;
       const previousBezIzvrsenja = bezIzvrsenja;
@@ -743,6 +746,7 @@ export function NalogIzvrsenje({
         throw new Error('Očitanja kilometara moraju biti nenegativni cijeli brojevi.');
       }
       if (pocetak !== null && kraj !== null && kraj < pocetak) throw new Error('Završno stanje ne može biti manje od početnog.');
+      if (pocetak !== null && kraj !== null && !confirmLargeMileage(pocetak, kraj)) return;
       await execution.persistDefaults();
       await saveNalogIzvrsenje(nalog.id, { km_pocetak: pocetak, km_kraj: kraj, napomena: napomena.trim() || null });
       setSaved(true);
@@ -1187,6 +1191,9 @@ export function NalogIzvrsenje({
             <input type="number" min={0} value={km.kraj} onChange={(e) => setKm({ ...km, kraj: e.target.value })} onBlur={() => void saveDetails()} className={`${inputCls} w-32`} />
           </label>
           {kmRazlika !== null && <span className="text-xs font-medium text-slate-600">Prijeđeno: {kmRazlika.toLocaleString('hr-HR')} km</span>}
+        </div>
+        <div className="mt-2">
+          <LargeMileageWarning start={km.pocetak} end={km.kraj} />
         </div>
       </div>
 

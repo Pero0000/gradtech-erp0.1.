@@ -53,6 +53,8 @@ import { MobileFuelTab } from '@/components/mobile/MobileFuelTab';
 import { MobileVehicleIssuesTab } from '@/components/mobile/MobileVehicleIssuesTab';
 import { PersonalCarTab } from '@/components/mobile/PersonalCarTab';
 import { fetchPersonalCarAccess } from '@/lib/personalCar';
+import { LargeMileageWarning } from '@/components/ui/LargeMileageWarning';
+import { confirmLargeMileage } from '@/lib/mileage';
 
 const portalTabs: Array<{ id: WorkerPortalTab; label: string; title: string; icon: React.ReactNode }> = [
   { id: 'nalozi', label: 'Nalozi', title: 'Moji radni nalozi', icon: <ClipboardCheck className="h-5 w-5" /> },
@@ -138,11 +140,17 @@ function errorMessage(reason: unknown, fallback: string) {
   return fallback;
 }
 
-function visibleMobileOrders(orders: MobileRadniNalog[]) {
-  const today = new Date();
-  const todayDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+function localISODate(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function visibleMobileOrders(orders: MobileRadniNalog[], now = new Date()) {
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const firstVisibleDate = localISODate(yesterday);
   return orders.filter((order) =>
-    order.mobile_status !== 'odobren' && (order.rok === null || order.rok >= todayDate),
+    order.rok === null
+      ? order.mobile_status !== 'odobren'
+      : order.rok >= firstVisibleDate,
   );
 }
 
@@ -262,6 +270,9 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
   selectedIdRef.current = selectedId;
 
   const selected = orders.find((order) => order.id === selectedId) ?? null;
+  const selectedIsFromPreviousDay = Boolean(selected?.rok && selected.rok < localISODate(new Date()));
+  const selectedIsReadOnlyPreviousDay = selectedIsFromPreviousDay
+    && (selected?.mobile_status === 'odobren' || selected?.mobile_status === 'zakljucen_bez_potvrde');
   const isWorkTimeOverlapError = Boolean(
     error && /već je upisano|preklapa se s drugim radnim vremenom|dionica se preklapa/i.test(error),
   );
@@ -406,6 +417,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         fetchNalogStavke(order.id),
         fetchMobileNalogTeam(order.id),
       ]);
+      const portalStavke = stavke.filter((item) => !(item.tip === 'materijal' || item.tip === 'alat') || !item.uzeto);
       const routesResult = await fetchMobileNalogVoznje(order.id)
         .then((voznje) => ({ voznje, error: null as unknown }))
         .catch((reason: unknown) => ({ voznje: [] as MobileNalogVoznja[], error: reason }));
@@ -438,7 +450,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         vozacId: nalog.vozac_id,
         napomena: nalog.napomena,
         zadaci: zadaci.filter((task) => !task.gotovo),
-        stavke,
+        stavke: portalStavke,
         alati: alati.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'),
         strojevi: strojevi.filter((item) => item.status !== 'servis' && item.status !== 'neaktivno'),
         dokumenti: [],
@@ -841,6 +853,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
         setError('Kilometri povratka ne smiju biti manji od početnih.');
         return;
       }
+      if (start !== null && !confirmLargeMileage(start, end)) return;
     }
     const nextReport = value === 'na' ? { ...report, kmKraj: '' } : report;
     if (value === 'na') setReport(nextReport);
@@ -1291,7 +1304,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                           </ReviewBlock>
                           <ReviewBlock title="Materijal i alat">
                             {details.stavke.some((item) => !item.gotovo)
-                              ? <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">{details.stavke.filter((item) => !item.gotovo).map((item) => <li key={item.id}>{item.naziv}</li>)}</ul>
+                              ? <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">{details.stavke.filter((item) => !item.gotovo && !item.uzeto).map((item) => <li key={item.id}>{item.naziv}</li>)}</ul>
                               : <p className="text-sm text-slate-500">Nema unaprijed upisanog materijala ni alata.</p>}
                           </ReviewBlock>
                           <WorkOrderPanel key={`closed-documents-${selected.id}`} title="Dokumenti" icon={<FileText className="h-5 w-5" />} onOpen={() => openFiles(false, true)}>
@@ -1309,9 +1322,17 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                   </>
                 )}
 
-                {(selected.mobile_status === 'u_tijeku' || selected.mobile_status === 'predan') && (
+                {(selected.mobile_status === 'u_tijeku'
+                  || selected.mobile_status === 'predan'
+                  || selectedIsReadOnlyPreviousDay) && (
                   <>
-                    <StepHeader step={2} title="Rad na gradilištu" text="Svi dodijeljeni djelatnici mogu uređivati nalog i predati ga uredu na završno odobrenje." />
+                    <StepHeader
+                      step={2}
+                      title={selectedIsReadOnlyPreviousDay ? 'Pregled jučerašnjeg naloga' : 'Rad na gradilištu'}
+                      text={selectedIsReadOnlyPreviousDay
+                        ? 'Završeni radni nalog iz prethodnog dana dostupan je za pregled.'
+                        : 'Svi dodijeljeni djelatnici mogu uređivati nalog i predati ga uredu na završno odobrenje.'}
+                    />
                     {selected.mobile_status === 'predan' && (
                       <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">Nalog je predan uredu, ali ga još možete uređivati. Nakon izmjena ponovno ga predajte; ured ga zaključuje tek završnim odobrenjem.</p>
                     )}
@@ -1718,6 +1739,7 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                     </WorkOrderPanel>
 
                     <WorkOrderPanel title="Kilometri povratka" icon={<Gauge className="h-5 w-5" />} tone="amber">
+                      <LargeMileageWarning start={report.kmPocetak} end={report.kmKraj} />
                       {report.kmNa ? (
                         <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">Kilometri su pri polasku označeni kao nisu primjenjivi.</p>
                       ) : (
@@ -1833,9 +1855,14 @@ export function MobileWorkOrdersView({ onOpenERP }: { onOpenERP?: () => void }) 
                 <button type="button" onClick={() => setSelectedId(order.id)} className="w-full text-left active:bg-indigo-50">
                   <div className="flex items-start justify-between gap-3">
                     <p className="font-mono text-xs font-semibold text-indigo-600">{order.broj}</p>
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${order.mobile_status === 'u_tijeku' ? 'bg-amber-100 text-amber-800' : order.mobile_status === 'odobren' ? 'bg-emerald-100 text-emerald-800' : 'bg-indigo-50 text-indigo-700'}`}>
-                      {order.mobile_status === 'dodijeljen' ? 'Čeka početak' : order.mobile_status === 'u_tijeku' ? 'U tijeku' : order.mobile_status === 'predan' ? 'Na odobrenju' : order.mobile_status === 'odobren' ? 'Odobren' : order.mobile_status === 'zakljucen_bez_potvrde' ? 'Zaključen bez potvrde' : 'Nalog'}
-                    </span>
+                    <div className="flex flex-wrap justify-end gap-1.5">
+                      {order.rok && order.rok < localISODate(new Date()) && (
+                        <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-800">Jučer</span>
+                      )}
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${order.mobile_status === 'u_tijeku' ? 'bg-amber-100 text-amber-800' : order.mobile_status === 'odobren' ? 'bg-emerald-100 text-emerald-800' : 'bg-indigo-50 text-indigo-700'}`}>
+                        {order.mobile_status === 'dodijeljen' ? 'Čeka početak' : order.mobile_status === 'u_tijeku' ? 'U tijeku' : order.mobile_status === 'predan' ? 'Na odobrenju' : order.mobile_status === 'odobren' ? 'Odobren' : order.mobile_status === 'zakljucen_bez_potvrde' ? 'Zaključen bez potvrde' : 'Nalog'}
+                      </span>
+                    </div>
                   </div>
                   <h3 className="mt-2 font-bold text-slate-900">{order.naslov}</h3>
                   {order.gradiliste_naziv && <p className="mt-1 text-sm text-slate-500">{order.gradiliste_naziv}</p>}

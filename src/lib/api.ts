@@ -1523,6 +1523,68 @@ export async function resolveRucnaObavijest(id: string) {
   if (error) throw error;
 }
 
+export async function fetchRijeseneRucneObavijesti(): Promise<RucnaObavijest[]> {
+  const { data, error } = await supabase
+    .from('rucne_obavijesti')
+    .select('id, datum, naslov, tekst, radnik_id, rijeseno_at, created_at, radnik:radnik_id ( id, ime, prezime )')
+    .not('rijeseno_at', 'is', null)
+    .order('rijeseno_at', { ascending: false })
+    .limit(50);
+  if (error) throw error;
+  return (data ?? []).map((item) => ({
+    ...item,
+    radnik: Array.isArray(item.radnik) ? item.radnik[0] ?? null : item.radnik,
+  })) as RucnaObavijest[];
+}
+
+export async function fetchRijeseneObavijestiOverview(): Promise<Array<{
+  id: string;
+  vrsta: 'rucna' | 'vozilo' | 'gorivo';
+  naslov: string;
+  detalj: string;
+  datum: string;
+  rijeseno_at: string;
+}>> {
+  const [manual, vehicleIssues, fuelAnomalies] = await Promise.all([
+    fetchRijeseneRucneObavijesti(),
+    supabase.from('vozila_obavijesti')
+      .select('id, opis, datum, rijeseno_at')
+      .not('rijeseno_at', 'is', null)
+      .order('rijeseno_at', { ascending: false })
+      .limit(50),
+    supabase.from('vozila_gorivo_anomalije')
+      .select('id, opis, datum, rijeseno_at')
+      .not('rijeseno_at', 'is', null)
+      .order('rijeseno_at', { ascending: false })
+      .limit(50),
+  ]);
+  if (vehicleIssues.error) throw vehicleIssues.error;
+  if (fuelAnomalies.error) throw fuelAnomalies.error;
+  return [
+    ...manual.map((item) => ({
+      id: item.id, vrsta: 'rucna' as const, naslov: item.naslov,
+      detalj: item.radnik ? `${item.radnik.prezime} ${item.radnik.ime} · ${item.tekst}` : item.tekst,
+      datum: item.datum, rijeseno_at: item.rijeseno_at as string,
+    })),
+    ...(vehicleIssues.data ?? []).map((item) => ({
+      id: item.id, vrsta: 'vozilo' as const, naslov: 'Prijava vozila',
+      detalj: item.opis, datum: item.datum, rijeseno_at: item.rijeseno_at as string,
+    })),
+    ...(fuelAnomalies.data ?? []).map((item) => ({
+      id: item.id, vrsta: 'gorivo' as const, naslov: 'Anomalija goriva',
+      detalj: item.opis, datum: item.datum, rijeseno_at: item.rijeseno_at as string,
+    })),
+  ].sort((left, right) => right.rijeseno_at.localeCompare(left.rijeseno_at)).slice(0, 50);
+}
+
+export async function reopenRucnaObavijest(id: string) {
+  const { error } = await supabase
+    .from('rucne_obavijesti')
+    .update({ rijeseno_at: null })
+    .eq('id', id);
+  if (error) throw error;
+}
+
 export async function resolveVoziloObavijest(id: string) {
   const { error } = await supabase.rpc('resolve_vozila_obavijest', { p_id: id });
   if (error) throw vozilaObavijestiError(error);
@@ -2878,54 +2940,64 @@ export async function createRadniNalog(input: {
     throw error;
   }
 
+  const teamWrites: Promise<void>[] = [];
   if (input.radnik_ids.length > 0) {
     const rows = input.radnik_ids.map((rid) => ({ nalog_id: data.id, radnik_id: rid }));
-    const { error: e2 } = await supabase.from('radni_nalozi_radnici').insert(rows);
-    if (e2) throw e2;
+    teamWrites.push((async () => {
+      const { error: e2 } = await supabase.from('radni_nalozi_radnici').insert(rows);
+      if (e2) throw e2;
+    })());
   }
   // Jedini djelatnik na nalogu automatski je i poslovođa.
   if (input.radnik_ids.length === 1) {
-    const { error: leaderError } = await supabase.from('radni_nalozi').update({ poslovodja_id: input.radnik_ids[0] }).eq('id', data.id);
-    if (leaderError) throw leaderError;
+    teamWrites.push((async () => {
+      const { error: leaderError } = await supabase.from('radni_nalozi').update({ poslovodja_id: input.radnik_ids[0] }).eq('id', data.id);
+      if (leaderError) throw leaderError;
+    })());
     data.poslovodja_id = input.radnik_ids[0];
   }
+  await Promise.all(teamWrites);
 
   // Materijal i alat upisan na gradilištu ulazi u prvi idući nalog tog gradilišta.
   if (input.gradiliste_id) {
-    const { error: siteItemsError } = await supabase
-      .from('radni_nalozi_stavke')
-      .update({ nalog_id: data.id })
-      .eq('gradiliste_id', input.gradiliste_id)
-      .eq('gotovo', false)
-      .eq('uzeto', false)
-      .is('nalog_id', null);
-    if (siteItemsError) throw siteItemsError;
-
-    const { data: submittedOrders, error: submittedOrdersError } = await supabase
-      .from('radni_nalozi')
-      .select('id')
-      .eq('gradiliste_id', input.gradiliste_id)
-      .eq('mobile_status', 'predan')
-      .neq('id', data.id);
-    if (submittedOrdersError) throw submittedOrdersError;
-
-    const submittedOrderIds = (submittedOrders ?? []).map((order: { id: string }) => order.id);
-    if (submittedOrderIds.length > 0) {
-      const { error: submittedTasksError } = await supabase
-        .from('gradiliste_zadaci')
-        .update({ nalog_id: data.id })
-        .in('nalog_id', submittedOrderIds)
-        .eq('gotovo', false);
-      if (submittedTasksError) throw submittedTasksError;
-    }
-
-    const { error: siteTasksError } = await supabase
-      .from('gradiliste_zadaci')
-      .update({ nalog_id: data.id })
-      .eq('gradiliste_id', input.gradiliste_id)
-      .eq('gotovo', false)
-      .is('nalog_id', null);
-    if (siteTasksError) throw siteTasksError;
+    await Promise.all([
+      (async () => {
+        const { error } = await supabase
+          .from('radni_nalozi_stavke')
+          .update({ nalog_id: data.id })
+          .eq('gradiliste_id', input.gradiliste_id)
+          .eq('gotovo', false)
+          .eq('uzeto', false)
+          .is('nalog_id', null);
+        if (error) throw error;
+      })(),
+      (async () => {
+        const { data: submittedOrders, error } = await supabase
+          .from('radni_nalozi')
+          .select('id')
+          .eq('gradiliste_id', input.gradiliste_id)
+          .eq('mobile_status', 'predan')
+          .neq('id', data.id);
+        if (error) throw error;
+        const submittedOrderIds = (submittedOrders ?? []).map((order: { id: string }) => order.id);
+        if (submittedOrderIds.length === 0) return;
+        const { error: submittedTasksError } = await supabase
+          .from('gradiliste_zadaci')
+          .update({ nalog_id: data.id })
+          .in('nalog_id', submittedOrderIds)
+          .eq('gotovo', false);
+        if (submittedTasksError) throw submittedTasksError;
+      })(),
+      (async () => {
+        const { error } = await supabase
+          .from('gradiliste_zadaci')
+          .update({ nalog_id: data.id })
+          .eq('gradiliste_id', input.gradiliste_id)
+          .eq('gotovo', false)
+          .is('nalog_id', null);
+        if (error) throw error;
+      })(),
+    ]);
   }
   if (!options.deferOpenItemTransfer) await prenesiOtvoreniSadrzajNaloga(data.id, input.gradiliste_id);
   return data;
@@ -3601,9 +3673,11 @@ export async function prenesiOtvoreneStavke(nalogId: string, gradilisteId: strin
 }
 
 async function prenesiOtvoreniSadrzajNaloga(nalogId: string, gradilisteId: string | null) {
-  await prenesiOtvoreneStavke(nalogId, gradilisteId);
   if (!gradilisteId) return;
-  const tasks = await fetchGradilisteZadaci(gradilisteId);
+  const [, tasks] = await Promise.all([
+    prenesiOtvoreneStavke(nalogId, gradilisteId),
+    fetchGradilisteZadaci(gradilisteId),
+  ]);
   await copyOpenNalogZadaci(nalogId, gradilisteId, tasks);
 }
 
